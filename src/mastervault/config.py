@@ -99,7 +99,7 @@ def _toml_source(settings_cls: type[BaseSettings]) -> dict[str, Any]:
     if env_path := os.environ.get("MV_CONFIG"):
         candidates.append(Path(env_path))
     candidates.append(Path.cwd() / CONFIG_FILENAME)
-    candidates.append(Path(__file__).resolve().parents[2].parent / CONFIG_FILENAME)
+    candidates.append(Path(__file__).resolve().parents[2] / CONFIG_FILENAME)
     for p in candidates:
         if p.is_file():
             with p.open("rb") as fh:
