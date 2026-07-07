@@ -1,0 +1,8 @@
+Restock SOP — Warehouse Checklist
+
+1. Count physical inventory for each SKU every Monday morning before 9am.
+2. Reorder any SKU that falls below 20 units on hand.
+3. The Reno warehouse reorders from the Pacific Northwest supplier; the
+   Columbus warehouse reorders from the Midwest supplier.
+4. Flag any SKU with zero units on hand to the merchandising lead the same
+   day.

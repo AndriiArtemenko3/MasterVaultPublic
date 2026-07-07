@@ -1,0 +1,9 @@
+Ticket #1042 — Shipping delay on order #58821
+
+Customer: My order #58821 was supposed to arrive on June 2 but tracking still
+shows "label created." It has been 9 days since I placed the order.
+
+Support: I'm sorry for the delay. Order #58821 shipped from our Reno
+warehouse on June 1 but was held at the carrier's regional hub due to a
+storm. I've issued a $10 shipping credit to your account and the package is
+now scheduled to arrive by June 6.
