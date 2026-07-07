@@ -36,7 +36,7 @@ class EmbeddingCfg(BaseModel):
 class LLMCfg(BaseModel):
     provider: Literal["anthropic", "openai", "mock"] = "anthropic"
     base_url: str | None = None  # provider="openai" only: compatible gateways
-    model_small: str = "claude-haiku-4-5-20251001"
+    model_small: str = "claude-haiku-4-5"
     model_medium: str = "claude-sonnet-5"
     model_large: str = "claude-sonnet-5"
 
