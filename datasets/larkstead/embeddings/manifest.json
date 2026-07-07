@@ -1,0 +1,14 @@
+{
+  "model": "BAAI/bge-small-en-v1.5",
+  "dimensions": 384,
+  "count": 5352,
+  "built": "2026-07-07",
+  "file": "embeddings.jsonl.gz",
+  "record_type_counts": {
+    "claim": 3412,
+    "wiki": 43,
+    "chunk": 1897
+  },
+  "vectors_l2_normalized": true,
+  "source": "extracted from /tmp/mv-build/index.db (mvault sync --full output) by joining the embeddings metadata table with the sqlite-vec vec_records table"
+}

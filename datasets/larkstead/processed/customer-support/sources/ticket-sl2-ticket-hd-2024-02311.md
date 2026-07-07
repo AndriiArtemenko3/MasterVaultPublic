@@ -1,0 +1,118 @@
+---
+domain: customer-support
+type: source
+title: Sl2 Ticket Hd 2024 02311
+tags:
+- email-thread
+status: processed
+created: '2026-07-07'
+updated: '2026-07-07'
+source_type: email-thread
+key_claims:
+- id: ticket-sl2-ticket-hd-2024-02311-01
+  statement: 'The request for return is for the Wren stand from order #LS20347.'
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-02
+  statement: 'Order #LS20347 was delivered on 2024-05-07.'
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-03
+  statement: Today is 2024-06-14, which is 38 days after the delivery.
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-04
+  statement: The return window for the stand is 30 days, effective from 2024-01-15.
+  confidence: high
+  affects:
+  - return-policy
+- id: ticket-sl2-ticket-hd-2024-02311-05
+  statement: The request for return is outside the 30-day return window.
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-06
+  statement: The price of the stand is $69.00 with an order total of $74.95.
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-07
+  statement: 'Shipping cost for order #LS20347 was $5.95.'
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-08
+  statement: The support agent's name is Jonah Beck.
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-09
+  statement: The ticket status is closed.
+  confidence: high
+  affects: []
+- id: ticket-sl2-ticket-hd-2024-02311-10
+  statement: Jonah Beck sent a reply to the customer asserting the return request is outside the return window.
+  confidence: medium
+  affects: []
+provenance: datasets/larkstead/raw/customer-support/ticket/sl2-ticket-hd-2024-02311.md
+provenance_hash: 870bb91ca715ad28
+---
+
+# Sl2 Ticket Hd 2024 02311
+
+## Summary
+
+Ticket: HD-2024-02311 Subject: return window for my laptop stand Requester: Ruben Silva <ruben.silva@example.com> Order: #LS20347 Status: closed Assignee: Jonah Beck Priority: normal Tags: returns, past-window Channel: email --- Message 1 (customer) --- 2024-06-14 10:22 PT hey, i want to return the wren stand i got, order #LS20347. its just not working out for my setup, the angle is wrong for my second monitor.
+
+## Content
+
+Ticket: HD-2024-02311
+Subject: return window for my laptop stand
+Requester: Ruben Silva <ruben.silva@example.com>
+Order: #LS20347
+Status: closed
+Assignee: Jonah Beck
+Priority: normal
+Tags: returns, past-window
+Channel: email
+
+--- Message 1 (customer) --- 2024-06-14 10:22 PT
+hey, i want to return the wren stand i got, order #LS20347. its just not
+working out for my setup, the angle is wrong for my second monitor. i
+know its been a bit since it arrived but i was hoping you guys could
+still take it back.
+
+--- Internal note (JB) --- 2024-06-14 11:05 PT
+checked ParcelPoint, #LS20347 delivered 2024-05-07. today is 2024-06-14,
+thats 38 days out. 1x LS-STD-001 at 69.00, order total 74.95 (5.95
+shipping, US-1 light, under the 75.00 free-ship line, OR so no tax).
+outside the 30-day window effective 2024-01-15. gonna send RET-02, this
+one might not go quietly tho.
+
+--- Message 2 (agent, public reply) --- 2024-06-14 11:31 PT
+Hey Ruben, really sorry to hear the stand isn't working out for your
+monitor setup, that's a frustrating way for it to land after waiting on
+it. I looked up your order #LS20347 and it shows delivered on
+2024-05-07, which puts today's request outside our 30-day return
+window, effective 2024-01-15, so I'm not able to process a return on
+this one. I know that's not the answer you wanted and I'm sorry I
+can't do more here.
+
+Jonah
+Larkstead Support
+
+--- Message 3 (customer) --- 2024-06-14 15:47 PT
+thats a bummer honestly. i probably would have shipped it back sooner
+if the window had been longer, i just didnt think about it right away
+with everything going on. tight window for a 69 dollar stand if you ask
+me but ok, i get it.
+
+--- Message 4 (agent, public reply) --- 2024-06-14 16:10 PT
+Totally fair, and I'm sorry again that the timing worked against you
+here, I wish I had more flexibility to offer on this one. If the angle
+ends up being the main issue, our help center has a page on adjusting
+the stand's hinge tension that might get it closer to working for your
+monitor, happy to walk through it with you if you want to give that a
+try before writing it off completely.
+
+Jonah
+Larkstead Support
+
+--- System --- 2024-06-17 09:00 PT
+Status changed to closed by Jonah Beck.
