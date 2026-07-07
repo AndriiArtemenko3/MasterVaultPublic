@@ -1,0 +1,739 @@
+# Larkstead Goods Co. -- dataset bible
+# Single source of truth for every corpus writer and mechanical checker.
+# Every date, price, and ID in the corpus must trace back to this file.
+# Corpus window: 2024-01 through 2026-06. Fully fictional company. No real brands anywhere.
+
+company:
+  name: "Larkstead Goods Co."
+  legal_name: "Larkstead Goods Company, LLC (Oregon)"
+  founded: "2022-06-01"
+  hq: "Portland, Oregon, USA"
+  positioning: >-
+    Larkstead sells ergonomic home-office furniture and accessories, direct to
+    consumers since 2022 and to small businesses outfitting 8-60 seat offices
+    since mid-2024. The catalog is small on purpose: one desk platform, one
+    chair, and a parts shelf deep enough that customers repair instead of replace.
+  revenue_by_year:
+    "2024": 1134900
+    "2025": 2417800
+  b2b_share_2026: 0.35
+  channels:
+    - "DTC web store (Shopstack)"
+    - "B2B direct sales (Pipewell pipeline)"
+    - "Showroom pickup, Portland"
+
+tools:
+  - {name: "Shopstack", category: "storefront", real_world_analog_category: "e-commerce storefront platform"}
+  - {name: "Helprise", category: "helpdesk", real_world_analog_category: "customer support helpdesk platform"}
+  - {name: "Pipewell", category: "CRM", real_world_analog_category: "sales CRM"}
+  - {name: "Ledgerly", category: "accounting", real_world_analog_category: "small-business accounting software"}
+  - {name: "ParcelPoint", category: "3PL portal", real_world_analog_category: "third-party logistics and fulfillment provider"}
+  - {name: "Mailloft", category: "email marketing", real_world_analog_category: "email marketing platform"}
+
+# Voice cards are binding on writer agents. A reader who knows the cards should
+# be able to guess the author of any internal document blind.
+staff:
+  - name: "Mara Voss"
+    role: "Founder / CEO"
+    initials: "MV"
+    email: "mara@larkstead.example"
+    hired: "2022-06-01"
+    voice:
+      - "short declaratives, rarely over 15 words"
+      - "opens internal mail with the ask, no greeting"
+      - "closes most messages with one pointed question"
+    quirks: "signs internal messages with just M"
+  - name: "Dmitri Okafor"
+    role: "Operations lead"
+    initials: "DO"
+    email: "dmitri@larkstead.example"
+    hired: "2022-08-15"
+    voice:
+      - "number first, context second"
+      - "keeps running dated logs inside updates (03 Jun: carrier swap confirmed)"
+      - "spells out units: 14 pallets, 96 cartons, never just 14"
+    quirks: "writes dates as 03 Jun, never 6/3"
+  - name: "Priya Raman"
+    role: "Support lead"
+    initials: "PR"
+    email: "priya@larkstead.example"
+    hired: "2023-01-09"
+    voice:
+      - "warm, short paragraphs, customer's first name in line one"
+      - "restates the problem before giving the fix, never blames the customer"
+      - "internal notes drop to terse fragments"
+    quirks: "calls the team folks"
+  - name: "Jonah Beck"
+    role: "Support agent"
+    initials: "JB"
+    email: "jonah@larkstead.example"
+    hired: "2024-02-12"
+    voice:
+      - "long sentences that run on when the queue is deep"
+      - "over-apologizes, often twice in one reply"
+      - "casual register bleeds into customer replies (gonna, no worries)"
+    quirks: "types tho and gonna in internal chat"
+  - name: "Celeste Marin"
+    role: "Support agent"
+    initials: "CM"
+    email: "celeste@larkstead.example"
+    hired: "2025-03-24"
+    voice:
+      - "quotes policy verbatim and always includes the effective date"
+      - "short paragraphs, one topic per paragraph"
+      - "asks for the order number before anything else"
+    quirks: "links the policy page in nearly every reply"
+  - name: "Tom Aldridge"
+    role: "Sales lead (B2B)"
+    initials: "TA"
+    email: "tom@larkstead.example"
+    hired: "2024-06-03"
+    voice:
+      - "leads with the dollar figure or seat count"
+      - "heavy use of first names, drops surnames after first contact"
+      - "keeps emails under 120 words"
+    quirks: "closes asks with fair enough?"
+  - name: "Yuki Tanaka"
+    role: "Account executive"
+    initials: "YT"
+    email: "yuki@larkstead.example"
+    hired: "2025-08-11"
+    voice:
+      - "formal register in external mail, no contractions"
+      - "numbered next-steps list at the end of every client email"
+      - "absolute dates only, never says next week"
+    quirks: "confirms every call in writing within the hour"
+  - name: "Sofia Grieg"
+    role: "Marketing"
+    initials: "SG"
+    email: "sofia@larkstead.example"
+    hired: "2023-05-15"
+    voice:
+      - "punchy fragments in draft copy"
+      - "asks for the metric before giving an opinion"
+      - "subject lines under 6 words"
+    quirks: "names campaigns after weather (Drizzle, Chinook, Squall)"
+  - name: "Hank Morrow"
+    role: "Warehouse lead"
+    initials: "HM"
+    email: "hank@larkstead.example"
+    hired: "2022-10-03"
+    voice:
+      - "terse, often single-line messages"
+      - "all lowercase in chat"
+      - "exact measurements, down to the half inch"
+    quirks: "refers to shipments by carrier plus weekday (the tuesday cascadia load)"
+  - name: "Ana Petrova"
+    role: "Finance / admin (part-time)"
+    initials: "AP"
+    email: "ana@larkstead.example"
+    hired: "2023-09-05"
+    voice:
+      - "conditional phrasing: if the invoice clears by Friday, then"
+      - "cites invoice and order IDs inline"
+      - "rounds nothing, gives cents"
+    quirks: "puts [APPROVAL] in the subject for anything at or over policy thresholds"
+  - name: "Ray Lindqvist"
+    role: "Contract Shopstack developer"
+    initials: "RL"
+    email: "ray@larkstead.example"
+    hired: "2024-04-01"
+    voice:
+      - "commit-message style updates: fix cart tax rounding on WA orders"
+      - "references ticket IDs in every status note"
+      - "no greetings, no sign-offs"
+    quirks: "responds only Tuesdays and Thursdays per contract"
+
+# 28 SKUs. Prices are list USD. price_history entries apply from their effective
+# date until the next entry. unit_cost is landed cost per unit, USD.
+# Bundle unit_cost = sum of component unit_costs + 6.00 ParcelPoint kitting fee.
+skus:
+  - sku: "LS-DSK-001-48"
+    name: "Birch standing desk, 48 in"
+    launched: "2022-09-15"
+    price_history:
+      - {price: 549.00, effective: "2022-09-15"}
+      - {price: 579.00, effective: "2026-01-15"}
+    unit_cost: 212.00
+    vendor: "VEN-02"
+    weight_class: heavy
+  - sku: "LS-DSK-001-60"
+    name: "Birch standing desk, 60 in"
+    launched: "2022-09-15"
+    price_history:
+      - {price: 649.00, effective: "2022-09-15"}
+      - {price: 679.00, effective: "2026-01-15"}
+    unit_cost: 248.00
+    vendor: "VEN-02"
+    weight_class: heavy
+  - sku: "LS-DSK-001-72"
+    name: "Birch standing desk, 72 in"
+    launched: "2023-03-06"
+    price_history:
+      - {price: 749.00, effective: "2023-03-06"}
+      - {price: 779.00, effective: "2026-01-15"}
+    unit_cost: 291.00
+    vendor: "VEN-02"
+    weight_class: heavy
+  - sku: "LS-CHR-001-BLK"
+    name: "Rowan task chair, graphite black"
+    launched: "2023-02-01"
+    price_history:
+      - {price: 389.00, effective: "2023-02-01"}
+      - {price: 409.00, effective: "2026-01-15"}
+    unit_cost: 148.00
+    vendor: "VEN-02"
+    weight_class: heavy
+  - sku: "LS-CHR-001-GRY"
+    name: "Rowan task chair, fog gray"
+    launched: "2023-02-01"
+    price_history:
+      - {price: 389.00, effective: "2023-02-01"}
+      - {price: 409.00, effective: "2026-01-15"}
+    unit_cost: 148.00
+    vendor: "VEN-02"
+    weight_class: heavy
+  - sku: "LS-MAT-001-CHL"
+    name: "Alder desk mat, charcoal"
+    launched: "2023-06-12"
+    price_history:
+      - {price: 49.00, effective: "2023-06-12"}
+      - {price: 59.00, effective: "2025-03-01"}
+    unit_cost: 14.50
+    vendor: "VEN-01"
+    weight_class: light
+  - sku: "LS-MAT-001-SND"
+    name: "Alder desk mat, sand"
+    launched: "2023-06-12"
+    price_history:
+      - {price: 49.00, effective: "2023-06-12"}
+      - {price: 59.00, effective: "2025-03-01"}
+    unit_cost: 14.50
+    vendor: "VEN-01"
+    weight_class: light
+  - sku: "LS-MAT-001-SGE"
+    name: "Alder desk mat, sage"
+    launched: "2024-02-19"
+    price_history:
+      - {price: 49.00, effective: "2024-02-19"}
+      - {price: 59.00, effective: "2025-03-01"}
+    unit_cost: 14.50
+    vendor: "VEN-01"
+    weight_class: light
+  - sku: "LS-STD-001"
+    name: "Wren laptop stand"
+    launched: "2022-11-03"
+    price_history:
+      - {price: 69.00, effective: "2022-11-03"}
+      - {price: 79.00, effective: "2024-09-01"}
+    unit_cost: 22.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ARM-001-SGL"
+    name: "Heron monitor arm, single"
+    launched: "2023-09-20"
+    price_history:
+      - {price: 129.00, effective: "2023-09-20"}
+    unit_cost: 41.00
+    vendor: "VEN-02"
+    weight_class: medium
+  - sku: "LS-ARM-001-DBL"
+    name: "Heron monitor arm, dual"
+    launched: "2023-09-20"
+    price_history:
+      - {price: 189.00, effective: "2023-09-20"}
+      - {price: 199.00, effective: "2026-01-15"}
+    unit_cost: 63.00
+    vendor: "VEN-02"
+    weight_class: medium
+  - sku: "LS-LMP-001"
+    name: "Vireo smart desk lamp"
+    launched: "2024-10-15"
+    price_history:
+      - {price: 149.00, effective: "2024-10-15"}
+      - {price: 159.00, effective: "2026-01-15"}
+    unit_cost: 52.00
+    vendor: "VEN-07"
+    weight_class: light
+  - sku: "LS-ACC-001"
+    name: "Finch footrest"
+    launched: "2023-04-10"
+    price_history:
+      - {price: 69.00, effective: "2023-04-10"}
+    unit_cost: 19.00
+    vendor: "VEN-02"
+    weight_class: medium
+  - sku: "LS-ACC-002"
+    name: "Sparrow cable kit"
+    launched: "2022-11-03"
+    price_history:
+      - {price: 35.00, effective: "2022-11-03"}
+    unit_cost: 8.00
+    vendor: "VEN-07"
+    weight_class: light
+  - sku: "LS-ACC-003"
+    name: "Magpie under-desk cable tray"
+    launched: "2023-08-14"
+    price_history:
+      - {price: 45.00, effective: "2023-08-14"}
+    unit_cost: 12.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ACC-004"
+    name: "Aspen felt cable sleeve, 3-pack"
+    launched: "2023-08-14"
+    price_history:
+      - {price: 19.00, effective: "2023-08-14"}
+    unit_cost: 4.00
+    vendor: "VEN-01"
+    weight_class: light
+  - sku: "LS-ACC-005"
+    name: "Willow grommet cover, pair"
+    launched: "2023-03-06"
+    price_history:
+      - {price: 12.00, effective: "2023-03-06"}
+    unit_cost: 2.50
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ACC-006"
+    name: "Robin headphone hook"
+    launched: "2024-05-06"
+    price_history:
+      - {price: 18.00, effective: "2024-05-06"}
+    unit_cost: 4.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ACC-007"
+    name: "Hazel under-desk drawer"
+    launched: "2024-11-11"
+    price_history:
+      - {price: 49.00, effective: "2024-11-11"}
+    unit_cost: 15.00
+    vendor: "VEN-02"
+    weight_class: medium
+  - sku: "LS-ACC-008"
+    name: "Rowan caster set, 5 soft wheels (replacement)"
+    launched: "2024-05-06"
+    price_history:
+      - {price: 24.00, effective: "2024-05-06"}
+    unit_cost: 6.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ACC-009"
+    name: "Rowan armrest pad, pair (replacement)"
+    launched: "2024-05-06"
+    price_history:
+      - {price: 29.00, effective: "2024-05-06"}
+    unit_cost: 7.00
+    vendor: "VEN-01"
+    weight_class: light
+  - sku: "LS-ACC-010"
+    name: "Birch motor control box (replacement)"
+    launched: "2024-08-19"
+    price_history:
+      - {price: 89.00, effective: "2024-08-19"}
+    unit_cost: 34.00
+    vendor: "VEN-07"
+    weight_class: light
+  - sku: "LS-ACC-011"
+    name: "Birch leveling feet set (replacement)"
+    launched: "2024-08-19"
+    price_history:
+      - {price: 15.00, effective: "2024-08-19"}
+    unit_cost: 3.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-ACC-012"
+    name: "Vireo power adapter (replacement)"
+    launched: "2025-02-10"
+    price_history:
+      - {price: 22.00, effective: "2025-02-10"}
+    unit_cost: 7.00
+    vendor: "VEN-07"
+    weight_class: light
+  - sku: "LS-ACC-013"
+    name: "Heron desk-clamp kit (replacement)"
+    launched: "2024-03-18"
+    price_history:
+      - {price: 16.00, effective: "2024-03-18"}
+    unit_cost: 4.00
+    vendor: "VEN-02"
+    weight_class: light
+  - sku: "LS-BDL-001"
+    name: "Fledgling workstation bundle"
+    launched: "2024-07-01"
+    price_history:
+      - {price: 899.00, effective: "2024-07-01"}
+      - {price: 949.00, effective: "2026-01-15"}
+    unit_cost: 374.00
+    vendor: "VEN-04"
+    weight_class: heavy
+    components:
+      - {sku: "LS-DSK-001-48", qty: 1}
+      - {sku: "LS-CHR-001-BLK", qty: 1}
+      - {sku: "LS-ACC-002", qty: 1}
+  - sku: "LS-BDL-002"
+    name: "Canopy team bundle (per seat)"
+    launched: "2024-07-01"
+    price_history:
+      - {price: 1099.00, effective: "2024-07-01"}
+      - {price: 1149.00, effective: "2026-01-15"}
+    unit_cost: 451.00
+    vendor: "VEN-04"
+    weight_class: heavy
+    components:
+      - {sku: "LS-DSK-001-60", qty: 1}
+      - {sku: "LS-CHR-001-BLK", qty: 1}
+      - {sku: "LS-ARM-001-SGL", qty: 1}
+      - {sku: "LS-ACC-002", qty: 1}
+  - sku: "LS-BDL-003"
+    name: "Roost executive bundle"
+    launched: "2025-01-20"
+    price_history:
+      - {price: 1449.00, effective: "2025-01-20"}
+      - {price: 1499.00, effective: "2026-01-15"}
+    unit_cost: 586.50
+    vendor: "VEN-04"
+    weight_class: heavy
+    components:
+      - {sku: "LS-DSK-001-72", qty: 1}
+      - {sku: "LS-CHR-001-BLK", qty: 1}
+      - {sku: "LS-ARM-001-DBL", qty: 1}
+      - {sku: "LS-LMP-001", qty: 1}
+      - {sku: "LS-MAT-001-CHL", qty: 1}
+      - {sku: "LS-ACC-003", qty: 1}
+
+customers:
+  # 12 repeat B2C customers. All email addresses use example.com.
+  b2c:
+    - {name: "Nora Feld", email_domain: "example.com", segment: "wfh-professional", first_order: "2024-01-18"}
+    - {name: "Marcus Bell", email_domain: "example.com", segment: "wfh-professional", first_order: "2024-02-02"}
+    - {name: "Ivy Chen", email_domain: "example.com", segment: "creative-studio", first_order: "2024-03-11"}
+    - {name: "Ruben Silva", email_domain: "example.com", segment: "grad-student", first_order: "2024-04-27"}
+    - {name: "Tessa Nakamura", email_domain: "example.com", segment: "accessibility", first_order: "2024-06-14"}
+    - {name: "Owen Gallagher", email_domain: "example.com", segment: "gaming-and-work", first_order: "2024-08-30"}
+    - {name: "Freya Lindholm", email_domain: "example.com", segment: "upgrader", first_order: "2024-11-21"}
+    - {name: "Desmond Cole", email_domain: "example.com", segment: "gift-buyer", first_order: "2024-12-09"}
+    - {name: "Alma Reyes", email_domain: "example.com", segment: "wfh-professional", first_order: "2025-02-06"}
+    - {name: "Kit Donovan", email_domain: "example.com", segment: "small-home-office", first_order: "2025-04-17"}
+    - {name: "Beatrix Mwangi", email_domain: "example.com", segment: "creative-studio", first_order: "2025-07-08"}
+    - {name: "Sam Whitfield", email_domain: "example.com", segment: "accessibility", first_order: "2025-10-02"}
+  # 12 B2B accounts. stage is as of 2026-06.
+  b2b:
+    - name: "Cobalt Dental Group"
+      contact: "Sam Ortiz (office manager)"
+      segment: "dental clinics"
+      size_seats: 40
+      stage: "closed-won 2025-11-14"
+      notes: >-
+        Flagship deal, PW-cobalt-dental-40seat. 40x LS-BDL-002 at 1099.00 list
+        (43960.00), 15% tier discount (closed before the 2025-12-08 tier change)
+        plus one-time SL3 exception of 3% (1318.80), CEO-approved by Mara Voss
+        on 2025-11-10 because it crossed the 1000.00 approval threshold. Rollout
+        across 4 clinics, Dec 2025 to Feb 2026. Two Vireo add-on units fall in
+        the vireo-v12-affected warranty scope.
+    - name: "Harborview Architects"
+      contact: "Elena Brandt (studio operations)"
+      segment: "architecture"
+      size_seats: 22
+      stage: "closed-won 2024-09-19; expansion discovery"
+      notes: "PW-harborview-expansion open for 8 additional seats since 2026-04. Original order included 6x LS-ARM-001-DBL."
+    - name: "Beacon Legal"
+      contact: "Marcus Hale (firm administrator)"
+      segment: "legal"
+      size_seats: 18
+      stage: "negotiation"
+      notes: "PW-beacon-legal-18seat. Wants extended warranty language in the MSA; cites the Vireo goodwill extension as precedent."
+    - name: "Stonebridge Accounting"
+      contact: "Priti Shah (partner)"
+      segment: "accounting"
+      size_seats: 12
+      stage: "closed-won 2025-03-05; churn-risk"
+      notes: "PW-stonebridge-refresh. 5 of their 12 Alder mats came from LOT-2025-14 and delaminated; replacements shipped 2025-08 but the relationship cooled."
+    - name: "Juniper Cowork"
+      contact: "Dana Whitcombe (community manager)"
+      segment: "coworking"
+      size_seats: 55
+      stage: "proposal"
+      notes: "PW-juniper-cowork-55seat. Phased buildout over 3 floors; asking for staggered invoicing per floor."
+    - name: "Petrel Analytics"
+      contact: "Sanjay Iyer (head of operations)"
+      segment: "data consultancy"
+      size_seats: 15
+      stage: "closed-won 2025-08-21"
+      notes: "PW-petrel-15seat. Fully remote team; drop-shipped to 15 home addresses, one order per seat."
+    - name: "Bluebird Therapy Collective"
+      contact: "Ruth Amadi (practice director)"
+      segment: "healthcare"
+      size_seats: 9
+      stage: "closed-won 2026-02-12"
+      notes: "PW-bluebird-9seat. Below every discount tier; paid list. Heavy Finch footrest buyer for treatment rooms."
+    - name: "Nordlicht Games"
+      contact: "Felix Braun (studio manager)"
+      segment: "game studio"
+      size_seats: 30
+      stage: "negotiation"
+      notes: >-
+        PW-nordlicht-30seat. Exactly 30 seats, so the 2025-12-08 tier sheet
+        gives 12%; Tom quoted 15% from the pre-change sheet in a 2026-01 call
+        and the quote had to be walked back. Sensitive.
+    - name: "Kestrel Financial Planning"
+      contact: "Grace Liu (operations coordinator)"
+      segment: "financial services"
+      size_seats: 10
+      stage: "discovery"
+      notes: "PW-kestrel-10seat. Inbound from the Portland showroom; comparing against ErgoNest lease offer."
+    - name: "Tidewater Insurance Brokers"
+      contact: "Hal Jensen (office administrator)"
+      segment: "insurance"
+      size_seats: 14
+      stage: "proposal"
+      notes: "PW-tidewater-14seat. Needs WA sales tax on the quote; office is in Vancouver, WA."
+    - name: "Summit Physio Group"
+      contact: "Omar Haddad (owner)"
+      segment: "physical therapy"
+      size_seats: 8
+      stage: "closed-won 2024-11-06"
+      notes: "PW-summit-8seat. Reorders LS-ACC-001 quarterly; steady small account."
+    - name: "Foxglove Studios"
+      contact: "Mia Serrano (producer)"
+      segment: "video production"
+      size_seats: 26
+      stage: "churn-risk"
+      notes: "PW-foxglove-winback. Holding an ErgoNest quote 14% under ours; renewal decision due 2026-08."
+
+# invoice_code feeds the INV-<VENDORCODE>-<YYYY>-<NNN> grammar.
+vendors:
+  - vendor_id: "VEN-01"
+    name: "Verdant Textiles Co."
+    invoice_code: "VRD"
+    country: "Vietnam"
+    supplies: "Alder desk mats (all colors), Aspen felt sleeves, Rowan armrest pads"
+    payment_terms: "Net-45"
+    contract_start: "2023-04-01"
+    notes: >-
+      Defect saga vendor. LOT-2025-14 (received 2025-06-19) showed edge-stitch
+      delamination on roughly 9% of 1400 units; corrective action plan accepted
+      2025-09-02; credit memo issued against INV-VRD-2025-118.
+  - vendor_id: "VEN-02"
+    name: "Ostrava Metalworks"
+    invoice_code: "OSM"
+    country: "Czechia"
+    supplies: "Birch desk frames, Rowan chair bases, Heron arm castings, metal accessories and replacement parts"
+    payment_terms: "Net-45"
+    contract_start: "2022-07-15"
+    notes: "Longest-tenured supplier. 2026-01 price increases trace to their 2025-11 steel surcharge."
+  - vendor_id: "VEN-03"
+    name: "Bitgrove Labs"
+    invoice_code: "BGL"
+    country: "USA"
+    supplies: "Vireo firmware development and OTA update service"
+    payment_terms: "Net-30"
+    contract_start: "2024-03-01"
+    notes: >-
+      Firmware saga vendor. Built Vireo firmware v1.0 through v1.3. v1.2
+      (released 2025-12-09) introduced a sleep-mode flicker on units with
+      Meridian PCB rev C; hotfix v1.3 shipped 2026-02-17. See
+      policies.warranty scope vireo-v12-affected.
+  - vendor_id: "VEN-04"
+    name: "ParcelPoint Fulfillment"
+    invoice_code: "PPF"
+    country: "USA"
+    supplies: "3PL warehousing, pick-pack, bundle kitting at 6.00 per kit, outbound parcel"
+    payment_terms: "Net-30"
+    contract_start: "2023-11-01"
+    notes: >-
+      Reno, NV warehouse. The 2023-11 contract covered warehousing, bundle
+      kitting, and heavy-item freight; light and medium parcels kept shipping
+      from the Portland showroom backroom until the 2026-01-12 full-outbound
+      cutover (SL5).
+  - vendor_id: "VEN-05"
+    name: "GreenCrate Packaging"
+    invoice_code: "GCP"
+    country: "USA"
+    supplies: "Cartons, molded pulp inserts, mailers"
+    payment_terms: "Net-30"
+    contract_start: "2022-08-01"
+    notes: "Recycled-content cartons; desk carton redesign 2025-04 cut damage claims."
+  - vendor_id: "VEN-06"
+    name: "Cascadia Freight"
+    invoice_code: "CSF"
+    country: "USA"
+    supplies: "Inbound ocean drayage and LTL to the ParcelPoint warehouse"
+    payment_terms: "Net-30"
+    contract_start: "2023-02-15"
+    notes: "Handles all Ostrava and Verdant inbound containers."
+  - vendor_id: "VEN-07"
+    name: "Meridian Components"
+    invoice_code: "MRC"
+    country: "Taiwan"
+    supplies: "Vireo PCBs and electronic parts, Sparrow cable kits, motor control boxes, power adapters"
+    payment_terms: "Net-45"
+    contract_start: "2024-02-01"
+    notes: "PCB rev C (from LOT-2025-31 onward) interacts with firmware v1.2 sleep timing; rev D qualified 2026-03-09."
+  - vendor_id: "VEN-08"
+    name: "Lovejoy Property Partners"
+    invoice_code: "LPP"
+    country: "USA"
+    supplies: "Office and showroom lease, 2140 sq ft, NW Portland"
+    payment_terms: "Net-30"
+    contract_start: "2022-06-15"
+    notes: "Rent due the 1st; 3% annual escalator each June."
+  - vendor_id: "VEN-09"
+    name: "Nehalem Mutual Insurance"
+    invoice_code: "NMI"
+    country: "USA"
+    supplies: "General liability, product liability, and commercial property coverage"
+    payment_terms: "Net-30"
+    contract_start: "2022-07-01"
+    notes: "Annual policy renews each July; product liability rider added 2024-10 ahead of the Vireo launch."
+  - vendor_id: "VEN-10"
+    name: "Colefield & Tran LLP"
+    invoice_code: "CTL"
+    country: "USA"
+    supplies: "Legal counsel: contracts, MSAs, employment, IP"
+    payment_terms: "Net-30"
+    contract_start: "2022-06-10"
+    notes: "Drafted the B2B MSA template 2024-06 and the Verdant corrective action agreement 2025-09."
+
+# THE CONTRADICTION ENGINE. Every policy is a version list; the entry in force
+# on a document's date governs that document. Later documents may contradict
+# earlier ones across a version boundary. That is intended.
+policies:
+  refund_window:
+    - {days: 30, effective: "2024-01-15"}
+    - {days: 45, effective: "2025-11-03", note: "holiday exception made permanent 2026-01-12"}
+  restocking_fee:
+    - {pct: 10, scope: "opened, non-defective returns", effective: "2024-01-15"}
+    - {pct: 10, scope: "opened, non-defective returns; waived on B2B orders of 10+ units", effective: "2025-06-02"}
+  free_shipping_threshold:
+    - {usd: 75, effective: "2024-03-01"}
+    - {usd: 99, effective: "2026-01-15"}
+  b2b_discount_tiers:
+    - {tier: "15% at 25+ units", effective: "2024-06-01"}
+    - {tier: "12% at 30+ units", effective: "2025-12-08", reason: "margin review"}
+  discount_exceptions:
+    - code: "SL3"
+      terms: "sales lead may grant a one-time extra 3% on deals of 30 or more seats"
+      approval: >-
+        CEO sign-off required when the exception's dollar value reaches the CEO
+        approval threshold in expense_policy. On the Cobalt Dental deal the 3%
+        was worth 1318.80, above the 1000.00 threshold.
+      effective: "2025-10-06"
+  warranty:
+    - {terms: "1 year standard", effective: "2024-01-15"}
+    - {terms: "2 years goodwill extension for Vireo units on firmware v1.2", effective: "2026-01-20", scope: "vireo-v12-affected"}
+  shipping_zones:
+    effective: "2024-03-01"
+    note: "free_shipping_threshold waives light and medium rates only; heavy items always bill the zone rate"
+    zones:
+      - {zone: "US-1", coverage: "OR WA ID NV", light_usd: 5.95, medium_usd: 12.95, heavy_usd: 49.00}
+      - {zone: "US-2", coverage: "CA AZ UT CO NM MT WY", light_usd: 7.95, medium_usd: 15.95, heavy_usd: 69.00}
+      - {zone: "US-3", coverage: "central US", light_usd: 9.95, medium_usd: 18.95, heavy_usd: 89.00}
+      - {zone: "US-4", coverage: "eastern US", light_usd: 11.95, medium_usd: 21.95, heavy_usd: 109.00}
+      - {zone: "CAN", coverage: "Canada", light_usd: 14.95, medium_usd: 29.95, heavy_usd: 149.00}
+  price_match:
+    - {terms: "no price matching", effective: "2024-01-15"}
+    - {terms: "match identical-spec list price from US-based sellers within 14 days of purchase; excludes clearance and bundles", effective: "2025-05-19"}
+  pto_policy:
+    - {terms: "15 days PTO plus 8 fixed holidays, accrual from day one", effective: "2024-01-15"}
+    - {terms: "18 days PTO plus 9 fixed holidays", effective: "2026-01-01"}
+  expense_policy:
+    - effective: "2024-01-15"
+      self_approve_under_usd: 250
+      manager_approval_band_usd: "250.00-999.99"
+      ceo_approval_from_usd: 1000
+      note: "thresholds apply to spend and to discount exceptions measured in dollar value"
+    - effective: "2025-07-01"
+      self_approve_under_usd: 500
+      manager_approval_band_usd: "500.00-999.99"
+      ceo_approval_from_usd: 1000
+      note: "self-approve limit raised; CEO threshold unchanged"
+
+tax_table:
+  OR: 0.0
+  WA: 0.065
+  CA: 0.0725
+  other_us: 0.05
+  note: "fictional simplified rates for dataset coherence; CAN orders ship tax-uncollected"
+
+# Mechanical checkers grep every corpus document against these.
+id_grammars:
+  sku:
+    regex: "LS-(DSK|CHR|MAT|LMP|STD|ARM|ACC|BDL)-[0-9]{3}(-[A-Z0-9]{2,3})?"
+    example: "LS-DSK-001-60"
+  ticket:
+    regex: "HD-[0-9]{4}-[0-9]{5}"
+    example: "HD-2025-04182"
+  invoice:
+    regex: "INV-[A-Z]{3}-[0-9]{4}-[0-9]{3}"
+    example: "INV-VRD-2025-118"
+  customer_order:
+    regex: "#LS[0-9]{5}"
+    example: "#LS20841"
+  vendor:
+    regex: "VEN-[0-9]{2}"
+    example: "VEN-07"
+  production_lot:
+    regex: "LOT-[0-9]{4}-[0-9]{2}"
+    example: "LOT-2025-14"
+  crm_opportunity:
+    regex: "PW-[a-z0-9]+(-[a-z0-9]+)*"
+    example: "PW-cobalt-dental-40seat"
+
+# Case-insensitive substring match. Writers must not produce these strings
+# anywhere, including inside larger words.
+banned_strings:
+  - "shopify"
+  - "zendesk"
+  - "hubspot"
+  - "quickbooks"
+  - "stripe"
+  - "klaviyo"
+  - "slack"
+  - "salesforce"
+  - "gorgias"
+  - "intercom"
+  - "freshdesk"
+  - "kustomer"
+  - "mailchimp"
+  - "sendgrid"
+  - "xero"
+  - "netsuite"
+  - "shipstation"
+  - "shipbob"
+  - "easypost"
+  - "paypal"
+  - "venmo"
+  - "klarna"
+  - "amazon"
+  - "wayfair"
+  - "ikea"
+  - "steelcase"
+  - "herman miller"
+  - "flexispot"
+  - "uplift desk"
+  - "jarvis desk"
+  - "autonomous desk"
+  - "zapier"
+  - "docusign"
+  - "gusto"
+  - "trello"
+  - "airtable"
+  - "halo"   # retired product name: the smart desk lamp was renamed Vireo; also blocks the real HALO lighting mark
+
+competitor:
+  name: "ErgoNest"
+  positioning: >-
+    Direct-import reseller of white-label ergonomic desks and chairs. Sells on
+    price and shipping speed; added a per-seat B2B leasing program in late 2025.
+  price_posture: "10-18% below Larkstead list on comparable desks; discount codes most weeks"
+  strengths:
+    - "lower list prices"
+    - "2-day shipping across the western US"
+    - "wide chair range, 9 models"
+  weaknesses:
+    - "no replacement-parts catalog"
+    - "14-day return window"
+    - "outsourced support with slow escalation"
+    - "smart lamp equivalent has no update path after purchase"

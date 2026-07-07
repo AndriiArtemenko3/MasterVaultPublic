@@ -1,0 +1,778 @@
+# Larkstead corpus plan -- storyline + filler allocation
+# Storyline doc tally derives from SL1-SL5 beat "produces" lists, mapped onto the
+# target doc_type buckets as follows:
+#   - SL1 macro-lot-2025-14-mat-warp (doc_type process) and SL2
+#     sl2-macros-returns-helprise (doc_type sop) count as customer-support macros.
+#   - SL4 vireo-flicker-troubleshooting-guide (doc_type faq) counts as troubleshooting;
+#     vireo-help-doc-2024 and the SL2/SL5 FAQs count as faq-help.
+#   - SL3 sl3-onepager-b2b-pricing and sl3-policy-b2b-tiers-v2 (sales-crm policy)
+#     count as pricing-one-pagers; sl3-objection-note-price counts as objection-note.
+#   - Ops logs split: SL1 receiving log -> receiving-log; SL4 firmware release
+#     notes -> release-meeting-note. SL3/SL5 checklists -> onboarding-checklist.
+#   - SL1 Verdant claim/response letters, exception memo, cost tally; SL2 memos;
+#     SL3 pricing-exception memo; SL4 goodwill memo; SL5 dispute memo -> memo-org.
+# Storyline docs total 89 (SL1 25, SL2 10, SL3 14, SL4 23, SL5 17). Filler 283.
+# Corpus total 372 = 122 + 92 + 90 + 68.
+#
+# Filler guardrails (binding on writer agents):
+#   - Do not restate, correct, or re-version any C1-C5 surface: the returns FAQ /
+#     window, the LOT-2025-14 refund exception, the free-shipping threshold, the
+#     B2B discount tiers (no percentages in filler sales docs), or Vireo warranty
+#     terms. Filler proposals are all list-price deals below the tier minimums.
+#   - Respect hire dates (Celeste Marin 2025-03-24, Yuki Tanaka 2025-08-11, Ray
+#     Lindqvist 2024-04-01), SKU launch dates, and price_history effective dates.
+#   - IDs minted by filler must not collide with IDs allocated in SL1-SL5 files.
+#   - ID monotonicity: the HD ticket and #LS order counters are sequential, so
+#     sorting every corpus ID by its in-world date must give ascending numbers
+#     (HD counters reset each January 1; #LS never resets). The ledger is the
+#     union of IDs allocated in SL1-SL5 plus the template exemplars. Mint filler
+#     IDs in the gaps between dated allocations, never below a later-dated ID
+#     or above an earlier-dated one. A mechanical checker sorts (date, ID)
+#     pairs across the corpus and asserts monotonicity before writers finalize.
+#   - Customer texture: at least half of filler ticket, chat, and CSAT
+#     requesters must be one-off customers outside the 12-name repeat roster.
+#     Mint plain two-part names, use each exactly once corpus-wide, and do not
+#     reuse roster surnames. The roster anchors recognition; it does not
+#     monopolize the queue.
+
+totals:
+  customer-support:
+    ticket: {total: 60, storyline: 36, filler: 24}
+    faq-help: {total: 22, storyline: 3, filler: 19}
+    troubleshooting: {total: 8, storyline: 1, filler: 7}
+    policy: {total: 6, storyline: 3, filler: 3}
+    macro: {total: 6, storyline: 2, filler: 4}
+    csat-batch: {total: 10, storyline: 0, filler: 10}
+    chat-log: {total: 10, storyline: 2, filler: 8}
+  sales-crm:
+    lead-note: {total: 25, storyline: 2, filler: 23}
+    call-transcript: {total: 12, storyline: 2, filler: 10}
+    proposal: {total: 8, storyline: 2, filler: 6}
+    pricing-one-pager: {total: 4, storyline: 2, filler: 2}
+    objection-note: {total: 6, storyline: 1, filler: 5}
+    competitor-note: {total: 5, storyline: 1, filler: 4}
+    segment-qbr-analysis: {total: 8, storyline: 0, filler: 8}
+    email-thread: {total: 20, storyline: 0, filler: 20}
+    case-study: {total: 4, storyline: 1, filler: 3}
+  operations:
+    sop: {total: 18, storyline: 2, filler: 16}
+    onboarding-checklist: {total: 6, storyline: 2, filler: 4}
+    project: {total: 10, storyline: 2, filler: 8}
+    bug-qa-report: {total: 14, storyline: 3, filler: 11}
+    integration-guide: {total: 8, storyline: 1, filler: 7}
+    process: {total: 10, storyline: 0, filler: 10}
+    postmortem: {total: 5, storyline: 2, filler: 3}
+    receiving-log: {total: 8, storyline: 1, filler: 7}
+    release-meeting-note: {total: 11, storyline: 2, filler: 9}
+  internal-admin:
+    hr-policy: {total: 12, storyline: 0, filler: 12}
+    finance-rule: {total: 8, storyline: 0, filler: 8}
+    vendor-contract: {total: 10, storyline: 4, filler: 6}
+    invoice: {total: 18, storyline: 3, filler: 15}
+    compliance-note: {total: 6, storyline: 0, filler: 6}
+    memo-org: {total: 14, storyline: 9, filler: 5}
+
+filler_batches:
+  # ---------------- customer-support ----------------
+  - batch_id: cs-ticket-b1
+    domain: customer-support
+    doc_type: ticket
+    count: 8
+    length_words: {min: 150, max: 350}
+    in_world_date_range: {start: "2024-02-01", end: "2024-12-20"}
+    topic_seeds:
+      - "Nora Feld's LS-DSK-001-48 hardware bag has a stripped hex bolt; Jonah Beck mails a full hardware kit, no return"
+      - "Marcus Bell asks why his birch desk motor hums at full extension; Priya Raman explains the duty-cycle pause, no fault found"
+      - "Ivy Chen's LS-CHR-001-GRY gas lift sinks overnight; warranty cylinder swap arranged with prepaid label"
+      - "Owen Gallagher's 60 in desk arrives as carton 1 of 2 only; ParcelPoint trace finds carton 2 misrouted, delivered 4 days late"
+      - "Ruben Silva pre-sale question: does the Wren laptop stand (LS-STD-001) hold a 17 in laptop; spec answer with weight limit"
+      - "Tessa Nakamura requests one-handed assembly guidance for the Finch footrest and desk; Priya sends photo steps and offers a call"
+      - "Desmond Cole December gift order needs a packing slip without prices; Jonah confirms gift slip enabled in Shopstack"
+      - "Customer reports Sparrow cable kit (LS-ACC-002) missing the adhesive clips; replacement clip pack mailed from the Portland backroom"
+  - batch_id: cs-ticket-b2
+    domain: customer-support
+    doc_type: ticket
+    count: 8
+    length_words: {min: 150, max: 350}
+    in_world_date_range: {start: "2025-01-10", end: "2025-10-30"}
+    topic_seeds:
+      - "Freya Lindholm asks if the Heron dual arm (LS-ARM-001-DBL) holds a 34 in ultrawide; Jonah quotes the per-arm weight limit"
+      - "Kit Donovan cannot pair the Vireo lamp on a 5 GHz-only network; Celeste Marin walks through enabling 2.4 GHz (April 2025, no firmware issue)"
+      - "Alma Reyes reports a squeak from her Rowan chair recline; Jonah sends the bolt-torque fix and offers LS-ACC-009 armrest pads"
+      - "Summit Physio Group asks to consolidate its quarterly 8x LS-ACC-001 reorder into fewer cartons; routed as B2B, Priya confirms with the warehouse"
+      - "Beatrix Mwangi asks for sage vs sand mat color guidance for her studio (April 2025); Celeste mails fabric swatches"
+      - "Owen Gallagher disputes WA sales tax on a Vancouver WA delivery; Celeste shows the 6.5% line: 79.00 stand, 5.14 tax"
+      - "Customer asks Larkstead to match an ErgoNest desk quote 11 days after purchase (August 2025); refused on identical-spec grounds per the 2025-05-19 policy: different materials and motor class, no replacement-parts catalog; the boundary is explained and the customer keeps the desk"
+      - "Hazel under-desk drawer (LS-ACC-007) rails misaligned out of the box; replacement drawer shipped, defective unit recycled with photo proof"
+  - batch_id: cs-ticket-b3
+    domain: customer-support
+    doc_type: ticket
+    count: 8
+    length_words: {min: 150, max: 350}
+    in_world_date_range: {start: "2025-11-05", end: "2026-05-29"}
+    topic_seeds:
+      - "Marcus Bell asks whether the 2026-01-15 price change affects his late-December desk order; Celeste confirms he keeps 549.00"
+      - "Nora Feld needs install help for a replacement Birch motor control box (LS-ACC-010); Jonah links the guide and stays on the ticket"
+      - "Cobalt Dental clinic 2 requests two extra LS-ACC-011 leveling feet sets after its January delivery wave; shipped free per account terms"
+      - "Sam Whitfield orders a spare Vireo power adapter (LS-ACC-012, 22.00) for a second desk location; simple order-assist ticket, April 2026"
+      - "Ivy Chen is moving studios and asks for desk disassembly torque specs; Celeste attaches the relocation guide"
+      - "Kestrel Financial visitor asks support whether showroom floor-model chairs are sold; Priya explains floor models are demo-only and loops in sales"
+      - "Customer says Magpie cable tray (LS-ACC-003) screws are too short for a 1 in desktop; Hank Morrow confirms spec and mails longer screws"
+      - "Ruben Silva is moving to Canada and asks what a Wren stand order would ship for; Jonah quotes the CAN zone light rate of 14.95"
+  - batch_id: cs-faq-b1
+    domain: customer-support
+    doc_type: faq-help
+    count: 4
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2024-01-20", end: "2024-06-30"}
+    topic_seeds:
+      - "Birch standing desk assembly FAQ: two-person lift, torque order, first-run height calibration"
+      - "Rowan task chair adjustment guide: seat height, tilt tension, armrest positions"
+      - "Alder desk mat care guide: cleaning spills, stain treatment, what not to use (solvents)"
+      - "Wren laptop stand compatibility FAQ: supported laptop sizes, weight limit, non-slip pad care"
+  - batch_id: cs-faq-b2
+    domain: customer-support
+    doc_type: faq-help
+    count: 4
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2024-07-01", end: "2024-12-15"}
+    topic_seeds:
+      - "Portland showroom pickup FAQ: pickup hours, ID required, 7-day hold window"
+      - "Willow grommet cover (LS-ACC-005) install help: hole sizes, removal without scratching"
+      - "Cable management guide: routing with the Magpie tray (LS-ACC-003) and Aspen sleeves (LS-ACC-004) on a standing desk"
+      - "Desk weight capacity FAQ: rated load per desk size, monitor arm clamp placement over frame rails"
+  - batch_id: cs-faq-b3
+    domain: customer-support
+    doc_type: faq-help
+    count: 4
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2025-01-15", end: "2025-09-30"}
+    topic_seeds:
+      - "Vireo app setup guide (March 2025): account creation, Wi-Fi pairing, scenes; no warranty content"
+      - "Chair fit guide: choosing Rowan settings by desk height and user height ranges"
+      - "Replacement parts overview: the parts shelf philosophy, list of LS-ACC replacement SKUs with prices"
+      - "How to order as a business: Shopstack B2B form fields, what happens after submission, showroom visits (no discount figures)"
+  - batch_id: cs-faq-b4
+    domain: customer-support
+    doc_type: faq-help
+    count: 4
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2025-04-01", end: "2025-12-20"}
+    topic_seeds:
+      - "Standing desk habits guide: sit-stand cadence, anti-fatigue basics, memory preset use"
+      - "Birch motor control box error codes E01-E04: what each code means and when to contact support"
+      - "Moving with your Larkstead desk: disassembly order, part bagging, re-leveling after reassembly"
+      - "Hazel under-desk drawer (LS-ACC-007) install FAQ: clearance measurements, rail alignment, weight limit"
+  - batch_id: cs-faq-b5
+    domain: customer-support
+    doc_type: faq-help
+    count: 3
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2026-01-05", end: "2026-05-30"}
+    topic_seeds:
+      - "Sparrow cable kit (LS-ACC-002) contents FAQ: what is in the kit, adhesive surface prep"
+      - "Accessibility setup hub: one-handed assembly options, lever reach notes, requesting extra install time on delivery"
+      - "Caster and floor protection guide: LS-ACC-008 soft casters vs hard floors, mat-under-chair advice"
+  - batch_id: cs-troubleshoot-b1
+    domain: customer-support
+    doc_type: troubleshooting
+    count: 4
+    length_words: {min: 300, max: 550}
+    in_world_date_range: {start: "2024-04-01", end: "2025-05-31"}
+    topic_seeds:
+      - "Desk will not rise or legs uneven: control box reset procedure and re-calibration steps"
+      - "Rowan gas lift sinking diagnostic: load test, cylinder inspection, when to order a warranty cylinder"
+      - "Heron monitor arm drifts down: tension screw adjustment by monitor weight"
+      - "Vireo lamp drops off Wi-Fi (May 2025): router band settings, signal check, re-pairing steps; no firmware v1.2 content"
+  - batch_id: cs-troubleshoot-b2
+    domain: customer-support
+    doc_type: troubleshooting
+    count: 3
+    length_words: {min: 300, max: 550}
+    in_world_date_range: {start: "2025-06-01", end: "2026-04-30"}
+    topic_seeds:
+      - "72 in desk wobble diagnosis: crossbar torque sequence, leveling feet (LS-ACC-011), floor check"
+      - "Squeaky chair mechanism: locating the source, bolt torque, felt washer fix"
+      - "Wren stand hinge too stiff or too loose: hinge tension adjustment with the included key"
+  - batch_id: cs-policy-b1
+    domain: customer-support
+    doc_type: policy
+    count: 3
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2024-01-15", end: "2025-06-15"}
+    topic_seeds:
+      - "Price-match policy v1 (effective 2024-01-15): no price matching; explains why (parts shelf, service)"
+      - "Price-match policy v2 (effective 2025-05-19): identical-spec list price from US sellers within 14 days; excludes clearance and bundles; identical-spec means same materials, motor class, warranty term, and a published replacement-parts catalog, so a cheaper import desk without a parts shelf does not qualify"
+      - "Support data-handling policy: what Helprise stores, 24-month retention, how customers request deletion"
+  - batch_id: cs-macro-b1
+    domain: customer-support
+    doc_type: macro
+    count: 4
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2024-03-01", end: "2025-09-30"}
+    topic_seeds:
+      - "Helprise macro WIS-01 where-is-my-order: check ParcelPoint tracking first, quote carrier scan, set follow-up date"
+      - "Helprise macro DMG-01 damaged-in-transit: request carton photos, file carrier claim, ship replacement before claim resolves"
+      - "Helprise macro B2B-01 routing: tag account, assign B2B queue, notify account owner in Pipewell, response-time target"
+      - "Helprise macro PKP-01 showroom pickup ready: pickup window, ID reminder, 7-day hold clock"
+  - batch_id: cs-csat-b1
+    domain: customer-support
+    doc_type: csat-batch
+    count: 10
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2024-07-05", end: "2026-05-05"}
+    topic_seeds:
+      - "2024-Q3 CSAT batch: 4.6/5 avg on 88 responses; verbatims praise Jonah's follow-through, one gripe about heavy-item delivery windows"
+      - "2024-Q4 CSAT batch: 4.4/5 on 132 responses; holiday volume slowed first response to 9 business hours"
+      - "January 2025 CSAT batch: 4.7/5 on 61 responses; two verbatims name Priya; showroom pickup praised"
+      - "April 2025 CSAT batch: 4.6/5 on 74 responses; Celeste's policy-link habit gets one positive and one annoyed verbatim"
+      - "July 2025 CSAT batch: 4.5/5 on 83 responses; replacement-parts experience praised twice"
+      - "August 2025 CSAT batch: 4.2/5 on 96 responses; first-response time slipped to 11 business hours during a high-volume month"
+      - "October 2025 CSAT batch: 4.6/5 on 79 responses; B2B queue response praised by Summit Physio contact"
+      - "December 2025 CSAT batch: 4.3/5 on 118 responses; gift-order slip mixups noted twice"
+      - "February 2026 CSAT batch: 4.5/5 on 85 responses; two verbatims praise clear delay updates"
+      - "April 2026 CSAT batch: 4.7/5 on 71 responses; best month since January 2025; troubleshooting guides credited"
+  - batch_id: cs-chat-b1
+    domain: customer-support
+    doc_type: chat-log
+    count: 8
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2024-05-01", end: "2026-04-30"}
+    topic_seeds:
+      - "Jonah-to-Priya shift handoff chat: 14 open tickets, two carrier claims pending, one angry gift-order case flagged"
+      - "Hank and Dmitri chat about dock scheduling for the thursday cascadia load; hank all lowercase, dmitri numbers-first"
+      - "Sofia warns Priya that the Drizzle campaign lands Monday and to expect a WISMO bump; metric ask first"
+      - "Celeste asks Jonah when to use macro WIS-01 vs a manual reply; Jonah answers in casual register (gonna, tho)"
+      - "Ray and Priya triage a cart tax rounding report on WA orders; Ray replies commit-message style with the ticket ID"
+      - "Tom and Priya settle B2B escalation etiquette: account owner notified in Pipewell before any policy quote goes out"
+      - "Ana asks Priya to hold refund batch processing until month-end close finishes; conditional phrasing, exact cents"
+      - "Mara posts the holiday coverage schedule; short declaratives, signed M, one pointed question about queue depth"
+
+  # ---------------- sales-crm ----------------
+  - batch_id: sales-leadnote-b1
+    domain: sales-crm
+    doc_type: lead-note
+    count: 8
+    length_words: {min: 100, max: 250}
+    in_world_date_range: {start: "2024-06-15", end: "2025-02-28"}
+    topic_seeds:
+      - "Harborview Architects first contact 2024-07: Elena Brandt, 22 seats, asks about drafting-height range on the 72 in desk"
+      - "Harborview closed-won note 2024-09-19: order includes 6x LS-ARM-001-DBL for the model shop; delivery scheduled October"
+      - "PW-summit-8seat inbound via showroom 2024-10: Omar Haddad, 8 treatment rooms, footrests plus 48 in desks"
+      - "Lost lead: Portland nonprofit, 6 seats, chose used furniture on budget; logged for spring nurture"
+      - "Tidewater Insurance inbound 2024-12: Hal Jensen, Vancouver WA office, note to apply 6.5% WA tax on any quote"
+      - "Summit Physio Q1-2025 reorder note: 8x LS-ACC-001 at 69.00, steady quarterly cadence confirmed"
+      - "Stonebridge Accounting discovery 2025-01: Priti Shah, 12 seats, partner-driven refresh, timeline before tax season ends"
+      - "Showroom walk-in: dental hygiene school, 10 training-lab seats, stalled awaiting grant funding"
+  - batch_id: sales-leadnote-b2
+    domain: sales-crm
+    doc_type: lead-note
+    count: 8
+    length_words: {min: 100, max: 250}
+    in_world_date_range: {start: "2025-03-01", end: "2025-12-31"}
+    topic_seeds:
+      - "Petrel Analytics inbound 2025-06: Sanjay Iyer, 15 fully remote seats, requires drop-ship to home addresses"
+      - "Petrel closed-won 2025-08-21 note: one order per seat to 15 addresses; Yuki confirms address collection plan"
+      - "Juniper Cowork first tour 2025-09: Dana Whitcombe, 55 seats over 3 floors, wants staggered invoicing per floor"
+      - "Bluebird Therapy inbound 2025-10: Ruth Amadi, 9 seats, footrest-heavy config for treatment rooms, quoted list (below volume minimum)"
+      - "Foxglove Studios renewal-risk note 2025-11: Mia Serrano holding a competitor quote, decision due 2026-08"
+      - "Kestrel Financial inbound from the showroom 2025-12: Grace Liu comparing an ErgoNest lease offer for 10 seats"
+      - "Lost lead: Beaverton startup, 12 seats, bought secondhand inventory; price objection logged, revisit at their series A"
+      - "Harborview expansion signal 2025-12: Elena mentions 8 spring hires; watch for a Q2 opportunity"
+  - batch_id: sales-leadnote-b3
+    domain: sales-crm
+    doc_type: lead-note
+    count: 7
+    length_words: {min: 100, max: 250}
+    in_world_date_range: {start: "2026-01-05", end: "2026-06-15"}
+    topic_seeds:
+      - "Beacon Legal discovery 2026-01: Marcus Hale, 18 seats, expects MSA redlines from firm counsel"
+      - "PW-harborview-expansion opened 2026-04: 8 additional seats matching the 2024 configuration"
+      - "Bluebird closed-won 2026-02-12 note: 9 seats, single delivery wave, paid list"
+      - "Juniper floor-1 pilot note 2026-03: 18-seat pilot before committing to all 55; success criteria agreed with Dana"
+      - "Tidewater proposal-stage note 2026-05: WA tax line confirmed on the draft quote; freight to Vancouver WA priced"
+      - "Kestrel discovery call set for 2026-05: Grace asks for on-site ergonomic assessments as part of any deal"
+      - "New inbound 2026-06: Pearl District accounting firm, 6 seats, referred by Summit Physio's Omar Haddad"
+  - batch_id: sales-transcript-b1
+    domain: sales-crm
+    doc_type: call-transcript
+    count: 4
+    length_words: {min: 700, max: 1100}
+    in_world_date_range: {start: "2024-08-01", end: "2025-09-30"}
+    topic_seeds:
+      - "Harborview discovery call 2024-08: Tom and Elena Brandt on 22 seats, model-shop monitor arms, October delivery target"
+      - "Summit Physio intake call 2024-10: Omar Haddad on treatment-room ergonomics, footrests, cleaning-friendly surfaces"
+      - "Petrel Analytics discovery 2025-06: Sanjay Iyer on remote drop-ship logistics and per-seat order tracking"
+      - "Juniper Cowork tour debrief call 2025-09: Dana Whitcombe on 3-floor phasing, member churn on furniture quality"
+  - batch_id: sales-transcript-b2
+    domain: sales-crm
+    doc_type: call-transcript
+    count: 3
+    length_words: {min: 700, max: 1100}
+    in_world_date_range: {start: "2025-11-01", end: "2026-02-28"}
+    topic_seeds:
+      - "Foxglove renewal call 2025-11: Mia Serrano raises the cheaper competitor quote; Tom leads with seat count, no discount numbers offered"
+      - "Bluebird configuration call 2025-12: Yuki (formal, no contractions) walks Ruth Amadi through treatment-room layouts; numbered next steps"
+      - "Beacon Legal MSA scoping call 2026-01: Marcus Hale lists contract asks; Yuki confirms everything in writing within the hour"
+  - batch_id: sales-transcript-b3
+    domain: sales-crm
+    doc_type: call-transcript
+    count: 3
+    length_words: {min: 700, max: 1100}
+    in_world_date_range: {start: "2026-04-01", end: "2026-06-10"}
+    topic_seeds:
+      - "Harborview expansion call 2026-04: Elena Brandt confirms 8 seats, wants delivery before July onboarding class"
+      - "Kestrel discovery call 2026-05: Grace Liu compares ownership vs the ErgoNest lease; asks about parts availability at year 5"
+      - "Tidewater logistics call 2026-05: Hal Jensen on dock access, elevator limits, and WA tax on the quote"
+  - batch_id: sales-proposal-b1
+    domain: sales-crm
+    doc_type: proposal
+    count: 3
+    length_words: {min: 300, max: 500}
+    in_world_date_range: {start: "2024-09-01", end: "2025-07-31"}
+    topic_seeds:
+      - "Summit Physio proposal 2024-10: 8x LS-DSK-001-48 at 549.00 + 8x LS-CHR-001-BLK at 389.00 + 8x LS-ACC-001 at 69.00 = 8056.00, list pricing, Oregon no tax"
+      - "Harborview add-on proposal 2024-11: 6x LS-ARM-001-DBL at 189.00 = 1134.00 for the model shop, list, quote valid 30 days"
+      - "Petrel Analytics proposal 2025-07: 15x LS-BDL-001 at 899.00 = 13485.00, list (15 units, below volume minimum), drop-ship freight quoted per address"
+  - batch_id: sales-proposal-b2
+    domain: sales-crm
+    doc_type: proposal
+    count: 3
+    length_words: {min: 300, max: 500}
+    in_world_date_range: {start: "2026-01-15", end: "2026-05-31"}
+    topic_seeds:
+      - "Bluebird proposal 2026-01: 9x LS-BDL-002 at 1149.00 = 10341.00 plus 6x LS-ACC-001 at 69.00 = 414.00, total 10755.00, list (15 units, below the volume minimum), Oregon no tax; matches the closed-won configuration in the PW-bluebird-9seat email thread"
+      - "Juniper floor-1 pilot proposal 2026-03: 18x LS-BDL-002 at 1149.00 = 20682.00, list (18 units, below the volume minimum), invoiced on delivery per floor"
+      - "Tidewater proposal 2026-05: 14x LS-BDL-002 at 1149.00 = 16086.00 merchandise (14 units, below the volume minimum), WA tax 6.5% = 1045.59, total 17131.59 plus freight at carrier cost; matches the PW-tidewater-14seat exemplar in doc-templates/proposal.md"
+  - batch_id: sales-onepager-b1
+    domain: sales-crm
+    doc_type: pricing-one-pager
+    count: 2
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2025-02-01", end: "2025-06-30"}
+    topic_seeds:
+      - "Bundle pricing one-pager 2025-02: Fledgling 899.00, Canopy 1099.00, Roost 1449.00, component lists and per-bundle savings vs itemized list; no volume tiers"
+      - "B2B freight and delivery one-pager 2025-05: palletized LTL at carrier cost per site, showroom pickup free, drop-ship parcel option; no discount content"
+  - batch_id: sales-objection-b1
+    domain: sales-crm
+    doc_type: objection-note
+    count: 5
+    length_words: {min: 130, max: 250}
+    in_world_date_range: {start: "2025-10-01", end: "2026-05-31"}
+    topic_seeds:
+      - "Juniper objection 2025-10: no leasing option; Dana asks why Larkstead sells only outright; counter logged (total cost at year 3)"
+      - "Foxglove objection 2025-11: 3-5 day transit vs ErgoNest 2-day western US shipping; counter: staged delivery scheduling"
+      - "Kestrel objection 2026-01: ErgoNest lease is cheaper per month; counter: ownership plus parts shelf at year 5"
+      - "Beacon objection 2026-02: MSA liability cap language too low for a law firm; escalated to Colefield & Tran for revised language"
+      - "Tidewater objection 2026-05: freight line on the 14-seat quote feels high; counter: carrier-cost passthrough with invoice transparency"
+  - batch_id: sales-competitor-b1
+    domain: sales-crm
+    doc_type: competitor-note
+    count: 4
+    length_words: {min: 180, max: 320}
+    in_world_date_range: {start: "2024-08-01", end: "2025-12-15"}
+    topic_seeds:
+      - "ErgoNest return-practice note 2024-08: 14-day window and restocking practices per two switcher leads; positioning angle is the parts shelf (no Larkstead window numbers quoted)"
+      - "ErgoNest chair range note 2024-11: 9 chair models vs the single Rowan platform; argument for one well-supported platform with replacement parts"
+      - "ErgoNest support intel 2025-04: switcher lead reports outsourced support with slow escalation; two anecdotes logged"
+      - "ErgoNest leasing program teardown 2025-12: per-seat lease launched late 2025, terms observed from the Kestrel offer, end-of-lease ownership gap"
+  - batch_id: sales-qbr-b1
+    domain: sales-crm
+    doc_type: segment-qbr-analysis
+    count: 4
+    length_words: {min: 400, max: 700}
+    in_world_date_range: {start: "2024-12-01", end: "2025-08-31"}
+    topic_seeds:
+      - "2024-H2 pipeline review: Tom's first six months; Harborview and Summit closed-won; pipeline count by stage, no discount arithmetic"
+      - "DTC segment mix analysis 2025-02: wfh-professional is the largest repeat segment; accessibility segment smallest but highest satisfaction"
+      - "Bundle performance review 2025-04: Fledgling vs Canopy unit sales since the 2024-07-01 launch; Canopy leads on B2B orders"
+      - "Accessory attach-rate analysis 2025-05: Sparrow kit attaches to 6 in 10 desk orders; Magpie tray attach rising since the cable guide published"
+  - batch_id: sales-qbr-b2
+    domain: sales-crm
+    doc_type: segment-qbr-analysis
+    count: 4
+    length_words: {min: 400, max: 700}
+    in_world_date_range: {start: "2025-10-01", end: "2026-06-15"}
+    topic_seeds:
+      - "Q3-2025 QBR: B2B nearing 30% of revenue; Petrel closed-won; Juniper and Foxglove open; healthcare segment growing"
+      - "Q1-2026 QBR: B2B reaches 35% of revenue; Bluebird closed-won; Beacon and Nordlicht in negotiation; churn-risk list has two accounts"
+      - "Showroom-sourced pipeline analysis 2026-03: walk-in-to-opportunity conversion since 2024; Kestrel as the flagship example"
+      - "Repeat-purchase cohort analysis 2026-05: the 12-name repeat B2C roster by first-order year, average reorder gap, accessory-led reorders"
+  - batch_id: sales-email-b1
+    domain: sales-crm
+    doc_type: email-thread
+    count: 10
+    length_words: {min: 150, max: 400}
+    in_world_date_range: {start: "2024-07-01", end: "2025-09-30"}
+    topic_seeds:
+      - "Tom to Mara weekly pipeline email 2024-07, first month in role; under 120 words, closes fair enough?"
+      - "Tom and Elena Brandt thread 2024-09: Harborview delivery scheduling across two studio floors"
+      - "Tom and Omar Haddad thread 2025-01: quarterly footrest reorder confirmation with order number"
+      - "Sofia and Tom thread 2025-02: case-study candidate shortlist for the Squall campaign; Sofia asks for the metric first"
+      - "Tom and Priti Shah kickoff thread 2025-03: Stonebridge delivery day and floor protection plan"
+      - "Tom to Mara pipeline coverage email 2025-06: open opportunities by stage, one risk flag"
+      - "Yuki introduction email to owned accounts 2025-08: formal register, numbered next steps, absolute dates"
+      - "Yuki and Sanjay Iyer thread 2025-08: collecting 15 drop-ship addresses, format requirements, cutoff date"
+      - "Tom and Dana Whitcombe thread 2025-09: tour follow-up with floor-plan measurements attached"
+      - "Yuki and Omar Haddad thread 2025-09: Q3 reorder confirmed in writing within the hour of the call"
+  - batch_id: sales-email-b2
+    domain: sales-crm
+    doc_type: email-thread
+    count: 10
+    length_words: {min: 150, max: 400}
+    in_world_date_range: {start: "2025-10-01", end: "2026-06-15"}
+    topic_seeds:
+      - "Yuki and Ruth Amadi thread 2025-10: discovery follow-up, treatment-room measurements requested"
+      - "Tom and Mia Serrano thread 2025-11: renewal check-in, no pricing figures, asks what would make the decision easy"
+      - "Yuki and Grace Liu thread 2025-12: showroom visit recap with the three chairs Grace's team tried"
+      - "Tom to sales internal 2026-01: heads-up on the 2026-01-15 list-price changes; quotes issued before the date honor old list"
+      - "Yuki and Marcus Hale thread 2026-01: document checklist for Beacon's procurement (W-9, insurance certificate, MSA draft)"
+      - "Sofia to Tom 2026-03: Chinook campaign B2B lead handoff process; subject line under 6 words"
+      - "Yuki and Sam Ortiz thread 2026-03: post-rollout check-in on the four clinics; satisfaction notes, no warranty content"
+      - "Yuki and Elena Brandt thread 2026-04: expansion timing against the July onboarding class"
+      - "Tom and Hal Jensen thread 2026-05: freight quote for Vancouver WA, dock and elevator constraints"
+      - "Tom to Mara quarter-close pipeline email 2026-06: closed-won list, two negotiation-stage risks, one pointed metric"
+  - batch_id: sales-casestudy-b1
+    domain: sales-crm
+    doc_type: case-study
+    count: 3
+    length_words: {min: 350, max: 550}
+    in_world_date_range: {start: "2025-01-15", end: "2025-11-30"}
+    topic_seeds:
+      - "Harborview Architects case study 2025-01: 22 seats, model-shop dual arms, quote from Elena Brandt on desk stability; no pricing"
+      - "Summit Physio case study 2025-06: treatment-room ergonomics, quarterly footrest reorders as the loyalty proof point; no pricing"
+      - "Petrel Analytics case study 2025-11: 15 remote seats drop-shipped to home addresses, one order per seat; quote from Sanjay Iyer; no pricing"
+
+  # ---------------- operations ----------------
+  - batch_id: ops-sop-b1
+    domain: operations
+    doc_type: sop
+    count: 4
+    length_words: {min: 300, max: 600}
+    in_world_date_range: {start: "2024-01-20", end: "2024-09-30"}
+    topic_seeds:
+      - "Inbound receiving inspection SOP: dock check, carton counts against the vendor invoice, damage photography, Ledgerly receipt entry"
+      - "Carton damage claim SOP: photo evidence standard, carrier claim window, replacement-before-resolution rule"
+      - "Showroom pickup handoff SOP: order staging, ID check, 7-day hold, unclaimed-order return to stock"
+      - "Pallet build and wrap SOP: layer patterns by weight class, wrap turns, label placement for LTL"
+  - batch_id: ops-sop-b2
+    domain: operations
+    doc_type: sop
+    count: 4
+    length_words: {min: 300, max: 600}
+    in_world_date_range: {start: "2024-10-01", end: "2025-05-31"}
+    topic_seeds:
+      - "Inventory cycle count SOP: weekly A-item counts, monthly full-shelf counts, variance thresholds requiring recount"
+      - "Bundle kitting work order SOP: component pull lists for LS-BDL-001/002/003, ParcelPoint 6.00 kit fee booking"
+      - "Desk QC pre-ship SOP: motor run test, frame torque spot check, control box error scan before cartoning"
+      - "Production lot number assignment SOP: LOT-YYYY-NN grammar, assignment at receipt, lot tags on shelf locations"
+  - batch_id: ops-sop-b3
+    domain: operations
+    doc_type: sop
+    count: 4
+    length_words: {min: 300, max: 600}
+    in_world_date_range: {start: "2025-06-01", end: "2025-12-31"}
+    topic_seeds:
+      - "Returns receiving and restock grading SOP: A/B/C grade criteria, photo record, scrap booking at landed cost (no return-window terms)"
+      - "Carrier claim filing SOP: claim forms per carrier, evidence package, Ledgerly recovery booking"
+      - "Vendor onboarding SOP: W-9 or foreign equivalent, invoice-code assignment for the INV grammar, payment-terms setup in Ledgerly"
+      - "Backorder communication SOP: customer notice at day 2, revised-date rule, escalation to Dmitri at day 7"
+  - batch_id: ops-sop-b4
+    domain: operations
+    doc_type: sop
+    count: 4
+    length_words: {min: 300, max: 600}
+    in_world_date_range: {start: "2026-01-20", end: "2026-05-31"}
+    topic_seeds:
+      - "Oversized-freight booking SOP: when LTL beats parcel on heavy cartons, quote collection, Cascadia Freight booking steps"
+      - "OTA release checklist SOP (2026-03): hardware-revision test matrix including PCB rev C and rev D, staged rollout gates, rollback trigger criteria"
+      - "End-of-quarter inventory reconciliation SOP: ParcelPoint system counts vs Ledgerly, variance investigation ladder"
+      - "Warehouse visitor and contractor safety SOP: dock zones, high-vis rule, forklift right-of-way"
+  - batch_id: ops-checklist-b1
+    domain: operations
+    doc_type: onboarding-checklist
+    count: 4
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2024-06-01", end: "2025-10-31"}
+    topic_seeds:
+      - "New support agent onboarding checklist: Helprise seat, macro library walkthrough, ParcelPoint tracking access, shadow week with Priya"
+      - "New warehouse temp onboarding checklist: safety briefing, scanner login, pick-path training, Hank sign-off"
+      - "B2B account onboarding checklist template (2024-09): Pipewell record, delivery contacts, dock survey, first check-in call date"
+      - "New vendor setup checklist: Ledgerly vendor record, invoice-code assignment, payment terms, insurance certificate on file"
+  - batch_id: ops-project-b1
+    domain: operations
+    doc_type: project
+    count: 4
+    length_words: {min: 400, max: 850}
+    in_world_date_range: {start: "2024-01-15", end: "2024-11-15"}
+    topic_seeds:
+      - "Sage mat colorway launch project: Verdant sampling, color approval, 2024-02-19 launch of LS-MAT-001-SGE"
+      - "Showroom refresh project 2024-05: new demo stations, bundle displays, pickup counter rework"
+      - "Replacement-parts catalog buildout project: selecting the parts shelf SKUs, 2024-08-19 launch of LS-ACC-010 and LS-ACC-011"
+      - "Vireo launch readiness project 2024-08 to 2024-10: Meridian PCB sourcing, Bitgrove firmware v1.0 acceptance, 2024-10-15 launch"
+  - batch_id: ops-project-b2
+    domain: operations
+    doc_type: project
+    count: 4
+    length_words: {min: 400, max: 850}
+    in_world_date_range: {start: "2024-09-01", end: "2025-05-15"}
+    topic_seeds:
+      - "Hazel under-desk drawer launch project: Ostrava tooling, drawer rail QC plan, 2024-11-11 launch of LS-ACC-007"
+      - "Roost executive bundle project: component selection, kitting flow with ParcelPoint, 2025-01-20 launch of LS-BDL-003"
+      - "Desk carton redesign project with GreenCrate (2025-02 to 2025-04): molded pulp corners, drop-test results, damage-claim reduction target"
+      - "Shopstack checkout tax fix project (Ray Lindqvist, 2024-10): WA rounding correction, regression test plan, Tuesday/Thursday work cadence"
+  - batch_id: ops-bugqa-b1
+    domain: operations
+    doc_type: bug-qa-report
+    count: 4
+    length_words: {min: 250, max: 450}
+    in_world_date_range: {start: "2024-06-01", end: "2025-02-28"}
+    topic_seeds:
+      - "Shopstack cart rounds WA tax down a cent on multi-item orders (reported 2024-09, after the 2024-09-01 Wren price change); Ray reproduces with a 79.00 stand plus 18.00 hook: 97.00 x 0.065 = 6.305, cart shows 6.30 instead of 6.31; fix ships with the 2024-10 checkout tax project"
+      - "Ledgerly daily export drops refund lines when a refund and sale share an order number; manual journal workaround documented"
+      - "QA: Wren stand hinge friction varies across the November 2024 Ostrava batch; 40-unit sample check, within tolerance, monitoring note"
+      - "Mailloft unsubscribe events not syncing back to Shopstack customer records; 48-hour lag confirmed, vendor case opened"
+  - batch_id: ops-bugqa-b2
+    domain: operations
+    doc_type: bug-qa-report
+    count: 4
+    length_words: {min: 250, max: 450}
+    in_world_date_range: {start: "2025-02-01", end: "2025-10-31"}
+    topic_seeds:
+      - "Shopstack B2B form drops address_line2 on submissions with long company names; Pipewell records missing suite numbers; Ray patches the field map"
+      - "Vireo companion app crashes on the onboarding screen on one phone OS version (2025-03); Bitgrove hotfix in app release, no firmware change"
+      - "Helprise auto-tagging misreads #LS order numbers in subject lines as phone numbers; tagging rule regex fixed"
+      - "ParcelPoint sandbox webhook retries create duplicate test orders during integration testing (2025-10); idempotency key added, noted for cutover"
+  - batch_id: ops-bugqa-b3
+    domain: operations
+    doc_type: bug-qa-report
+    count: 3
+    length_words: {min: 250, max: 450}
+    in_world_date_range: {start: "2025-11-01", end: "2026-04-30"}
+    topic_seeds:
+      - "QA: incoming Rowan armrest pads (Verdant) show stitching tension variance on one 2025-11 batch; 60-unit sample passes, watch flag set"
+      - "Shopstack price-display cache served pre-change prices for 2 hours on the morning of 2026-01-15; orders honored as displayed, 3 orders affected"
+      - "QA: Hazel drawer rail dimension drift on a 2026-04 Ostrava batch; 12 of 300 units out of spec, returned to vendor, no field impact"
+  - batch_id: ops-intguide-b1
+    domain: operations
+    doc_type: integration-guide
+    count: 4
+    length_words: {min: 500, max: 900}
+    in_world_date_range: {start: "2024-05-01", end: "2025-09-30"}
+    topic_seeds:
+      - "Shopstack to Ledgerly daily order export guide: field map, tax lines, refund handling, reconciliation report"
+      - "Helprise to Shopstack order-lookup sidebar guide: order search by #LS number, data shown to agents, permissions"
+      - "Pipewell lead capture from the Shopstack B2B form: field mapping, opportunity naming per the PW-slug grammar, owner assignment rules"
+      - "Mailloft abandoned-cart event guide: Shopstack webhook setup, suppression rules for B2B accounts, send-delay configuration"
+  - batch_id: ops-intguide-b2
+    domain: operations
+    doc_type: integration-guide
+    count: 3
+    length_words: {min: 500, max: 900}
+    in_world_date_range: {start: "2026-02-01", end: "2026-05-15"}
+    topic_seeds:
+      - "ParcelPoint tracking webhooks into Helprise ticket updates (2026-02): event types, ticket-matching by order number, agent notification rules"
+      - "Ledgerly import of ParcelPoint monthly invoices: line-item categories, kitting-fee coding, dispute-hold flag handling"
+      - "Vireo OTA telemetry into the ops dashboard (2026-04): Bitgrove API endpoints, firmware-version counts by hardware revision, alert thresholds"
+  - batch_id: ops-process-b1
+    domain: operations
+    doc_type: process
+    count: 4
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2024-02-01", end: "2024-12-31"}
+    topic_seeds:
+      - "Month-end close process (Ana Petrova): invoice cutoff, accrual list, Ledgerly lock date, exact-cents reconciliation"
+      - "Weekly support queue triage process (Priya Raman): aging review, tag hygiene, escalation criteria"
+      - "Purchase order issuance process: reorder points by SKU, Dmitri approval, vendor confirmation window"
+      - "Campaign launch process (Sofia Grieg): weather-name assignment, list selection in Mailloft, support heads-up 3 days before send"
+  - batch_id: ops-process-b2
+    domain: operations
+    doc_type: process
+    count: 3
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2025-01-15", end: "2025-11-30"}
+    topic_seeds:
+      - "Showroom demo unit rotation process: quarterly swap, demo-unit grading, sale-as-open-box rules"
+      - "Contractor work-request process: ticket queue for Ray Lindqvist, Tuesday/Thursday scheduling, acceptance criteria per request"
+      - "Friday defect-count reporting process (from 2025-08): per-SKU defect tallies from Helprise tags to Dmitri, trend thresholds"
+  - batch_id: ops-process-b3
+    domain: operations
+    doc_type: process
+    count: 3
+    length_words: {min: 250, max: 500}
+    in_world_date_range: {start: "2026-01-20", end: "2026-05-31"}
+    topic_seeds:
+      - "Helprise ticket tagging taxonomy: product tags, incident tags, B2B account tags, retro-tagging rules"
+      - "List-price change rollout process: Shopstack price table update, quote-honoring rule for open proposals, vendor cost review trigger"
+      - "B2B freight quoting process: carrier cost passthrough, quote validity, dock survey requirement for first deliveries"
+  - batch_id: ops-postmortem-b1
+    domain: operations
+    doc_type: postmortem
+    count: 3
+    length_words: {min: 500, max: 900}
+    in_world_date_range: {start: "2024-08-15", end: "2025-04-15"}
+    topic_seeds:
+      - "Mailloft segment misfire postmortem (2024-08): Drizzle campaign sent to B2B contacts, 4 unsubscribes including one active opportunity, list-hygiene fixes"
+      - "Holiday shipping backlog postmortem (December 2024): Portland backroom hit capacity, 28 orders shipped late, capacity math that later motivates the 3PL expansion"
+      - "Shopstack checkout outage postmortem (2025-03): 90-minute payment processor timeout on a Saturday, 17 abandoned checkouts, retry-notice fix"
+  - batch_id: ops-reclog-b1
+    domain: operations
+    doc_type: receiving-log
+    count: 7
+    length_words: {min: 80, max: 160}
+    in_world_date_range: {start: "2024-03-01", end: "2026-05-31"}
+    topic_seeds:
+      - "Ostrava desk-frame container received 2024-03 as LOT-2024-07: 180 frame sets, 2 cartons dented, contents fine; hank logs all lowercase"
+      - "Verdant mat lot LOT-2024-19 received 2024-08: 900 units across three colors, clean receipt, counts match INV-VRD-2024-072"
+      - "Meridian PCB rev B lot LOT-2025-06 received 2025-02: 400 boards plus 250 power adapters, one carton short, vendor notified"
+      - "GreenCrate carton stock receipt 2025-05: first order of redesigned desk cartons, 3000 units, spot-check of pulp inserts passes"
+      - "Ostrava chair-base lot LOT-2025-40 received 2025-10: 350 bases, 6 with scuffed powder coat set aside for showroom use"
+      - "Meridian rev D first-article receipt LOT-2026-09 (2026-03): 200 PCBs, incoming inspection against the rev D qualification sheet"
+      - "Ostrava mixed replacement-parts receipt LOT-2026-15 (2026-05): caster sets, leveling feet, clamp kits; counts by half-carton"
+  - batch_id: ops-relnote-b1
+    domain: operations
+    doc_type: release-meeting-note
+    count: 9
+    length_words: {min: 150, max: 300}
+    in_world_date_range: {start: "2024-10-15", end: "2026-05-15"}
+    topic_seeds:
+      - "Vireo firmware v1.0 launch release note (2024-10-15): shipping firmware scope, OTA channel setup with Bitgrove"
+      - "Monthly ops review notes 2024-11: pick-error rate, two carrier claims, holiday staffing plan"
+      - "All-hands notes January 2025: 2024 revenue 1,134,900; headcount 9 (8 employees plus Ray Lindqvist on contract, the same contractor-inclusive count the 2025-09 org chart memo uses); priorities for the year"
+      - "Shopstack storefront redesign release note 2025-04: new bundle pages, faster checkout, no pricing changes"
+      - "Ops review notes 2025-05: desk carton damage claims down after the GreenCrate redesign; cycle-count variances small"
+      - "Vireo firmware v1.1 release note (2025-06): sleep schedule feature added, scene improvements, staged OTA rollout"
+      - "Warehouse safety meeting note 2025-09: near-miss at the dock, forklift rule reminder, high-vis restock"
+      - "All-hands notes January 2026: 2025 revenue 2,417,800; B2B share about a third; Reno fulfillment now live"
+      - "Vireo companion app v2.0 release note 2026-05: redesigned scheduling screen, firmware-version display, no hardware changes"
+
+  # ---------------- internal-admin ----------------
+  - batch_id: admin-hr-b1
+    domain: internal-admin
+    doc_type: hr-policy
+    count: 4
+    length_words: {min: 300, max: 550}
+    in_world_date_range: {start: "2024-01-15", end: "2024-09-30"}
+    topic_seeds:
+      - "PTO policy v1 (effective 2024-01-15): 15 days PTO plus 8 fixed holidays, accrual from day one, request lead times"
+      - "Remote and hybrid work policy: support may work remote 3 days a week, warehouse on site, core hours"
+      - "Contractor engagement policy: scoped statements of work, invoicing cadence, the two-days-per-week pattern used with Ray Lindqvist"
+      - "Timekeeping and payroll calendar policy: semi-monthly runs, hourly vs salaried, correction window"
+  - batch_id: admin-hr-b2
+    domain: internal-admin
+    doc_type: hr-policy
+    count: 4
+    length_words: {min: 300, max: 550}
+    in_world_date_range: {start: "2024-10-01", end: "2025-08-31"}
+    topic_seeds:
+      - "Employee product purchase policy: 30% off list for personal use, two large items per year, no resale"
+      - "Anti-harassment and complaint-path policy: reporting to Mara or Ana, external counsel option via Colefield & Tran"
+      - "Hiring and referral policy: referral bonus 500.00 paid after 90 days, interview panel makeup"
+      - "Workplace safety policy: warehouse visit rules for office staff, incident reporting within 24 hours"
+  - batch_id: admin-hr-b3
+    domain: internal-admin
+    doc_type: hr-policy
+    count: 4
+    length_words: {min: 300, max: 550}
+    in_world_date_range: {start: "2025-09-01", end: "2026-04-30"}
+    topic_seeds:
+      - "Parental leave policy: 8 weeks paid for all staff past one year of tenure, phase-back schedule"
+      - "Performance review cycle policy: annual January reviews, mid-year check-in, no forced ranking"
+      - "PTO policy v2 (effective 2026-01-01): 18 days PTO plus 9 fixed holidays; supersedes the 2024-01-15 policy; carryover cap"
+      - "Home-office equipment stipend policy (2026): one-time 400.00 stipend for remote staff, receipts to Ana"
+  - batch_id: admin-finrule-b1
+    domain: internal-admin
+    doc_type: finance-rule
+    count: 4
+    length_words: {min: 250, max: 450}
+    in_world_date_range: {start: "2024-02-01", end: "2025-03-31"}
+    topic_seeds:
+      - "AP invoice intake rule: three-way match of PO, receiving log, and invoice before Ledgerly entry; exceptions to Ana"
+      - "Sales tax collection rule: Oregon 0%, Washington 6.5%, California 7.25%, other US states 5%; Canadian orders ship tax-uncollected"
+      - "Vendor payment run rule: Net-30 and Net-45 batches processed Fridays; early-pay only with a discount of 2% or better"
+      - "Corporate card rule: named cardholders, receipt within 5 business days, category codes matching Ledgerly"
+  - batch_id: admin-finrule-b2
+    domain: internal-admin
+    doc_type: finance-rule
+    count: 4
+    length_words: {min: 250, max: 450}
+    in_world_date_range: {start: "2025-04-01", end: "2026-03-31"}
+    topic_seeds:
+      - "Refund accounting rule: refunds book as contra-revenue in the order's original period when open, else current period; exact cents"
+      - "Revenue recognition rule for staged B2B deliveries: recognize per delivery wave at ship confirmation, deposits as liability"
+      - "Capitalization threshold rule: assets at or over 2500.00 capitalized, 3-year straight line for equipment"
+      - "Petty cash and showroom till rule: 200.00 float, weekly count by Ana, over/short log"
+  - batch_id: admin-contract-b1
+    domain: internal-admin
+    doc_type: vendor-contract
+    count: 3
+    length_words: {min: 300, max: 700}
+    in_world_date_range: {start: "2024-02-01", end: "2025-02-28"}
+    topic_seeds:
+      - "Meridian Components supply agreement (2024-02-01): PCB revision control clause, Net-45, first-article inspection rights"
+      - "Colefield & Tran engagement letter (2024-06): retainer scope covering the B2B MSA template, employment matters, hourly rates"
+      - "Cascadia Freight rate schedule (2025-02): drayage per container, LTL per pallet-mile bands, fuel surcharge formula"
+  - batch_id: admin-contract-b2
+    domain: internal-admin
+    doc_type: vendor-contract
+    count: 3
+    length_words: {min: 300, max: 700}
+    in_world_date_range: {start: "2025-01-01", end: "2025-07-31"}
+    topic_seeds:
+      - "GreenCrate supply agreement renewal (2025-01): recycled-content minimums, carton redesign engineering support, pricing per thousand"
+      - "Lovejoy lease amendment (2025-06): third-year 3% escalator applied, monthly rent restated with cents, term through 2028-06"
+      - "Nehalem Mutual policy renewal (2025-07): general liability limits, the product liability rider added 2024-10, annual premium and deductibles"
+  - batch_id: admin-invoice-b1
+    domain: internal-admin
+    doc_type: invoice
+    count: 15
+    length_words: {min: 120, max: 250}
+    in_world_date_range: {start: "2024-03-01", end: "2026-04-15"}
+    topic_seeds:
+      - "INV-OSM-2024-031 (Ostrava, 2024-03): 180 desk frame sets x 92.00 = 16560.00 plus 40 chair bases x 61.50 = 2460.00, total 19020.00, Net-45"
+      - "INV-GCP-2024-058 (GreenCrate, 2024-06): 3000 cartons x 2.15 = 6450.00 plus 1500 pulp insert sets x 1.20 = 1800.00, total 8250.00, Net-30"
+      - "INV-VRD-2024-072 (Verdant, 2024-08): 900 Alder mats x 12.40 = 11160.00, Net-45, matches LOT-2024-19 receipt"
+      - "INV-BGL-2024-003 (Bitgrove, 2024-10): Vireo firmware v1.0 acceptance milestone, fixed fee 6500.00, Net-30"
+      - "INV-CSF-2025-044 (Cascadia, 2025-04): one container drayage 1850.00 plus two LTL legs at 640.00 each, total 3130.00, Net-30"
+      - "INV-MRC-2025-021 (Meridian, 2025-02): 400 PCB rev B x 18.60 = 7440.00 plus 250 power adapters x 6.80 = 1700.00, total 9140.00, Net-45"
+      - "INV-LPP-2025-007 (Lovejoy, 2025-07): monthly rent 4726.23 for 2140 sq ft, due the 1st, Net-30"
+      - "INV-NMI-2025-002 (Nehalem, 2025-07): annual premium 11400.00 including the product liability rider, Net-30"
+      - "INV-CTL-2025-019 (Colefield & Tran, 2025-05): 6.5 hours MSA template revisions x 310.00 = 2015.00, Net-30"
+      - "INV-PPF-2025-011 (ParcelPoint, 2025-06): pre-cutover scope month: pallet storage 84 x 22.50 = 1890.00, kitting 58 kits x 6.00 = 348.00, heavy outbound passthrough 4212.40, total 6450.40, Net-30"
+      - "INV-BGL-2025-004 (Bitgrove, 2025-06): firmware v1.1 development milestone 5200.00, Net-30"
+      - "INV-OSM-2025-052 (Ostrava, 2025-11): 200 frame sets x 96.60 = 19320.00 with the steel surcharge line item called out, Net-45"
+      - "INV-GCP-2025-104 (GreenCrate, 2025-04): first production run of redesigned desk cartons, 1200 x 2.65 = 3180.00, Net-30"
+      - "INV-CSF-2026-012 (Cascadia, 2026-01): cutover transfer loads, 14 pallets and 96 cartons Portland to Reno, two trucks, total 2480.00, Net-30"
+      - "INV-MRC-2026-008 (Meridian, 2026-03): rev D first-article run, 200 PCBs x 19.40 = 3880.00 plus tooling fee 1500.00, total 5380.00, Net-45"
+  - batch_id: admin-compliance-b1
+    domain: internal-admin
+    doc_type: compliance-note
+    count: 3
+    length_words: {min: 200, max: 400}
+    in_world_date_range: {start: "2024-04-01", end: "2025-06-30"}
+    topic_seeds:
+      - "Furniture stability testing note: third-party lab tip-test results for the desk line, retest cadence after design changes"
+      - "Oregon LLC annual report filing note: registered agent, filing date, fee paid"
+      - "Vireo power adapter electrical safety certification note: independent lab report on the Meridian-supplied adapter, file retention"
+  - batch_id: admin-compliance-b2
+    domain: internal-admin
+    doc_type: compliance-note
+    count: 3
+    length_words: {min: 200, max: 400}
+    in_world_date_range: {start: "2025-07-01", end: "2026-05-31"}
+    topic_seeds:
+      - "Washington sales tax registration review: nexus confirmed from B2B deliveries, remittance calendar set"
+      - "Textile content disclosure note: Verdant material declarations for mats and pads on file, label wording check"
+      - "Customer data retention note: Helprise 24-month retention configured, deletion-request handling verified"
+  - batch_id: admin-memo-b1
+    domain: internal-admin
+    doc_type: memo-org
+    count: 5
+    length_words: {min: 200, max: 400}
+    in_world_date_range: {start: "2024-04-01", end: "2026-02-28"}
+    topic_seeds:
+      - "Showroom hours change memo (2024-04): Saturday hours added, staffing rotation, signed M"
+      - "Building access memo (2025-02): Lovejoy keycard changeover, parking assignments, after-hours rules"
+      - "Headcount memo Q2-2025: Celeste Marin joined support 2025-03-24; account executive role opened for fall"
+      - "Org chart memo (2025-09): 11 staff counting contractor Ray Lindqvist (10 employees), reporting lines under Mara, Yuki added under Tom"
+      - "2026 planning memo from Mara: three priorities in short declaratives, one pointed question about B2B capacity"

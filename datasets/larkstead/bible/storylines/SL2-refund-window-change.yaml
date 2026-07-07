@@ -1,0 +1,249 @@
+# SL2 -- Refund window change. Storyline spec for corpus writers.
+# All facts trace to bible/company.yaml (policies.refund_window, policies.restocking_fee,
+# policies.free_shipping_threshold, policies.shipping_zones, skus, staff, customers.b2c).
+# Ticket and order IDs below are allocated by this file per id_grammars; no other
+# document may mint IDs for this storyline.
+
+storyline: SL2
+slug: refund-window-change
+title: "Refund window change: 30 days to 45 days"
+window:
+  start: "2024-01-01"
+  end: "2026-01-31"
+summary: >-
+  Larkstead publishes its first returns policy on 2024-01-15 with a 30-day
+  window from delivery, and support spends 2024-2025 denying late returns
+  against it, including two escalations that leave customers angry. For the
+  2025 holiday season Mara Voss extends the window to 45 days effective
+  2025-11-03, and on 2026-01-12 the extension becomes permanent as policy v2.
+  The public returns FAQ from January 2024 and two Helprise macros still say
+  30 days and are never corrected, even though the exception memo assigned
+  that update to support. Ana Petrova closes the storyline with a memo pricing
+  the extension at 1655.85 in net incremental refunds over the exception
+  period.
+
+entities:
+  staff:
+    - "Priya Raman"
+    - "Jonah Beck"
+    - "Celeste Marin"
+    - "Mara Voss"
+    - "Ana Petrova"
+  customers:
+    - "Ruben Silva"
+    - "Owen Gallagher"
+    - "Desmond Cole"
+    - "Freya Lindholm"
+  vendors: []
+  skus:
+    - "LS-STD-001"
+    - "LS-CHR-001-GRY"
+    - "LS-LMP-001"
+    - "LS-MAT-001-SGE"
+    - "LS-ACC-004"
+  ids:
+    tickets:
+      - "HD-2024-02311"
+      - "HD-2025-01592"
+      - "HD-2026-00187"
+      - "HD-2026-00214"
+    invoices: []
+    orders:
+      - "#LS20347"
+      - "#LS21015"
+      - "#LS31760"
+      - "#LS31848"
+    lots: []
+    opportunities: []
+
+contradictions:
+  - id: C1
+    stale_doc: sl2-faq-returns
+    current_doc: sl2-policy-returns-v2
+    stale_claim: "You have 30 days from delivery to start a return."
+    current_claim: "Returns are accepted within 45 days of delivery, permanent from 2026-01-12 and in force since 2025-11-03."
+    truth: >-
+      45 days is correct for anything delivered from 2025-11-03 onward. The
+      public FAQ (sl2-faq-returns, written 2024-01-22) and both Helprise
+      macros in sl2-macros-returns-helprise still say 30 days; the update
+      assigned to support in sl2-memo-holiday-exception was never done, and no
+      later document fixes them. Documents dated 2024-01-15 through 2025-11-02
+      that say 30 days are correct for their date.
+
+beats:
+  - beat: 1
+    date: "2024-01-15"
+    event: >-
+      Priya Raman publishes the first written returns policy, then rolls it
+      out to the storefront FAQ and the Helprise macro library over the
+      following weeks.
+    produces:
+      - doc_id: sl2-policy-returns-v1
+        domain: customer-support
+        doc_type: policy
+        in_world_date: "2024-01-15"
+        author: "Priya Raman"
+        required_facts:
+          - "Returns accepted within 30 days of the delivery date."
+          - "Policy effective 2024-01-15."
+          - "10% restocking fee on opened, non-defective returns; defective items exempt."
+          - "Refunds go to the original payment method within 5 business days of warehouse receipt."
+          - "Return requests start by email to support@larkstead.example with the order number."
+        length_words: {min: 300, max: 500}
+      - doc_id: sl2-faq-returns
+        domain: customer-support
+        doc_type: faq
+        in_world_date: "2024-01-22"
+        author: "Priya Raman"
+        required_facts:
+          - "You have 30 days from delivery to start a return."
+          - "Opened, non-defective items carry a 10% restocking fee."
+          - "Email support@larkstead.example with your #LS order number to start."
+          - "Refunds land within 5 business days after the warehouse checks the item in."
+        length_words: {min: 250, max: 450}
+      - doc_id: sl2-macros-returns-helprise
+        domain: customer-support
+        doc_type: sop
+        in_world_date: "2024-02-09"
+        author: "Priya Raman"
+        required_facts:
+          - "Helprise macro RET-01 (standard return): reply text includes 'within 30 days of delivery'."
+          - "Helprise macro RET-02 (past-window denial): reply text includes 'outside our 30-day return window'."
+          - "Agents must confirm the delivery date in ParcelPoint before quoting eligibility."
+          - "Restocking fee line: 10% on opened, non-defective returns."
+        length_words: {min: 150, max: 300}
+
+  - beat: 2
+    date: "2024-06-14"
+    event: >-
+      Ruben Silva asks to return a Wren laptop stand 38 days after delivery.
+      Jonah Beck denies the return under the 30-day policy and the customer
+      pushes back hard before giving up.
+    produces:
+      - doc_id: sl2-ticket-hd-2024-02311
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2024-06-14"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2024-02311, requester Ruben Silva, order #LS20347."
+          - "Order placed 2024-05-02, delivered 2024-05-07: 1x LS-STD-001 at 69.00, shipping 5.95 (US-1 light, under the 75.00 free-shipping threshold), no sales tax (Oregon delivery), order total 74.95."
+          - "Return requested 2024-06-14, 38 days after delivery; denied per the 30-day window effective 2024-01-15."
+          - "Customer reply: he would have shipped it back sooner if the window had been longer, and calls the policy 'tight for a 69 dollar stand'."
+          - "Jonah apologizes at least twice and uses macro RET-02 for the denial."
+        length_words: {min: 250, max: 500}
+
+  - beat: 3
+    date: "2025-04-02"
+    event: >-
+      Owen Gallagher tries to return a fog gray Rowan chair 35 days after
+      delivery. Celeste Marin denies it, quoting the policy with its effective
+      date; the customer threatens to buy from ErgoNest next time and Priya
+      upholds the denial on escalation.
+    produces:
+      - doc_id: sl2-ticket-hd-2025-01592
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-04-02"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2025-01592, requester Owen Gallagher, order #LS21015."
+          - "Order placed 2025-02-20, delivered 2025-02-26: 1x LS-CHR-001-GRY at 389.00, shipping 49.00 (US-1 heavy, zone rate always billed on heavy items), no sales tax (Oregon delivery), order total 438.00."
+          - "Return requested 2025-04-02, 35 days after delivery; denied under the 30-day policy, quoted verbatim with 'effective 2024-01-15' and a link to the policy page."
+          - "Customer says ErgoNest 'would have taken it back' and he will shop there next time."
+          - "Escalated to Priya Raman; denial upheld; internal note flags the second angry past-window case of the policy's life."
+        length_words: {min: 300, max: 550}
+
+  - beat: 4
+    date: "2025-10-27"
+    event: >-
+      Mara Voss announces a holiday-season exception: the return window goes
+      to 45 days for anything delivered from 2025-11-03, to be revisited in
+      January. She assigns the FAQ and macro updates to support; the update
+      never happens.
+    produces:
+      - doc_id: sl2-memo-holiday-exception
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-10-27"
+        author: "Mara Voss"
+        required_facts:
+          - "Return window extended from 30 to 45 days for orders delivered on or after 2025-11-03."
+          - "Framed as a holiday-season exception; decision on making it permanent due in January 2026."
+          - "Restocking fee unchanged: 10% on opened, non-defective returns."
+          - "Action item: support to update the site FAQ and Helprise macros RET-01 and RET-02 before 2025-11-03."
+          - "Memo signed 'M' and closes with one question: 'What does 15 extra days cost us in January?'"
+        length_words: {min: 200, max: 400}
+
+  - beat: 5
+    date: "2026-01-12"
+    event: >-
+      Priya Raman publishes returns policy v2, making the 45-day window
+      permanent. The policy document supersedes the 2024 version; the FAQ and
+      macros are still not touched.
+    produces:
+      - doc_id: sl2-policy-returns-v2
+        domain: customer-support
+        doc_type: policy
+        in_world_date: "2026-01-12"
+        author: "Priya Raman"
+        required_facts:
+          - "Returns accepted within 45 days of the delivery date."
+          - "Effective 2026-01-12 as permanent policy; the 45-day window has been in force since 2025-11-03 under the holiday exception."
+          - "Supersedes the returns policy effective 2024-01-15."
+          - "10% restocking fee on opened, non-defective returns; waived on B2B orders of 10 or more units (per the 2025-06-02 restocking update)."
+          - "Refunds to the original payment method within 5 business days of warehouse receipt."
+        length_words: {min: 300, max: 500}
+
+  - beat: 6
+    date: "2026-01-14"
+    event: >-
+      Two holiday-window returns land after the permanence announcement and
+      both are approved under the 45-day policy. One customer quotes the stale
+      30-day FAQ expecting a denial; Jonah corrects her and flags the FAQ
+      internally, but no fix follows.
+    produces:
+      - doc_id: sl2-ticket-hd-2026-00187
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2026-01-14"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2026-00187, requester Desmond Cole, order #LS31760."
+          - "Order placed 2025-11-28, delivered 2025-12-03: 1x LS-LMP-001 at 149.00, free shipping (light item over the 75.00 threshold), no sales tax (Oregon delivery), order total 149.00."
+          - "Gift return requested 2026-01-14, 42 days after delivery; approved under the 45-day window, quoted with 'effective 2026-01-12'."
+          - "Unit unopened, so no restocking fee; full 149.00 refund to the original payment method."
+          - "Celeste links the policy page and asks for the order number in her first reply."
+        length_words: {min: 250, max: 500}
+      - doc_id: sl2-ticket-hd-2026-00214
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2026-01-19"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00214, requester Freya Lindholm, order #LS31848."
+          - "Order placed 2025-12-06, delivered 2025-12-11: 1x LS-MAT-001-SGE at 59.00 and 1x LS-ACC-004 at 19.00, subtotal 78.00, free shipping (light items over the 75.00 threshold), no sales tax (Oregon delivery), order total 78.00."
+          - "Customer read the returns FAQ saying 30 days and opened the ticket expecting a denial at day 39; Jonah confirms the window is 45 days."
+          - "Return of the opened LS-MAT-001-SGE approved: refund 53.10 after a 5.90 restocking fee (10% of 59.00); the LS-ACC-004 is kept."
+          - "Jonah's internal note: 'the faq still says 30 tho, someone should fix that' -- no follow-up ticket is ever filed."
+        length_words: {min: 300, max: 550}
+
+  - beat: 7
+    date: "2026-01-26"
+    event: >-
+      Ana Petrova sends the finance-impact memo Mara asked for, pricing the
+      exception period and backing the decision to keep 45 days.
+    produces:
+      - doc_id: sl2-memo-finance-impact
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2026-01-26"
+        author: "Ana Petrova"
+        required_facts:
+          - "Exception period analyzed: orders delivered 2025-11-03 through 2026-01-11; 1286 orders delivered, 41 returns opened against them."
+          - "Return rate 3.19% (41 of 1286) versus 2.49% (32 of 1286) had the 30-day window held; 9 returns arrived in the day-31-to-45 band the old policy would have refused."
+          - "Merchandise value of the 9 incremental returns: 1742.55; restocking fees withheld 86.70 (10% of 867.00 across 3 opened, non-defective units); net incremental refunds 1655.85."
+          - "If the 45-day window had applied earlier, then HD-2024-02311 (38 days) and HD-2025-01592 (35 days) would both have been approved."
+          - "One admitted gap, unusual for Ana: outbound return freight is not netted out -- 'call it roughly 1650 all-in; I did not pull the freight lines for this'."
+          - "Conclusion: 1655.85 over a peak quarter is below one escalated chargeback dispute in handling cost; no objection to permanence."
+        length_words: {min: 250, max: 450}

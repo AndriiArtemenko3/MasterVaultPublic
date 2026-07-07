@@ -1,0 +1,353 @@
+# SL3 -- Cobalt Dental 40-seat B2B deal. Storyline spec for corpus writers.
+# All facts trace to bible/company.yaml (customers.b2b Cobalt Dental Group,
+# policies.b2b_discount_tiers, policies.discount_exceptions, policies.expense_policy,
+# skus, staff, vendors, competitor). Order and lot IDs below are allocated by this
+# file per id_grammars; no other document may mint IDs for this storyline.
+# Anchor dates fixed by company.yaml: CEO sign-off 2025-11-10, closed-won 2025-11-14,
+# SL3 exception code effective 2025-10-06, tier change 2025-12-08, rollout Dec 2025
+# through Feb 2026. Yuki Tanaka was hired 2025-08-11; she appears in no document
+# dated earlier.
+
+storyline: SL3
+slug: cobalt-dental-deal
+title: "Cobalt Dental 40-seat B2B deal"
+window:
+  start: "2024-06-10"
+  end: "2026-03-10"
+summary: >-
+  Cobalt Dental Group, a four-clinic Oregon dental operator with 40 seats,
+  comes in through the Shopstack B2B form in June 2025 and closes on
+  2025-11-14 after a five-month negotiation against an ErgoNest counter-offer
+  of 37920.00. Proposal v1 (itemized desks, chairs, arms, and cable kits at
+  the 15% tier, net 40868.00) fails Sam Ortiz's 38000.00 ceiling, so Tom
+  Aldridge and Yuki Tanaka restructure on 40x LS-BDL-002 with a one-time 3%
+  SL3 exception worth 1318.80, which crosses the 1000.00 CEO threshold and
+  needs Mara Voss's sign-off on 2025-11-10. Proposal v2 lands at 36345.20
+  including two Vireo lamps at list, wins, and rolls out across the four
+  clinics from 2025-12-10 to 2026-02-18. The storyline seeds contradiction
+  C3: Tom's 2024-06 pricing one-pager (15% at 25+ units) stays in circulation
+  after Ana Petrova's 2025-12-08 tier sheet cuts the tier to 12% at 30+
+  units.
+
+entities:
+  staff:
+    - "Tom Aldridge"
+    - "Yuki Tanaka"
+    - "Mara Voss"
+    - "Ana Petrova"
+    - "Dmitri Okafor"
+    - "Sofia Grieg"
+  customers:
+    - "Cobalt Dental Group (contact: Sam Ortiz, office manager)"
+  vendors:
+    - "VEN-02 Ostrava Metalworks"
+    - "VEN-04 ParcelPoint Fulfillment"
+    - "VEN-07 Meridian Components"
+  skus:
+    - "LS-DSK-001-60"
+    - "LS-CHR-001-BLK"
+    - "LS-ARM-001-SGL"
+    - "LS-ACC-002"
+    - "LS-BDL-002"
+    - "LS-LMP-001"
+    - "LS-ACC-008"
+    - "LS-ACC-011"
+  ids:
+    tickets: []
+    invoices: []
+    orders:
+      - "#LS31695"
+    lots:
+      - "LOT-2025-31"
+      - "LOT-2025-44"
+      - "LOT-2025-46"
+    opportunities:
+      - "PW-cobalt-dental-40seat"
+
+contradictions:
+  - id: C3
+    stale_doc: sl3-onepager-b2b-pricing
+    current_doc: sl3-policy-b2b-tiers-v2
+    stale_claim: "B2B volume discount is 15% off list at 25 or more units."
+    current_claim: "B2B volume discount is 12% off list at 30 or more units, effective 2025-12-08."
+    truth: >-
+      The 15% at 25+ tier governed 2024-06-01 through 2025-12-07; from
+      2025-12-08 the tier is 12% at 30+ units. Every SL3 sales document citing
+      15% is dated before the change and is correct for its date, and the
+      Cobalt deal (closed 2025-11-14) keeps its signed pricing. The tier sheet
+      sl3-policy-b2b-tiers-v2 told sales to pull the 2024-06 one-pager from
+      the shared drive; that never happened, the one-pager stays in the
+      corpus uncorrected, and company.yaml records Tom quoting 15% from it on
+      a 2026-01 Nordlicht Games call that had to be walked back.
+
+beats:
+  - beat: 1
+    date: "2024-06-10"
+    event: >-
+      Tom Aldridge, one week into the new B2B sales role, writes the pricing
+      one-pager the pipeline will quote from for the next eighteen months.
+    produces:
+      - doc_id: sl3-onepager-b2b-pricing
+        domain: sales-crm
+        doc_type: policy
+        in_world_date: "2024-06-10"
+        author: "Tom Aldridge"
+        required_facts:
+          - "B2B volume discount: 15% off list at 25 or more units, effective 2024-06-01."
+          - "Units count across all lines on one order; a bundle counts as one unit."
+          - "Discounts beyond the tier need approval per the expense-policy dollar thresholds; CEO sign-off at 1000.00 and above."
+          - "Quotes hold for 30 days from the proposal date."
+        length_words: {min: 150, max: 300}
+
+  - beat: 2
+    date: "2025-06-24"
+    event: >-
+      Sam Ortiz, office manager at Cobalt Dental Group, submits the Shopstack
+      B2B form asking about outfitting 40 seats across four clinics. Tom opens
+      the opportunity in Pipewell.
+    produces:
+      - doc_id: sl3-lead-note-inbound
+        domain: sales-crm
+        doc_type: lead-note
+        in_world_date: "2025-06-24"
+        author: "Tom Aldridge"
+        required_facts:
+          - "Opportunity PW-cobalt-dental-40seat opened in Pipewell 2025-06-24; inbound via the Shopstack B2B form."
+          - "Contact: Sam Ortiz, office manager, Cobalt Dental Group; 40 seats across 4 Portland-area clinics, all Oregon addresses."
+          - "Sam asks to reconnect after Cobalt's August budget cycle; follow-up task set for 2025-08-18."
+          - "Tom's sizing note: 40 seats clears the 15% tier at 25+ units per the 2024-06 pricing one-pager."
+          - "Next step and date close the note, per Pipewell convention."
+        length_words: {min: 120, max: 220}
+
+  - beat: 3
+    date: "2025-08-26"
+    event: >-
+      First discovery call. Tom and Yuki Tanaka (two weeks into the AE role)
+      walk Sam Ortiz through the catalog; Yuki files the transcript the same
+      hour.
+    produces:
+      - doc_id: sl3-discovery-call-1-transcript
+        domain: sales-crm
+        doc_type: call-transcript
+        in_world_date: "2025-08-26"
+        author: "Yuki Tanaka"
+        required_facts:
+          - "Attendees: Tom Aldridge, Yuki Tanaka, Sam Ortiz; call date 2025-08-26."
+          - "40 seats split 28 front-office and admin, 12 clinician charting stations, across 4 clinics."
+          - "Current furniture is nine years old, mixed fixed-height desks; complaints from admin staff drove the search."
+          - "Sam asks about replacement parts; Tom cites the parts shelf, naming the LS-ACC-008 caster set at 24.00 as an example."
+          - "Target: rollout complete before the end of February 2026."
+        length_words: {min: 700, max: 1100}
+
+  - beat: 4
+    date: "2025-09-09"
+    event: >-
+      Second discovery call pins down configuration and budget. Sam names a
+      38000.00 ceiling for the full 40 seats.
+    produces:
+      - doc_id: sl3-discovery-call-2-transcript
+        domain: sales-crm
+        doc_type: call-transcript
+        in_world_date: "2025-09-09"
+        author: "Yuki Tanaka"
+        required_facts:
+          - "Attendees: Tom Aldridge, Yuki Tanaka, Sam Ortiz; call date 2025-09-09."
+          - "Budget ceiling stated by Sam: 38000.00 for all 40 seats, set by Cobalt's partners."
+          - "Configuration: 60 in desks (LS-DSK-001-60) to fit the clinic workstation bays; chairs in graphite black (LS-CHR-001-BLK)."
+          - "One single monitor arm per seat (LS-ARM-001-SGL); cable kits wanted at every desk."
+          - "Two windowless back offices want desk lamps; Yuki notes 2x LS-LMP-001 as a possible add-on."
+        length_words: {min: 700, max: 1100}
+
+  - beat: 5
+    date: "2025-09-18"
+    event: >-
+      Tom sends proposal v1: itemized lines at list with the 15% volume tier.
+      Net lands 2868.00 over Sam's ceiling.
+    produces:
+      - doc_id: sl3-proposal-v1
+        domain: sales-crm
+        doc_type: proposal
+        in_world_date: "2025-09-18"
+        author: "Tom Aldridge"
+        required_facts:
+          - "Lines: 40x LS-DSK-001-60 at 649.00 = 25960.00; 40x LS-CHR-001-BLK at 389.00 = 15560.00; 40x LS-ARM-001-SGL at 129.00 = 5160.00; 40x LS-ACC-002 at 35.00 = 1400.00."
+          - "Subtotal 48080.00; 15% volume discount (25+ units, per the 2024-06 pricing one-pager) = 7212.00; net 40868.00."
+          - "All four delivery addresses in Oregon; sales tax 0.00."
+          - "Freight: palletized LTL from the ParcelPoint Reno warehouse, billed at carrier cost per clinic, quoted separately."
+          - "Quote valid 30 days from 2025-09-18."
+        length_words: {min: 300, max: 500}
+
+  - beat: 6
+    date: "2025-10-02"
+    event: >-
+      Sam Ortiz declines proposal v1 on price and reveals an ErgoNest
+      counter-offer under budget. Tom logs the objection and flags the deal to
+      Mara.
+    produces:
+      - doc_id: sl3-objection-note-price
+        domain: sales-crm
+        doc_type: lead-note
+        in_world_date: "2025-10-02"
+        author: "Tom Aldridge"
+        required_facts:
+          - "Sam Ortiz declined proposal v1 by phone on 2025-10-01: 40868.00 is over the 38000.00 ceiling."
+          - "Cobalt holds an ErgoNest counter-offer: 40 desk-and-chair sets at 948.00 per seat = 37920.00, no monitor arms."
+          - "ErgoNest offer includes 2-day shipping; return window on it is 14 days."
+          - "Tom flags PW-cobalt-dental-40seat to Mara Voss and asks whether anything past 15% is possible on 40 seats."
+          - "Next step: Yuki to write the competitor comparison by 2025-10-17."
+        length_words: {min: 130, max: 250}
+
+  - beat: 7
+    date: "2025-10-16"
+    event: >-
+      Yuki files the competitor note on ErgoNest and recommends restructuring
+      the deal on the Canopy team bundle plus the new SL3 exception code.
+    produces:
+      - doc_id: sl3-competitor-note-ergonest
+        domain: sales-crm
+        doc_type: competitor-note
+        in_world_date: "2025-10-16"
+        author: "Yuki Tanaka"
+        required_facts:
+          - "ErgoNest quote on the table: 37920.00 (948.00 per seat x 40), desks and chairs only, no monitor arms."
+          - "ErgoNest gaps: no replacement-parts catalog, 14-day return window, outsourced support with slow escalation."
+          - "Larkstead counters: parts shelf with published replacement SKUs, 1 year standard warranty (effective 2024-01-15), Portland showroom for inspection visits."
+          - "Recommendation: requote on 40x LS-BDL-002 Canopy team bundle at 1099.00 per seat and request the SL3 exception (one-time extra 3% on deals of 30 or more seats, effective 2025-10-06)."
+          - "Note ends with a numbered next-steps list carrying absolute dates."
+        length_words: {min: 180, max: 320}
+
+  - beat: 8
+    date: "2025-11-05"
+    event: >-
+      Ana Petrova packages Tom's SL3 exception request for CEO approval: at
+      1318.80 the exception sits above the 1000.00 threshold and outside her
+      approval band. Mara Voss signs off 2025-11-10.
+    produces:
+      - doc_id: sl3-memo-pricing-exception
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-11-05"
+        author: "Ana Petrova"
+        required_facts:
+          - "Subject line carries [APPROVAL]; request raised by Tom Aldridge on 2025-11-04 for PW-cobalt-dental-40seat."
+          - "Exception requested: code SL3 (effective 2025-10-06), one-time extra 3% on 40x LS-BDL-002 at 1099.00; dollar value 3% of 43960.00 = 1318.80."
+          - "Routing: 1318.80 is at or above the 1000.00 CEO threshold and outside Ana's 500.00-999.99 band (expense policy effective 2025-07-01), so Mara Voss must sign."
+          - "Combined pricing if approved: 15% tier (6594.00) plus 3% exception (1318.80) = 7912.80 off; bundle line nets 36047.20."
+          - "Mara's approval appended 2025-11-10, one line, signed M, closing with one question about whether 18% becomes the new anchor for every 40-seat deal."
+        length_words: {min: 200, max: 350}
+
+  - beat: 9
+    date: "2025-11-11"
+    event: >-
+      Tom sends proposal v2 the day after sign-off: the deal restructured on
+      the Canopy bundle at 18% off with two Vireo lamps at list.
+    produces:
+      - doc_id: sl3-proposal-v2
+        domain: sales-crm
+        doc_type: proposal
+        in_world_date: "2025-11-11"
+        author: "Tom Aldridge"
+        required_facts:
+          - "Line 1: 40x LS-BDL-002 Canopy team bundle at 1099.00 = 43960.00."
+          - "Discounts on line 1: 15% volume tier 6594.00 plus one-time 3% SL3 exception 1318.80, total 7912.80 off; bundle net 36047.20."
+          - "Line 2: 2x LS-LMP-001 Vireo smart desk lamp at 149.00 = 298.00, list price, excluded from the volume discount."
+          - "Order total 36345.20; Oregon delivery, sales tax 0.00; palletized LTL freight at carrier cost per clinic, billed separately."
+          - "Positioning: 1574.80 under the ErgoNest counter of 37920.00 and inside the 38000.00 ceiling; quote valid 30 days from 2025-11-11."
+        length_words: {min: 300, max: 500}
+
+  - beat: 10
+    date: "2025-11-14"
+    event: >-
+      Sam Ortiz signs. Tom marks PW-cobalt-dental-40seat closed-won and hands
+      fulfillment to Dmitri; Yuki keeps the account.
+    produces:
+      - doc_id: sl3-lead-note-closed-won
+        domain: sales-crm
+        doc_type: lead-note
+        in_world_date: "2025-11-14"
+        author: "Tom Aldridge"
+        required_facts:
+          - "PW-cobalt-dental-40seat marked closed-won 2025-11-14; signed total 36345.20."
+          - "Shopstack B2B order #LS31695 covers 40x LS-BDL-002 plus 2x LS-LMP-001."
+          - "Rollout: four clinic deliveries, December 2025 through February 2026."
+          - "Handoff to Dmitri Okafor for the fulfillment plan; Yuki Tanaka owns the account from signature."
+          - "Next step and date close the note."
+        length_words: {min: 100, max: 200}
+
+  - beat: 11
+    date: "2025-11-21"
+    event: >-
+      Dmitri publishes the bulk-fulfillment plan: four delivery waves from the
+      ParcelPoint Reno warehouse, one clinic per wave.
+    produces:
+      - doc_id: sl3-fulfillment-plan-cobalt
+        domain: operations
+        doc_type: project
+        in_world_date: "2025-11-21"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Order #LS31695: 40 bundle kits assembled at ParcelPoint (VEN-04) Reno; kitting fee 6.00 per kit = 240.00."
+          - "Components: desk frames from LOT-2025-44 and chair bases from LOT-2025-46, both Ostrava Metalworks (VEN-02); 2x LS-LMP-001 from Vireo stock built on Meridian (VEN-07) PCB rev C, LOT-2025-31, shipping with wave 1."
+          - "Waves: clinic 1 on 2025-12-10, clinic 2 on 2026-01-07, clinic 3 on 2026-01-28, clinic 4 on 2026-02-18; 10 seats per wave."
+          - "Load: 12 pallets, 122 cartons total; 3 pallets per wave, palletized LTL at carrier cost."
+          - "Plan keeps a running dated log (21 Nov: kitting slots booked) and spells out units in full."
+        length_words: {min: 300, max: 500}
+
+  - beat: 12
+    date: "2025-12-01"
+    event: >-
+      Yuki issues the account onboarding checklist ahead of wave 1 so every
+      clinic knows delivery day logistics, warranty terms, and where support
+      lives.
+    produces:
+      - doc_id: sl3-onboarding-checklist-cobalt
+        domain: operations
+        doc_type: checklist
+        in_world_date: "2025-12-01"
+        author: "Yuki Tanaka"
+        required_facts:
+          - "Covers order #LS31695; four delivery waves, first on 2025-12-10."
+          - "Warranty registration for all 42 units under the 1 year standard warranty (effective 2024-01-15)."
+          - "Support routing: Helprise B2B queue, account tag cobalt-dental; Sam Ortiz is the single point of contact."
+          - "Each clinic gets the desk assembly guide; LS-ACC-011 leveling feet sets available on request for uneven floors."
+          - "Post-wave check-in call scheduled within 5 business days of each delivery; all items numbered, all dates absolute."
+        length_words: {min: 150, max: 300}
+
+  - beat: 13
+    date: "2025-12-08"
+    event: >-
+      The margin review lands three weeks after Cobalt signs: Ana publishes
+      the new tier sheet cutting the volume discount to 12% at 30+ units. The
+      2024-06 one-pager is supposed to come down and never does.
+    produces:
+      - doc_id: sl3-policy-b2b-tiers-v2
+        domain: sales-crm
+        doc_type: policy
+        in_world_date: "2025-12-08"
+        author: "Ana Petrova"
+        required_facts:
+          - "B2B volume discount: 12% off list at 30 or more units, effective 2025-12-08; replaces the 15% at 25+ tier that had been in force since 2024-06-01."
+          - "Reason: 2025 margin review; average realized B2B discount ran above plan."
+          - "Signed deals keep contracted pricing; order #LS31695 (Cobalt Dental, closed 2025-11-14 at the 15% tier) is unaffected."
+          - "Exception code SL3 unchanged: one-time extra 3% on deals of 30 or more seats, CEO sign-off required from 1000.00 in exception value."
+          - "Action item: sales to pull the 2024-06 pricing one-pager from the shared drive by 2025-12-12."
+        length_words: {min: 250, max: 400}
+
+  - beat: 14
+    date: "2026-03-10"
+    event: >-
+      Rollout complete as of 2026-02-18. Sofia writes the case study for the
+      B2B pipeline and sends it through a Mailloft campaign.
+    produces:
+      - doc_id: sl3-case-study-cobalt-dental
+        domain: sales-crm
+        doc_type: case-study
+        in_world_date: "2026-03-10"
+        author: "Sofia Grieg"
+        required_facts:
+          - "40 seats across 4 clinics; 40x LS-BDL-002 Canopy team bundle plus 2 Vireo lamps; deliveries 2025-12-10 through 2026-02-18 with zero missed wave dates."
+          - "Deal cycle: inbound lead 2025-06-24 to closed-won 2025-11-14."
+          - "One direct quote from Sam Ortiz, office manager, on choosing repairability and the parts shelf over a cheaper import quote."
+          - "Volume pricing mentioned without percentages or discount arithmetic; no contract total disclosed."
+          - "Distributed via the Mailloft campaign named Chinook; subject line under 6 words."
+        length_words: {min: 350, max: 550}

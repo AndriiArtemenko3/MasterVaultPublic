@@ -1,0 +1,386 @@
+# SL5 -- 3PL cutover to ParcelPoint
+# Reconciliation with company.yaml: VEN-04 contract_start is 2023-11-01. That
+# contract covered inbound warehousing, bundle kitting, and heavy-item freight
+# out of Reno. Light/medium DTC parcels and B2B staging kept shipping from the
+# Portland showroom backroom. SL5 is the 2025-07 decision to move ALL outbound
+# fulfillment to ParcelPoint, plus the live Shopstack order-feed integration
+# that replaced the manual batch process. Cutover: 2026-01-12.
+
+storyline: SL5
+slug: parcelpoint-cutover
+title: "3PL cutover to ParcelPoint"
+window:
+  start: "2025-07-01"
+  end: "2026-03-31"
+summary: >-
+  In July 2025 Mara Voss approves expanding the ParcelPoint contract from
+  warehousing, kitting, and heavy freight to all outbound fulfillment, ending
+  parcel shipping from the Portland backroom. Dmitri Okafor and Hank Morrow
+  run the migration; the Shopstack order feed flips to ParcelPoint on
+  2026-01-12 and the transition week produces six delay tickets, then a
+  postmortem. ParcelPoint's first two full-cycle invoices bill a
+  dimensional-weight adjustment the contract does not allow; Ana Petrova
+  disputes 2392.50 and recovers it through a 2026-03-27 rate amendment. A
+  2026-01-15 policy update raises the free-shipping threshold from 75.00 to
+  99.00, but the 2024 shipping FAQ is never updated (contradiction C2).
+
+entities:
+  staff:
+    - "Mara Voss"
+    - "Dmitri Okafor"
+    - "Hank Morrow"
+    - "Ray Lindqvist"
+    - "Ana Petrova"
+    - "Priya Raman"
+    - "Jonah Beck"
+    - "Celeste Marin"
+  customers:
+    - "Marcus Bell"
+    - "Ivy Chen"
+    - "Ruben Silva"
+    - "Owen Gallagher"
+    - "Alma Reyes"
+    - "Summit Physio Group (Omar Haddad)"
+  vendors:
+    - "VEN-04"   # ParcelPoint Fulfillment, invoice code PPF
+    - "VEN-06"   # Cascadia Freight, inbound transfer loads
+  skus:
+    - "LS-CHR-001-GRY"
+    - "LS-BDL-001"
+    - "LS-DSK-001-48"
+    - "LS-CHR-001-BLK"
+    - "LS-ACC-002"
+    - "LS-STD-001"
+    - "LS-ACC-006"
+    - "LS-ARM-001-DBL"
+    - "LS-ACC-001"
+    - "LS-MAT-001-CHL"
+    - "LS-ACC-004"
+  ids:
+    tickets:
+      - "HD-2026-00118"
+      - "HD-2026-00123"
+      - "HD-2026-00141"
+      - "HD-2026-00196"
+      - "HD-2026-00203"
+      - "HD-2026-00219"
+    invoices:
+      - "INV-PPF-2026-002"   # Jan 2026 fulfillment period, disputed
+      - "INV-PPF-2026-003"   # Feb 2026 fulfillment period, disputed
+    orders:
+      - "#LS32210"
+      - "#LS32228"
+      - "#LS32241"
+      - "#LS32270"
+      - "#LS32277"
+      - "#LS32320"
+      - "#LS90001"   # Shopstack sandbox test order, integration guide only
+    lots: []
+    opportunities:
+      - "PW-summit-8seat"   # Summit Physio quarterly reorder account
+
+contradictions:
+  - id: C2
+    stale_doc: "sl5-shipping-faq-2024"
+    current_doc: "sl5-shipping-policy-2026-01"
+    stale_claim: "Orders of 75.00 or more ship free (light and medium items only)."
+    current_claim: "Free-shipping threshold is 99.00, effective 2026-01-15."
+    truth: >-
+      99.00 effective 2026-01-15 per policies.free_shipping_threshold in
+      company.yaml. The help-center shipping FAQ published 2024-03-05 was
+      flagged for update in the 2026-01-15 rollout task list and never
+      updated; any date on or after 2026-01-15 uses 99.00, earlier dates use
+      75.00.
+
+beats:
+  - beat: 1
+    date: "2024-03-05"
+    pre_window: true   # deliberate background beat before window.start; plants the stale shipping FAQ for C2
+    event: >-
+      Background beat, pre-window. Priya Raman publishes the help-center
+      shipping FAQ after the 75.00 free-shipping threshold takes effect on
+      2024-03-01. This FAQ is never revised again.
+    produces:
+      - doc_id: "sl5-shipping-faq-2024"
+        domain: "customer-support"
+        doc_type: "faq"
+        in_world_date: "2024-03-05"
+        author: "Priya Raman"
+        required_facts:
+          - "Orders of 75.00 or more ship free; free shipping waives light and medium item rates only"
+          - "Heavy items always bill the zone rate: 49.00 US-1, 69.00 US-2, 89.00 US-3, 109.00 US-4"
+          - "Zone US-1 covers OR, WA, ID, NV; light rate 5.95, medium rate 12.95"
+          - "Standard transit is 3-5 business days from the warehouse"
+          - "Threshold effective 2024-03-01"
+        length_words: {min: 250, max: 450}
+
+  - beat: 2
+    date: "2025-07-14"
+    event: >-
+      Mara Voss decides to stop shipping parcels from the Portland backroom:
+      order volume roughly doubled year over year and the backroom is at
+      capacity. Larkstead signs an amendment expanding the ParcelPoint
+      relationship to full outbound fulfillment.
+    produces:
+      - doc_id: "sl5-parcelpoint-fulfillment-amendment-2025"
+        domain: "internal-admin"
+        doc_type: "contract"
+        in_world_date: "2025-07-28"
+        author: "Ana Petrova"
+        required_facts:
+          - "Amendment to the 2023-11-01 master services agreement with ParcelPoint Fulfillment (VEN-04); signed 2025-07-28, effective 2025-08-01"
+          - "Scope expands from warehousing, bundle kitting, and heavy-item freight to all outbound fulfillment from the Reno, NV warehouse"
+          - "Rate card: pick-pack 2.85 per order plus 0.55 per additional item; bundle kitting unchanged at 6.00 per kit; pallet storage 22.50 per pallet-position per month"
+          - "Exhibit B: heavy weight-class cartons bill at actual scale weight; dimensional weight (divisor 166) applies to light and medium parcels only"
+          - "Payment terms Net-30"
+          - "Signed by Mara Voss for Larkstead and Carla Munoz, account manager, for ParcelPoint"
+        length_words: {min: 400, max: 750}
+
+  - beat: 3
+    date: "2025-08-11"
+    event: >-
+      Dmitri Okafor writes the migration project plan with Hank Morrow as
+      co-owner. Cutover is deliberately placed after the holiday returns
+      peak.
+    produces:
+      - doc_id: "sl5-3pl-migration-project"
+        domain: "operations"
+        doc_type: "project"
+        in_world_date: "2025-08-11"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Project owners: Dmitri Okafor (operations) and Hank Morrow (warehouse)"
+          - "Phase 1 contract and rate card closed 2025-07-28; Phase 2 Shopstack-ParcelPoint integration build 2025-09-02 to 2025-11-25, built by Ray Lindqvist; Phase 3 inventory transfer 2025-11-17 to 2026-01-08; Phase 4 parallel run 2025-12-01 to 2025-12-19; Phase 5 cutover week starting 2026-01-12"
+          - "Cutover scheduled after the holiday returns peak on purpose"
+          - "Inventory transfer plan: 14 pallets of finished goods and 96 cartons of replacement parts via Cascadia Freight (VEN-06)"
+          - "Success metric: 96% of orders shipped within 2 business days, measured 30 days after cutover"
+        length_words: {min: 450, max: 850}
+
+  - beat: 4
+    date: "2025-10-09"
+    event: >-
+      Ray Lindqvist delivers the Shopstack-to-ParcelPoint integration guide
+      (a Thursday, one of his two contract days). Sandbox validation runs
+      against test order #LS90001.
+    produces:
+      - doc_id: "sl5-shopstack-parcelpoint-integration-guide"
+        domain: "operations"
+        doc_type: "integration-guide"
+        in_world_date: "2025-10-09"
+        author: "Ray Lindqvist"
+        required_facts:
+          - "Shopstack order webhook posts to the ParcelPoint order API; the Shopstack order number (#LS format) maps to ParcelPoint external_ref"
+          - "Field map: Shopstack line_item.sku maps to ParcelPoint item.sku; shipping_address.zip maps to destination.postal_code; order.placed_at maps to order.received_at"
+          - "Bundle explosion rule: LS-BDL-* SKUs must explode to components before transmission; LS-BDL-001 explodes to 1x LS-DSK-001-48, 1x LS-CHR-001-BLK, 1x LS-ACC-002 plus a kit work order billed at 6.00"
+          - "ParcelPoint address validation rejects addresses missing a unit number unless address_line2 passes through intact"
+          - "Sandbox validation used test order #LS90001"
+        length_words: {min: 500, max: 900}
+
+  - beat: 5
+    date: "2026-01-08"
+    event: >-
+      Hank Morrow issues the cutover checklist. The final inventory transfer
+      leaves Portland on the Thursday Cascadia load.
+    produces:
+      - doc_id: "sl5-cutover-checklist"
+        domain: "operations"
+        doc_type: "checklist"
+        in_world_date: "2026-01-08"
+        author: "Hank Morrow"
+        required_facts:
+          - "Final inventory transfer load via Cascadia Freight (VEN-06) on Thursday 2026-01-08"
+          - "Portland backroom last pick 2026-01-09 at 17:00; unshipped open orders transfer to the ParcelPoint queue on 2026-01-12"
+          - "Shopstack order feed flips to ParcelPoint 2026-01-12 at 06:00 PT"
+          - "Physical count before load-out: LS-ACC-001 on-hand 62 units"
+          - "Rollback plan: revert the Shopstack webhook to the backroom queue within 4 hours if ParcelPoint order acknowledgment rate drops below 95%"
+        length_words: {min: 250, max: 500}
+
+  - beat: 6
+    date: "2026-01-12"
+    event: >-
+      The order feed flips to ParcelPoint at 06:00 PT. Within two days the
+      first shipping-delay tickets arrive: transferred open orders miss
+      carrier re-manifest and bundle parent SKUs sit at zero on-hand.
+    produces:
+      - doc_id: "sl5-ticket-hd-2026-00118"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-13"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00118; order #LS32210 placed 2026-01-08 by Marcus Bell"
+          - "1x LS-CHR-001-GRY at 389.00 plus 49.00 US-1 heavy shipping; order total 438.00, Oregon, no sales tax"
+          - "Label created 2026-01-09 in the Portland backroom; no carrier scan since"
+          - "Order was in the 2026-01-12 open-order transfer batch and was never re-manifested with the carrier"
+        length_words: {min: 120, max: 280}
+      - doc_id: "sl5-ticket-hd-2026-00123"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-13"
+        author: "Priya Raman"
+        required_facts:
+          - "Ticket HD-2026-00123; order #LS32228 placed 2026-01-09 by Ivy Chen"
+          - "1x LS-BDL-001 at 899.00 plus 69.00 US-2 heavy shipping plus 65.18 CA tax (7.25% on merchandise); order total 1033.18"
+          - "ParcelPoint received the parent SKU LS-BDL-001 without component explosion and showed zero on-hand, so the order sat unpicked"
+          - "Desk, chair, and cable kit all physically in stock at Reno"
+        length_words: {min: 120, max: 280}
+      - doc_id: "sl5-ticket-hd-2026-00141"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-14"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2026-00141; order #LS32241 placed 2026-01-10 by Ruben Silva"
+          - "1x LS-STD-001 at 79.00 plus 1x LS-ACC-006 at 18.00; merchandise 97.00, free shipping under the 75.00 threshold in force on the order date, 6.31 WA tax (6.5%); order total 103.31"
+          - "Tracking number issued 2026-01-12 never activated with the carrier"
+          - "Reply quotes the shipping policy effective 2024-03-01 with its effective date"
+        length_words: {min: 120, max: 280}
+
+  - beat: 7
+    date: "2026-01-15"
+    event: >-
+      The 2026-01-15 pricing update lands mid-transition: the free-shipping
+      threshold moves from 75.00 to 99.00. Celeste Marin publishes the
+      updated shipping policy page; the 2024 FAQ is flagged for update but
+      nobody gets to it. Delay tickets keep coming through the backlog.
+    produces:
+      - doc_id: "sl5-shipping-policy-2026-01"
+        domain: "customer-support"
+        doc_type: "policy"
+        in_world_date: "2026-01-15"
+        author: "Celeste Marin"
+        required_facts:
+          - "Free-shipping threshold rises from 75.00 to 99.00, effective 2026-01-15"
+          - "Free shipping continues to waive light and medium zone rates only; heavy items always bill the zone rate"
+          - "Zone rates unchanged: US-1 light 5.95, medium 12.95, heavy 49.00"
+          - "Orders placed before 2026-01-15 keep the 75.00 threshold"
+          - "Help-center shipping FAQ flagged for update in the rollout task list"
+        length_words: {min: 200, max: 400}
+      - doc_id: "sl5-ticket-hd-2026-00196"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-15"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00196; order #LS32270 placed 2026-01-12 by Owen Gallagher"
+          - "1x LS-ARM-001-DBL at 189.00; medium item over the 75.00 threshold in force on the order date, so free shipping; Oregon, no tax; order total 189.00"
+          - "ParcelPoint address-validation flag held the order 3 days over a missing apartment unit number"
+          - "No hold notification reached the customer"
+        length_words: {min: 120, max: 280}
+      - doc_id: "sl5-ticket-hd-2026-00203"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-16"
+        author: "Priya Raman"
+        required_facts:
+          - "Ticket HD-2026-00203; order #LS32277 placed 2026-01-12 by Omar Haddad, Summit Physio Group (PW-summit-8seat)"
+          - "8x LS-ACC-001 at 69.00 each; merchandise 552.00, free shipping (medium class over threshold), Oregon, no tax; order total 552.00"
+          - "ParcelPoint system showed 3 units of LS-ACC-001 on hand against the 62-unit physical count from the 2026-01-08 load-out"
+          - "Quarterly treatment-room reorder; customer since 2024-11"
+        length_words: {min: 120, max: 280}
+      - doc_id: "sl5-ticket-hd-2026-00219"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-19"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2026-00219; order #LS32320 placed 2026-01-15 by Alma Reyes"
+          - "1x LS-MAT-001-CHL at 59.00 plus 1x LS-ACC-004 at 19.00; merchandise 78.00, 5.95 US-1 light shipping, Oregon, no tax; order total 83.95"
+          - "Customer quotes the help-center FAQ line that orders over 75.00 ship free and asks for the 5.95 back"
+          - "Reply quotes the 99.00 threshold effective 2026-01-15 and links the updated policy page"
+          - "No carrier scan as of 2026-01-19 from the transition-week backlog; revised ship estimate 2026-01-20"
+        length_words: {min: 120, max: 280}
+
+  - beat: 8
+    date: "2026-01-29"
+    event: >-
+      Dmitri Okafor publishes the cutover postmortem covering the transition
+      week 2026-01-12 to 2026-01-16 and the fixes deployed the following
+      week.
+    produces:
+      - doc_id: "sl5-cutover-postmortem"
+        domain: "operations"
+        doc_type: "postmortem"
+        in_world_date: "2026-01-29"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Cutover week 2026-01-12 to 2026-01-16: 41 of 187 outbound orders shipped more than 2 business days late (21.9%)"
+          - "Late-order breakdown: 19 bundle parent-SKU holds, 11 address-validation holds, 7 transferred open orders missing carrier re-manifest, 4 inventory-variance holds on LS-ACC-001"
+          - "Production order feed went live without the bundle explosion rule documented in the integration guide; Ray Lindqvist deployed the fix 2026-01-20"
+          - "ParcelPoint set address validation to warn-only 2026-01-21; a 2026-01-23 cycle count reconciled the 59-unit LS-ACC-001 variance (system 3 vs physical 62)"
+          - "Tickets: HD-2026-00118, HD-2026-00123, HD-2026-00141, HD-2026-00196, HD-2026-00203, HD-2026-00219"
+          - "On-time ship rate recovered to 97% for the week of 2026-01-26, against the 96% project target"
+          - "No what-went-well section: this review runs summary, impact, timeline, causes, and fixes only"
+        length_words: {min: 500, max: 900}
+
+  - beat: 9
+    date: "2026-02-05"
+    event: >-
+      ParcelPoint issues its first full-cycle monthly invoice. Ana Petrova
+      files it in Ledgerly and flags a dimensional-weight adjustment line
+      that Exhibit B of the 2025-07-28 amendment does not allow on heavy
+      cartons.
+    produces:
+      - doc_id: "sl5-invoice-ppf-2026-002"
+        domain: "internal-admin"
+        doc_type: "invoice"
+        in_world_date: "2026-02-05"
+        author: "Ana Petrova"
+        required_facts:
+          - "Invoice INV-PPF-2026-002 from ParcelPoint Fulfillment (VEN-04), dated 2026-02-05, period 2026-01-12 to 2026-01-31, terms Net-30, due 2026-03-07"
+          - "Line items: pallet storage 118 positions x 22.50 = 2655.00; pick-pack 563 orders x 2.85 = 1604.55; additional-item picks 402 x 0.55 = 221.10; bundle kitting 74 kits x 6.00 = 444.00; outbound postage passthrough 12969.65"
+          - "Disputed line: dimensional weight adjustment, 96 heavy cartons x 13.75 = 1320.00"
+          - "Invoice total 19214.30"
+        length_words: {min: 150, max: 300}
+
+  - beat: 10
+    date: "2026-03-04"
+    event: >-
+      The February invoice repeats the dimensional-weight line. Ana Petrova
+      files a formal dispute memo, short-pays the January invoice by the
+      disputed amount, and gets Mara's sign-off because the dispute value
+      crosses the CEO approval threshold.
+    produces:
+      - doc_id: "sl5-invoice-ppf-2026-003"
+        domain: "internal-admin"
+        doc_type: "invoice"
+        in_world_date: "2026-03-04"
+        author: "Ana Petrova"
+        required_facts:
+          - "Invoice INV-PPF-2026-003 from ParcelPoint Fulfillment (VEN-04), dated 2026-03-04, period 2026-02-01 to 2026-02-28, terms Net-30, due 2026-04-03"
+          - "Line items: pallet storage 112 positions x 22.50 = 2520.00; pick-pack 601 orders x 2.85 = 1712.85; additional-item picks 388 x 0.55 = 213.40; bundle kitting 81 kits x 6.00 = 486.00; outbound postage passthrough 10877.70"
+          - "Disputed line: dimensional weight adjustment, 78 heavy cartons x 13.75 = 1072.50"
+          - "Invoice total 16882.45"
+        length_words: {min: 150, max: 300}
+      - doc_id: "sl5-dim-weight-dispute-memo"
+        domain: "internal-admin"
+        doc_type: "memo"
+        in_world_date: "2026-03-10"
+        author: "Ana Petrova"
+        required_facts:
+          - "Subject carries [APPROVAL]; disputed total 2392.50 = 1320.00 (INV-PPF-2026-002) + 1072.50 (INV-PPF-2026-003)"
+          - "Exhibit B of the 2025-07-28 amendment: heavy weight-class cartons bill at actual scale weight; dimensional divisor 166 applies to light and medium parcels only"
+          - "ParcelPoint applied a divisor of 139 to 96 January and 78 February heavy desk and chair cartons at 13.75 per carton"
+          - "INV-PPF-2026-002 short-paid by 1320.00 (17894.30 paid) on 2026-03-06, ahead of the due date, on Ana's own call and above her 999.99 approval band; the memo asks Mara to ratify the hold after the fact"
+          - "if ParcelPoint credits the full 2392.50 by 2026-03-31, then INV-PPF-2026-003 pays on its due date"
+          - "Mara Voss sign-off appended 2026-03-12, ratifying the short-pay; dispute value exceeds the 1000.00 CEO approval threshold, and Mara's one-line reply notes the band breach was the right call given the due date"
+        length_words: {min: 250, max: 450}
+
+  - beat: 11
+    date: "2026-03-27"
+    event: >-
+      ParcelPoint concedes the dispute. A rate amendment restates Exhibit B,
+      waives the short-paid balance, and credits the February overcharge.
+    produces:
+      - doc_id: "sl5-parcelpoint-rate-amendment-2026"
+        domain: "internal-admin"
+        doc_type: "contract"
+        in_world_date: "2026-03-27"
+        author: "Ana Petrova"
+        required_facts:
+          - "Rate amendment signed 2026-03-27 by Mara Voss (Larkstead) and Carla Munoz (ParcelPoint Fulfillment, VEN-04)"
+          - "Exhibit B restated: heavy weight-class cartons bill actual scale weight; dimensional divisor 166 applies to light and medium parcels only; divisor-139 billing barred"
+          - "ParcelPoint waives the 1320.00 open balance on INV-PPF-2026-002 and credits 1072.50 against INV-PPF-2026-003"
+          - "INV-PPF-2026-003 net balance 15809.95 due unchanged on 2026-04-03"
+          - "Restatement applies retroactively to 2026-01-12; amendment effective 2026-04-01"
+        length_words: {min: 250, max: 500}

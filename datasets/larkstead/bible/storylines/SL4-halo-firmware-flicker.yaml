@@ -1,0 +1,480 @@
+# SL4 -- Vireo firmware v1.2 flicker bug
+# Derives from company.yaml (single source of truth). Note: company.yaml names the
+# hotfix v1.3 (shipped 2026-02-17), so this storyline uses v1.3, not v1.2.1.
+# Dates force the goodwill memo (2026-01-20) before the hotfix release (2026-02-17).
+# Beat 1 sits outside the window on purpose: it plants the stale help doc for C4.
+
+storyline: SL4
+slug: vireo-firmware-flicker
+title: "Vireo firmware v1.2 flicker bug"
+window:
+  start: "2025-10-01"
+  end: "2026-02-28"
+summary: >-
+  Bitgrove Labs ships Vireo firmware v1.2 over the air on 2025-12-09 and units
+  built on Meridian PCB rev C (lots LOT-2025-31 and LOT-2025-38, sold from
+  October 2025) start flickering at about 0.5 Hz whenever sleep-mode dimming
+  drops below 20 percent brightness. Twelve support tickets land between
+  2025-12-11 and 2026-01-14; Jonah Beck escalates, Dmitri Okafor files two bug
+  reports with Bitgrove, support publishes a workaround guide, and ops executes
+  a staged v1.1 rollback on 2026-01-09 that restores 592 of 618 exposed units.
+  Mara Voss grants a 2-year goodwill warranty for affected units effective
+  2026-01-20, Ana Petrova papers a 4,800.00 SOW amendment with Bitgrove, and
+  hotfix v1.3 ships 2026-02-17 with a postmortem to follow. The 2024 Vireo help
+  doc still says 1-year warranty and is never updated (contradiction C4).
+
+entities:
+  staff:
+    - "Mara Voss"
+    - "Dmitri Okafor"
+    - "Priya Raman"
+    - "Jonah Beck"
+    - "Celeste Marin"
+    - "Ana Petrova"
+    - "Tom Aldridge"
+  customers:
+    - "Sam Whitfield"
+    - "Beatrix Mwangi"
+    - "Colin Mercer (one-off customer, not in the repeat roster)"
+    - "Kit Donovan"
+    - "Renata Kwan (one-off customer, not in the repeat roster)"
+    - "Alma Reyes"
+    - "Nora Feld"
+    - "Dale Hutchins (one-off customer, not in the repeat roster)"
+    - "Desmond Cole"
+    - "Tessa Nakamura"
+    - "Ruben Silva"
+    - "Cobalt Dental Group (Sam Ortiz, office manager)"
+  vendors:
+    - "VEN-03"   # Bitgrove Labs -- firmware and OTA service
+    - "VEN-07"   # Meridian Components -- Vireo PCBs (rev C at fault)
+  skus:
+    - "LS-LMP-001"   # Vireo smart desk lamp, 149.00 list through 2026-01-14
+    - "LS-ACC-012"   # Vireo power adapter (replacement), 22.00 -- ruled out in triage
+  ids:
+    tickets:
+      - "HD-2025-05402"   # Sam Whitfield, 2025-12-11
+      - "HD-2025-05417"   # Beatrix Mwangi, 2025-12-12
+      - "HD-2025-05433"   # Colin Mercer, 2025-12-14
+      - "HD-2025-05461"   # Kit Donovan, 2025-12-15
+      - "HD-2025-05478"   # Renata Kwan, 2025-12-16
+      - "HD-2025-05490"   # Alma Reyes, 2025-12-17
+      - "HD-2025-05511"   # Cobalt Dental Group, 2025-12-19
+      - "HD-2026-00041"   # Nora Feld, 2026-01-03
+      - "HD-2026-00057"   # Dale Hutchins, 2026-01-05
+      - "HD-2026-00089"   # Desmond Cole, 2026-01-08
+      - "HD-2026-00112"   # Tessa Nakamura, 2026-01-12
+      - "HD-2026-00136"   # Ruben Silva, 2026-01-14
+    invoices:
+      - "INV-BGL-2026-006"   # Bitgrove SOW Amendment No. 2 fee, 4800.00, Net-30
+    orders:
+      - "#LS31408"   # Sam Whitfield, 2025-10-02, 1x LS-LMP-001 at 149.00
+      - "#LS31552"   # Beatrix Mwangi, 2025-10-24, 1x LS-LMP-001 at 149.00
+      - "#LS31687"   # Colin Mercer, 2025-11-14, 1x LS-LMP-001 at 149.00
+      - "#LS31710"   # Kit Donovan, 2025-11-20, 1x LS-LMP-001 at 149.00
+      - "#LS31745"   # Renata Kwan, 2025-11-28, 1x LS-LMP-001 at 149.00
+      - "#LS31802"   # Alma Reyes, 2025-12-01, 1x LS-LMP-001 at 149.00
+      # Cobalt Dental's two lamps live on SL3's B2B order #LS31695 (line 2 of
+      # proposal v2: 2x LS-LMP-001 at 149.00 = 298.00 at list, delivered with
+      # wave 1 on 2025-12-10). SL4 mints no separate order for them.
+      - "#LS31921"   # Nora Feld, 2025-12-11, 1x LS-LMP-001 at 149.00
+      - "#LS31940"   # Dale Hutchins, 2025-12-13, 1x LS-LMP-001 at 149.00
+      - "#LS31968"   # Desmond Cole (gift), 2025-12-16, 1x LS-LMP-001 at 149.00
+      - "#LS31990"   # Tessa Nakamura, 2025-12-18, 1x LS-LMP-001 at 149.00
+      - "#LS32015"   # Ruben Silva, 2025-12-20, 1x LS-LMP-001 at 149.00
+    lots:
+      - "LOT-2025-31"   # Meridian PCB rev C, 400 units, received 2025-09-22 (lot named in company.yaml; receipt date allocated here)
+      - "LOT-2025-38"   # Meridian PCB rev C, 350 units, received 2025-11-17 (derived)
+    opportunities:
+      - "PW-cobalt-dental-40seat"   # two Vireo add-on units fall in warranty scope
+
+# Shared numeric canon for every SL4 doc writer:
+#   v1.2 OTA release 2025-12-09; v1.3 hotfix release 2026-02-17.
+#   Rev C population: 400 (LOT-2025-31) + 350 (LOT-2025-38) = 750 units.
+#   Units that took v1.2 before the rollback: 618. Restored to v1.1 by
+#   2026-01-13: 592. Offline and unreachable at rollback close: 26 (618 - 592).
+#   Ticket totals over time: 6 by 2025-12-17, 7 by 2025-12-19, 9 by 2026-01-06,
+#   12 final. 12 / 618 = 1.9 percent ticket rate.
+#   Symptom: visible flicker at roughly 0.5 Hz when sleep-mode dimming goes
+#   below 20 percent brightness; only on Meridian PCB rev C running v1.2.
+
+contradictions:
+  - id: C4
+    stale_doc: "vireo-help-doc-2024"
+    current_doc: "vireo-goodwill-warranty-memo"
+    stale_claim: "The Vireo smart desk lamp (LS-LMP-001) is covered by a 1-year warranty from delivery."
+    current_claim: "Vireo units that ran firmware v1.2 (scope vireo-v12-affected) carry a 2-year warranty, effective 2026-01-20."
+    truth: >-
+      Both claims are true in their own scope, but the help doc is stale. The
+      2026-01-20 goodwill memo extends warranty to 2 years only for the 618
+      vireo-v12-affected units (Meridian PCB rev C units that received firmware
+      v1.2); every other Vireo unit keeps the 1-year standard warranty effective
+      2024-01-15. The memo assigned Priya Raman to update the public help doc
+      and that update never happened, so the help doc still states 1 year for
+      all units with no mention of the extension.
+
+beats:
+  - beat: 1
+    date: "2024-10-20"
+    pre_window: true   # deliberate background beat before window.start; plants the stale help doc for C4
+    event: >-
+      Support publishes the Vireo product help doc five days after launch. It
+      states the 1-year standard warranty and is never revised afterward,
+      which seeds contradiction C4.
+    produces:
+      - doc_id: "vireo-help-doc-2024"
+        domain: "customer-support"
+        doc_type: "faq"
+        in_world_date: "2024-10-20"
+        author: "Priya Raman"
+        required_facts:
+          - "Vireo smart desk lamp is SKU LS-LMP-001, launched 2024-10-15, list price 149.00."
+          - "Warranty: 1 year from delivery, per the standard warranty policy effective 2024-01-15."
+          - "Firmware updates arrive over the air; the lamp checks for updates when connected to Wi-Fi."
+          - "Returns follow the standard refund window; opened non-defective returns carry a 10 percent restocking fee."
+          - "Support contact: helpdesk (Helprise); customers should include their #LS order number."
+        length_words: {min: 350, max: 600}
+
+  - beat: 2
+    date: "2025-12-09"
+    event: >-
+      Bitgrove Labs releases Vireo firmware v1.2 over the air. Ops publishes the
+      release notes; the staged rollout reaches 100 percent of connected units
+      within four days.
+    produces:
+      - doc_id: "vireo-fw-v12-release-notes"
+        domain: "operations"
+        doc_type: "log"
+        in_world_date: "2025-12-09"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Firmware v1.2 released 2025-12-09 via the Bitgrove Labs (VEN-03) OTA service."
+          - "Changes: reworked sleep-mode dimming schedule and ambient sensor recalibration."
+          - "Applies to all LS-LMP-001 units; staged rollout 20 percent on 09 Dec, 50 percent on 11 Dec, 100 percent on 13 Dec."
+          - "No hardware revisions called out in the release package."
+        length_words: {min: 150, max: 300}
+
+  - beat: 3
+    date: "2025-12-11"
+    event: >-
+      Flicker tickets start two days after the v1.2 rollout begins. Six tickets
+      arrive between 2025-12-11 and 2025-12-17, all from units sold October
+      2025 or later.
+    produces:
+      - doc_id: "hd-2025-05402-whitfield-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-11"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2025-05402, customer Sam Whitfield, order #LS31408 placed 2025-10-02, 1x LS-LMP-001 at 149.00."
+          - "Lamp flickers visibly when sleep-mode dimming drops below 20 percent brightness; started 2025-12-10 evening."
+          - "Customer has light sensitivity (accessibility segment); flicker triggers headaches, so the lamp is unplugged."
+          - "Jonah confirms firmware shows v1.2 in the Vireo app; no fix known yet, apologizes twice."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2025-05417-mwangi-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-12"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2025-05417, customer Beatrix Mwangi, order #LS31552 placed 2025-10-24, 1x LS-LMP-001 at 149.00."
+          - "Flicker at a steady slow pulse (about every 2 seconds) during scheduled night dimming in her studio."
+          - "Celeste asks for the order number first, then confirms firmware v1.2 installed 2025-12-11."
+          - "Celeste quotes the warranty policy verbatim: 1 year standard, effective 2024-01-15, unit well inside coverage."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2025-05433-mercer-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-14"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2025-05433, customer Colin Mercer (one-off buyer, first Larkstead order), order #LS31687 placed 2025-11-14, 1x LS-LMP-001 at 149.00."
+          - "Flicker appears only below 20 percent brightness; customer measured roughly one pulse per 2 seconds on slow-motion video."
+          - "Customer already swapped outlets and power strip; behavior unchanged."
+          - "Jonah suggests trying a replacement power adapter (LS-ACC-012, 22.00) before engineering review; customer declines."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2025-05461-donovan-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-15"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2025-05461, customer Kit Donovan, order #LS31710 placed 2025-11-20, 1x LS-LMP-001 at 149.00."
+          - "Flicker in sleep-mode dim; disabling the dim schedule in the Vireo app stops it (first workaround confirmation)."
+          - "Firmware v1.2, auto-installed 2025-12-12 per the app update history."
+          - "Celeste logs the workaround in the internal ticket note for the support team."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2025-05478-kwan-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-16"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2025-05478, customer Renata Kwan (one-off buyer, first Larkstead order), order #LS31745 placed 2025-11-28, 1x LS-LMP-001 at 149.00."
+          - "Same symptom: slow flicker below 20 percent brightness during the scheduled evening dim."
+          - "Customer asks whether this is a fire risk; Jonah confirms it is a firmware timing issue, not electrical."
+          - "Ticket tagged vireo-flicker; Jonah notes internally this is the fifth identical report this week."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2025-05490-reyes-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-17"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2025-05490, customer Alma Reyes, order #LS31802 placed 2025-12-01, 1x LS-LMP-001 at 149.00."
+          - "Flicker at about 0.5 Hz below 20 percent brightness; started after the firmware v1.2 update."
+          - "Celeste applies the workaround from HD-2025-05461: disable sleep-mode dimming in the Vireo app."
+          - "Customer accepts the workaround but asks to be notified when a permanent fix ships."
+        length_words: {min: 120, max: 260}
+
+  - beat: 4
+    date: "2025-12-18"
+    event: >-
+      Jonah escalates the pattern to Priya and Dmitri in internal chat: six
+      identical flicker tickets in seven days, all on firmware v1.2, all units
+      sold from October 2025 onward.
+    produces:
+      - doc_id: "vireo-flicker-escalation-chat"
+        domain: "customer-support"
+        doc_type: "chat-log"
+        in_world_date: "2025-12-18"
+        author: "Jonah Beck"
+        required_facts:
+          - "Six tickets between 2025-12-11 and 2025-12-17: HD-2025-05402, HD-2025-05417, HD-2025-05433, HD-2025-05461, HD-2025-05478, HD-2025-05490."
+          - "Common pattern: LS-LMP-001 on firmware v1.2, flicker below 20 percent brightness in sleep-mode dim, all units shipped 2025-10 or later."
+          - "Confirmed workaround: disabling sleep-mode dimming in the Vireo app stops the flicker."
+          - "Jonah writes in casual register (gonna, tho); Priya assigns Dmitri to open a vendor bug report with Bitgrove."
+          - "Dmitri replies number-first: 6 tickets against roughly 750 rev C units shipped, wants serials from each ticket."
+        length_words: {min: 150, max: 300}
+
+  - beat: 5
+    date: "2025-12-19"
+    event: >-
+      Cobalt Dental Group reports the same flicker on both add-on Vireo units,
+      making it a B2B issue, and Dmitri files the first bug report with
+      Bitgrove Labs the same day.
+    produces:
+      - doc_id: "hd-2025-05511-cobalt-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2025-12-19"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2025-05511, Sam Ortiz (office manager, Cobalt Dental Group): the two LS-LMP-001 add-on units on B2B order #LS31695 (line 2 of the signed deal, 2x 149.00 = 298.00 at list), delivered with wave 1 on 2025-12-10."
+          - "Both units flicker during the evening dim in the two windowless back offices; account is PW-cobalt-dental-40seat, flagged for Tom Aldridge."
+          - "Celeste quotes the warranty policy: 1 year standard, effective 2024-01-15, and applies the disable-sleep-dim workaround."
+          - "Internal note: seventh flicker ticket overall; B2B flagship account, handle with priority."
+        length_words: {min: 140, max: 280}
+      - doc_id: "bitgrove-bug-report-flicker-01"
+        domain: "operations"
+        doc_type: "bug-report"
+        in_world_date: "2025-12-19"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Filed with Bitgrove Labs (VEN-03) on 2025-12-19 against firmware v1.2 (released 2025-12-09)."
+          - "Repro steps: (1) LS-LMP-001 with Meridian PCB rev C on v1.2, (2) enable sleep-mode dim schedule, (3) set brightness below 20 percent, (4) flicker at roughly 0.5 Hz appears within 30 seconds."
+          - "Affected hardware: Meridian Components (VEN-07) PCB rev C, lots LOT-2025-31 (400 units, received 22 Sep) and LOT-2025-38 (350 units, received 17 Nov); 750 rev C units total."
+          - "7 tickets to date; rev B units on v1.2 do not reproduce the flicker."
+          - "Ask: root-cause analysis plus a rollback option to v1.1 for rev C units."
+        length_words: {min: 250, max: 450}
+
+  - beat: 6
+    date: "2025-12-22"
+    event: >-
+      Priya publishes a customer-facing troubleshooting guide with the
+      confirmed workaround while Bitgrove investigates.
+    produces:
+      - doc_id: "vireo-flicker-troubleshooting-guide"
+        domain: "customer-support"
+        doc_type: "faq"
+        in_world_date: "2025-12-22"
+        author: "Priya Raman"
+        required_facts:
+          - "Applies to LS-LMP-001 units purchased October 2025 or later running firmware v1.2."
+          - "Symptom: slow visible flicker (about one pulse every 2 seconds) when sleep-mode dimming goes below 20 percent brightness."
+          - "Workaround: open the Vireo app, Settings, Sleep schedule, toggle sleep-mode dimming off; flicker stops immediately."
+          - "Not a power problem: swapping the LS-ACC-012 power adapter does not change the behavior."
+          - "A firmware fix is in progress with the firmware vendor; affected customers can reply to their existing HD ticket for updates."
+        length_words: {min: 300, max: 550}
+
+  - beat: 7
+    date: "2026-01-03"
+    event: >-
+      A second wave of tickets arrives after the holidays from December buyers,
+      and Dmitri sends Bitgrove a follow-up bug report with log captures that
+      narrow the root cause.
+    produces:
+      - doc_id: "hd-2026-00041-feld-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-03"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00041, customer Nora Feld, order #LS31921 placed 2025-12-11, 1x LS-LMP-001 at 149.00."
+          - "Flicker below 20 percent brightness on firmware v1.2; matches the published troubleshooting guide."
+          - "Jonah links the troubleshooting guide and applies the disable-sleep-dim workaround."
+          - "Eighth flicker ticket overall; tagged vireo-flicker."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2026-00057-hutchins-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-05"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2026-00057, customer Dale Hutchins (one-off buyer, first Larkstead order), order #LS31940 placed 2025-12-13, 1x LS-LMP-001 at 149.00."
+          - "Customer found the troubleshooting guide himself; workaround holds but he wants the dim schedule back."
+          - "Celeste confirms a vendor fix is in progress and quotes the 1 year standard warranty, effective 2024-01-15."
+          - "Ninth flicker ticket overall."
+        length_words: {min: 120, max: 260}
+      - doc_id: "bitgrove-bug-report-flicker-02"
+        domain: "operations"
+        doc_type: "bug-report"
+        in_world_date: "2026-01-06"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Follow-up to bitgrove-bug-report-flicker-01, sent 2026-01-06 with debug log captures from 3 customer units."
+          - "Root cause narrowed: v1.2 sleep-timer wake interrupt collides with the rev C LED driver PWM cycle at duty below 20 percent, producing the 0.5 Hz flicker."
+          - "9 tickets by 06 Jan against 618 rev C units confirmed on v1.2."
+          - "Ask: signed v1.1 image pinned to the OTA channel for rev C serials as an interim rollback; hotfix to follow."
+        length_words: {min: 250, max: 450}
+      - doc_id: "hd-2026-00089-cole-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-08"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00089, customer Desmond Cole, order #LS31968 placed 2025-12-16, 1x LS-LMP-001 at 149.00, bought as a gift."
+          - "Gift recipient reports the flicker; Desmond asks whether a return is possible instead of a fix."
+          - "Jonah explains the 45-day refund window (effective 2025-11-03) still covers the order and offers the workaround as an alternative."
+          - "Tenth flicker ticket overall; customer opts to wait for the fix."
+        length_words: {min: 120, max: 260}
+
+  - beat: 8
+    date: "2026-01-09"
+    event: >-
+      Ops executes the rollback: Bitgrove pins the OTA channel for rev C
+      serials to a signed v1.1 image and Dmitri publishes the rollback SOP that
+      support and warehouse follow.
+    produces:
+      - doc_id: "vireo-v11-rollback-sop"
+        domain: "operations"
+        doc_type: "sop"
+        in_world_date: "2026-01-09"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Restore path: Bitgrove pins the OTA channel to a signed firmware v1.1 image for all Meridian PCB rev C serials (lots LOT-2025-31 and LOT-2025-38)."
+          - "Staged execution 09 Jan through 13 Jan 2026; 618 units on v1.2 in scope."
+          - "Units must be powered and on Wi-Fi to receive the rollback; support script for walking customers through a manual update check included."
+          - "Result recorded at close: 592 of 618 units restored to v1.1 by 13 Jan; 26 units offline, flagged for an outreach email via Mailloft."
+          - "Escalation path: unresolved units go to a replacement swap under warranty, referencing the customer's HD ticket."
+        length_words: {min: 350, max: 600}
+
+  - beat: 9
+    date: "2026-01-12"
+    event: >-
+      Trailing tickets arrive from units that were offline during the rollback
+      window and had not received the v1.1 restore.
+    produces:
+      - doc_id: "hd-2026-00112-nakamura-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-12"
+        author: "Celeste Marin"
+        required_facts:
+          - "Ticket HD-2026-00112, customer Tessa Nakamura, order #LS31990 placed 2025-12-18, 1x LS-LMP-001 at 149.00."
+          - "Unit was unplugged over the holidays and missed the staged rollback; still on firmware v1.2."
+          - "Celeste walks her through reconnecting to Wi-Fi and forcing an update check; unit pulls the pinned v1.1 image and the flicker stops."
+          - "Accessibility-segment customer; Celeste notes the flicker made the lamp unusable for her."
+          - "Eleventh flicker ticket overall."
+        length_words: {min: 120, max: 260}
+      - doc_id: "hd-2026-00136-silva-flicker"
+        domain: "customer-support"
+        doc_type: "ticket"
+        in_world_date: "2026-01-14"
+        author: "Jonah Beck"
+        required_facts:
+          - "Ticket HD-2026-00136, customer Ruben Silva, order #LS32015 placed 2025-12-20, 1x LS-LMP-001 at 149.00."
+          - "Lamp lives in a dorm with unreliable Wi-Fi and missed the rollback window."
+          - "Jonah applies the manual update-check path from the rollback SOP; unit restores to v1.1 on the call."
+          - "Twelfth and final flicker ticket of the incident."
+        length_words: {min: 120, max: 260}
+
+  - beat: 10
+    date: "2026-01-20"
+    event: >-
+      Mara Voss issues a goodwill warranty extension memo: 2 years for
+      vireo-v12-affected units, effective 2026-01-20. The memo assigns a help
+      doc update to support that never happens, seeding contradiction C4.
+    produces:
+      - doc_id: "vireo-goodwill-warranty-memo"
+        domain: "internal-admin"
+        doc_type: "memo"
+        in_world_date: "2026-01-20"
+        author: "Mara Voss"
+        required_facts:
+          - "Warranty extended to 2 years for Vireo units in scope vireo-v12-affected, effective 2026-01-20."
+          - "Scope: the 618 LS-LMP-001 units on Meridian PCB rev C that received firmware v1.2; all other Vireo units stay on the 1 year standard warranty (effective 2024-01-15)."
+          - "Cobalt Dental Group's two add-on units on order #LS31695 (account PW-cobalt-dental-40seat, delivered with wave 1 on 2025-12-10) fall inside the scope."
+          - "Action item: Priya Raman to update the public Vireo help doc to reflect the extension. (Corpus note: this update never ships; the help doc stays at 1 year.)"
+          - "Memo in Mara's voice: short declaratives, signed M, closes with one pointed question about the offline 26 units."
+        length_words: {min: 200, max: 350}
+
+  - beat: 11
+    date: "2026-01-26"
+    event: >-
+      Ana Petrova executes SOW Amendment No. 2 with Bitgrove Labs covering the
+      hotfix, the signed rollback image, and 90 days of post-release
+      monitoring. Mara approved the spend on 2026-01-23.
+    produces:
+      - doc_id: "bitgrove-sow-amendment-2"
+        domain: "internal-admin"
+        doc_type: "contract"
+        in_world_date: "2026-01-26"
+        author: "Ana Petrova"
+        required_facts:
+          - "Amendment No. 2 to the Bitgrove Labs (VEN-03) statement of work under the master agreement dated 2024-03-01; executed 2026-01-26."
+          - "Scope: firmware v1.3 hotfix development, the signed v1.1 rollback image already delivered, and 90 days of post-release monitoring from the v1.3 release date."
+          - "Fee: 4,800.00, invoiced as INV-BGL-2026-006 on Net-30 terms."
+          - "CEO approval required because 4,800.00 exceeds the 1,000.00 threshold in the expense policy; Mara Voss approved 2026-01-23 ([APPROVAL] in the subject line per Ana's practice)."
+          - "Delivery target for v1.3: 2026-02-17."
+        length_words: {min: 250, max: 450}
+
+  - beat: 12
+    date: "2026-02-17"
+    event: >-
+      Bitgrove ships hotfix firmware v1.3 on schedule. Ops publishes release
+      notes; the OTA push covers all rev C units, including those pinned to
+      v1.1.
+    produces:
+      - doc_id: "vireo-fw-v13-hotfix-release-notes"
+        domain: "operations"
+        doc_type: "log"
+        in_world_date: "2026-02-17"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Firmware v1.3 released 2026-02-17 via the Bitgrove OTA service."
+          - "Fix: sleep-timer wake interrupt rescheduled so it no longer collides with the rev C LED driver PWM cycle below 20 percent duty."
+          - "Rollout: rev C units (lots LOT-2025-31 and LOT-2025-38) first, staged 25 percent on 17 Feb and 100 percent by 21 Feb; v1.1 channel pin removed."
+          - "Sleep-mode dimming is safe to re-enable after the update; support to notify customers on the 12 vireo-flicker tickets."
+        length_words: {min: 150, max: 300}
+
+  - beat: 13
+    date: "2026-02-24"
+    event: >-
+      Dmitri writes the incident postmortem covering the full timeline, root
+      cause, cost, and corrective actions.
+    produces:
+      - doc_id: "vireo-v12-flicker-postmortem"
+        domain: "operations"
+        doc_type: "postmortem"
+        in_world_date: "2026-02-24"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "Timeline: v1.2 released 09 Dec 2025; first ticket HD-2025-05402 on 11 Dec; vendor bug report 19 Dec; troubleshooting guide 22 Dec; v1.1 rollback executed 09-13 Jan; goodwill memo effective 20 Jan; v1.3 hotfix 17 Feb 2026."
+          - "Impact: 12 tickets against 618 exposed units, a 1.9 percent ticket rate; 592 units restored by rollback, 26 recovered afterward through support contact or the v1.3 push."
+          - "Root cause: v1.2 sleep-timer wake interrupt colliding with the Meridian PCB rev C LED driver PWM cycle below 20 percent duty; rev B unaffected."
+          - "Contributing factor: Bitgrove's test bench had no rev C hardware, so v1.2 shipped untested on rev C boards."
+          - "Cost: 4,800.00 SOW Amendment No. 2 (INV-BGL-2026-006) plus the 2-year goodwill warranty exposure on 618 units."
+          - "Corrective actions: rev C units added to the Bitgrove test bench; Meridian (VEN-07) rev D qualification in progress with a March 2026 target; warranty scope vireo-v12-affected tracked in Helprise."
+        length_words: {min: 500, max: 800}

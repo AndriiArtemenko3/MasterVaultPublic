@@ -1,0 +1,511 @@
+# SL1 -- Alder mat warping defect (Verdant Textiles LOT-2025-14)
+# Derived from company.yaml. Reconciliations vs. the original storyline sketch:
+#   - lot is LOT-2025-14 (company.yaml VEN-01 notes), not LOT-2025-03
+#   - invoice is INV-VRD-2025-118 (Verdant invoice_code VRD), not INV-VER-*
+#   - window starts at lot receipt 2025-06-19, not 2025-03
+# Arithmetic spine (checkers verify these):
+#   INV-VRD-2025-118: 1400 units x 12.90 = 18060.00, dated 2025-06-24, Net-45, due 2025-08-08
+#   landed unit cost 14.50 = 12.90 vendor price + 1.60 freight/receiving per unit
+#   defective total 127 of 1400 (9.07%): 109 warehouse cull + 18 field (13 B2C + 5 Stonebridge)
+#   credit memo 1638.30 = 127 x 12.90; freight claim 203.20 = 127 x 1.60, declined
+#   demand total 1841.50 = 1638.30 + 203.20 = 127 x 14.50
+#   adjusted payable 16421.70 = 18060.00 - 1638.30, ACH 2025-09-05
+#   gross program cost 2056.35 = refunds 129.90 (2 x 64.95) + replacement stock 232.00
+#     (16 x 14.50) + outbound 113.95 (11 parcels x 7.40 = 81.40, plus 32.55 Stonebridge
+#     batch) + scrap write-off 1580.50 (109 x 14.50)
+#   net cost 418.05 = 2056.35 - 1638.30
+#   single-mat B2C order total 64.95 = 59.00 list + 5.95 US-1 light shipping, OR tax 0.0
+#   Stonebridge add-on order 295.00 = 5 x 59.00, free shipping (over 75.00), OR tax 0.0
+
+storyline: SL1
+slug: alder-mat-defect
+title: "Alder mat warping defect -- Verdant Textiles LOT-2025-14"
+window:
+  start: "2025-06-19"
+  end: "2025-09-26"
+summary: >-
+  Verdant Textiles lot LOT-2025-14 (1400 Alder desk mats, received 2025-06-19)
+  carries an edge-stitch delamination defect: an adhesive cure oven ran low for
+  one shift, and affected mats curl at the edges within weeks, faster in humid
+  rooms. Support tickets trickle in through July, spike in early August, and
+  reach 14 in total, including 5 delaminated mats at B2B account Stonebridge
+  Accounting. Priya Raman flags the pattern to Dmitri Okafor, whose QA cull
+  confirms 127 defective units of 1400 (9.07%); a support macro, a recall SOP,
+  and a formal claim against Verdant follow. Verdant credits 1638.30 against
+  INV-VRD-2025-118, declines the 203.20 freight claim, signs a QC addendum on
+  2025-09-12, and Ana Petrova closes the books at 418.05 net cost on 2025-09-26.
+entities:
+  staff:
+    - "Priya Raman (support lead)"
+    - "Jonah Beck (support agent)"
+    - "Celeste Marin (support agent)"
+    - "Dmitri Okafor (operations lead)"
+    - "Hank Morrow (warehouse lead)"
+    - "Tom Aldridge (sales lead, Stonebridge relationship)"
+    - "Ana Petrova (finance)"
+    - "Mara Voss (CEO, signs vendor claim and approvals)"
+  customers:
+    - "Ruben Silva (b2c, grad-student)"
+    - "Nora Feld (b2c, wfh-professional)"
+    - "Owen Gallagher (b2c, gaming-and-work, refund)"
+    - "Tessa Nakamura (b2c, accessibility)"
+    - "Marcus Bell (b2c, wfh-professional, refund)"
+    - "Gwen Harada (b2c, one-off customer, not in repeat roster)"
+    - "Kit Donovan (b2c, small-home-office)"
+    - "Beatrix Mwangi (b2c, creative-studio, this was her first order)"
+    - "Freya Lindholm (b2c, upgrader)"
+    - "Alma Reyes (b2c, wfh-professional)"
+    - "Leo Vance (b2c, one-off customer, not in repeat roster)"
+    - "Desmond Cole (b2c, gift-buyer)"
+    - "Ivy Chen (b2c, creative-studio)"
+    - "Stonebridge Accounting -- Priti Shah, partner (b2b, 12 seats)"
+  vendors:
+    - "VEN-01 Verdant Textiles Co. (contact: Lan Pham, account manager -- derived name)"
+    - "VEN-04 ParcelPoint Fulfillment (Reno warehouse, receiving and outbound)"
+    - "VEN-06 Cascadia Freight (inbound LTL for the lot)"
+    - "VEN-10 Colefield & Tran LLP (drafted the QC addendum)"
+  skus:
+    - "LS-MAT-001-CHL"
+    - "LS-MAT-001-SND"
+    - "LS-MAT-001-SGE"
+  ids:
+    tickets:
+      - "HD-2025-04217"
+      - "HD-2025-04263"
+      - "HD-2025-04301"
+      - "HD-2025-04342"
+      - "HD-2025-04371"
+      - "HD-2025-04395"
+      - "HD-2025-04402"
+      - "HD-2025-04415"
+      - "HD-2025-04431"
+      - "HD-2025-04446"
+      - "HD-2025-04477"
+      - "HD-2025-04489"
+      - "HD-2025-04502"
+      - "HD-2025-04521"
+    invoices:
+      - "INV-VRD-2025-118"
+    orders:
+      - "#LS21406"
+      - "#LS21419"
+      - "#LS21433"
+      - "#LS21478"
+      - "#LS21502"
+      - "#LS21540"
+      - "#LS21571"
+      - "#LS21588"
+      - "#LS21609"
+      - "#LS21653"
+      - "#LS21687"
+      - "#LS21704"
+      - "#LS21745"
+      - "#LS21790"
+    lots:
+      - "LOT-2025-14"
+    opportunities:
+      - "PW-stonebridge-refresh"
+contradictions:
+  - id: C5
+    stale_doc: ticket-gwen-harada-mat-curl-policy-quote
+    current_doc: memo-refund-exception-lot-2025-14
+    stale_claim: >-
+      Returns are accepted within 30 days of delivery per the policy effective
+      2024-01-15, and opened non-defective returns carry a 10% restocking fee;
+      nothing can be refunded past the window.
+    current_claim: >-
+      Any Alder mat traced to LOT-2025-14 is refundable or replaceable
+      regardless of purchase date through 2025-12-31, with no restocking fee.
+    truth: >-
+      Ana Petrova's exception memo governs LOT-2025-14 claims from 2025-08-06
+      (macro deployment) onward. The 30-day window and 10% restocking fee
+      remain correct for ordinary, non-defective returns.
+beats:
+  - beat: 1
+    date: "2025-06-19"
+    event: >-
+      ParcelPoint receives Verdant Textiles lot LOT-2025-14 at the Reno
+      warehouse: 1400 Alder desk mats, no visible carton damage.
+    produces:
+      - doc_id: log-parcelpoint-receiving-lot-2025-14
+        domain: operations
+        doc_type: log
+        in_world_date: "2025-06-19"
+        author: "Hank Morrow"
+        required_facts:
+          - "LOT-2025-14 received 2025-06-19 at the ParcelPoint warehouse, Reno NV"
+          - "1400 units total: 600 LS-MAT-001-CHL, 500 LS-MAT-001-SND, 300 LS-MAT-001-SGE"
+          - "28 cartons of 50 units each; no visible carton damage at dock"
+          - "received against Verdant Textiles invoice INV-VRD-2025-118"
+          - "inbound leg handled by Cascadia Freight LTL"
+        length_words: {min: 80, max: 160}
+  - beat: 2
+    date: "2025-07-05"
+    event: >-
+      First trickle of warped-mat tickets: three customers report edge curl
+      within weeks of delivery. Handled as one-off complaints.
+    produces:
+      - doc_id: ticket-ruben-silva-mat-corner-curl
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-05"
+        author: "Ruben Silva"
+        required_facts:
+          - "ticket HD-2025-04217, order #LS21406 placed 2025-06-21"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal, 59.00"
+          - "corners lift about half an inch off the desk after three weeks of use"
+          - "tone: puzzled, not angry; asks if this is normal break-in"
+          - "Jonah Beck replies; free replacement shipped 2025-07-07, no return required"
+        length_words: {min: 180, max: 320}
+      - doc_id: ticket-nora-feld-mat-edge-curl
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-11"
+        author: "Nora Feld"
+        required_facts:
+          - "ticket HD-2025-04263, order #LS21433 placed 2025-06-23"
+          - "LS-MAT-001-SND Alder desk mat, sand, 59.00"
+          - "long edge waves and will not sit flat; worse after a humid week"
+          - "Celeste Marin asks for the order number first, then confirms purchase within warranty"
+          - "replacement shipped 2025-07-14"
+        length_words: {min: 180, max: 320}
+      - doc_id: ticket-owen-gallagher-mat-warp-refund
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-18"
+        author: "Owen Gallagher"
+        required_facts:
+          - "ticket HD-2025-04301, order #LS21478 placed 2025-06-27"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal; order total 64.95 (59.00 mat + 5.95 US-1 light shipping, Oregon, no sales tax)"
+          - "mat bows enough that his mouse skips; declines a replacement, wants money back"
+          - "tone: irritated; second Alder mat he has seen curl (a friend's did the same)"
+          - "Jonah Beck processes a full refund of 64.95 including shipping on 2025-07-19"
+        length_words: {min: 200, max: 350}
+  - beat: 3
+    date: "2025-07-24"
+    event: >-
+      Second wave: three more tickets in one week, tone sharpening. Celeste
+      quotes the standing 30-day return policy on one of them.
+    produces:
+      - doc_id: ticket-tessa-nakamura-mat-curl-caster
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-24"
+        author: "Tessa Nakamura"
+        required_facts:
+          - "ticket HD-2025-04342, order #LS21502 placed 2025-06-30"
+          - "LS-MAT-001-SGE Alder desk mat, sage, 59.00"
+          - "curled edge catches her chair casters; she uses a mobility chair, so this is a safety issue for her"
+          - "Priya Raman replies warmly, uses Tessa's first name in line one, restates the problem before the fix"
+          - "replacement shipped 2025-07-25 with an apology; no return required"
+        length_words: {min: 200, max: 350}
+      - doc_id: ticket-marcus-bell-mat-warp-refund
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-28"
+        author: "Marcus Bell"
+        required_facts:
+          - "ticket HD-2025-04371, order #LS21540 placed 2025-07-03"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal; order total 64.95 (59.00 mat + 5.95 US-1 light shipping, Oregon, no sales tax)"
+          - "mat warped within three weeks; requests refund, not replacement"
+          - "Celeste Marin confirms the purchase is inside the 30-day window and refunds 64.95 in full on 2025-07-29"
+          - "tone: curt; mentions he expected better at this price"
+        length_words: {min: 180, max: 320}
+      - doc_id: ticket-gwen-harada-mat-curl-policy-quote
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-07-30"
+        author: "Gwen Harada"
+        required_facts:
+          - "ticket HD-2025-04395, order #LS21571 placed 2025-07-06"
+          - "LS-MAT-001-SND Alder desk mat, sand, 59.00"
+          - "customer asks what happens if the replacement curls again in the fall"
+          - "Celeste Marin quotes policy verbatim with its effective date: returns accepted within 30 days of delivery per the policy effective 2024-01-15; opened non-defective returns carry a 10% restocking fee; beyond the window no refund is possible"
+          - "replacement shipped 2025-07-31; this policy quote is later superseded for LOT-2025-14 by Ana Petrova's exception memo (contradiction C5)"
+        length_words: {min: 200, max: 350}
+  - beat: 4
+    date: "2025-07-31"
+    event: >-
+      Priya flags the pattern to Dmitri in internal chat: six mat-curl tickets
+      in four weeks against a baseline under one per month, all on orders
+      placed 2025-06-21 or later. Dmitri traces the window to LOT-2025-14.
+    produces:
+      - doc_id: chat-priya-dmitri-mat-curl-pattern
+        domain: customer-support
+        doc_type: chat-log
+        in_world_date: "2025-07-31"
+        author: "Priya Raman"
+        required_facts:
+          - "6 mat-curl tickets since 2025-07-05: HD-2025-04217, HD-2025-04263, HD-2025-04301, HD-2025-04342, HD-2025-04371, HD-2025-04395"
+          - "trailing baseline for mat complaints is under 1 per month"
+          - "every affected order was placed on or after 2025-06-21"
+          - "Dmitri answers number first: 1400 units, LOT-2025-14, received 19 Jun at ParcelPoint"
+          - "Dmitri commits to a sample inspection at the warehouse; Priya holds pending mat tickets for a standard reply"
+        length_words: {min: 150, max: 300}
+  - beat: 5
+    date: "2025-08-01"
+    event: >-
+      The spike begins: two more tickets land while the warehouse inspection is
+      being arranged. Replacements are held pending quarantine.
+    produces:
+      - doc_id: ticket-kit-donovan-mat-warp
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-01"
+        author: "Kit Donovan"
+        required_facts:
+          - "ticket HD-2025-04402, order #LS21609 placed 2025-07-10"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal, 59.00"
+          - "edges curl upward after a muggy week in a garden-office shed"
+          - "Jonah Beck apologizes twice in one reply; replacement held during stock quarantine, ships 2025-08-12"
+          - "tone: frustrated; asks whether Larkstead has a known problem with these mats"
+        length_words: {min: 180, max: 320}
+      - doc_id: ticket-beatrix-mwangi-mat-warp
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-03"
+        author: "Beatrix Mwangi"
+        required_facts:
+          - "ticket HD-2025-04415, order #LS21588 placed 2025-07-08 -- her first Larkstead order"
+          - "LS-MAT-001-SGE Alder desk mat, sage, 59.00"
+          - "mat warped inside four weeks; she says a first purchase should not go like this"
+          - "Priya Raman handles it personally given the first-order stakes"
+          - "replacement held during stock quarantine, ships 2025-08-12"
+        length_words: {min: 180, max: 320}
+  - beat: 6
+    date: "2025-08-04"
+    event: >-
+      Dmitri's QA report confirms a lot defect: edge-stitch delamination from
+      an adhesive cure deviation, roughly 9% of the lot. Remaining stock is
+      quarantined and culled.
+    produces:
+      - doc_id: bug-report-lot-2025-14-edge-stitch-delamination
+        domain: operations
+        doc_type: bug-report
+        in_world_date: "2025-08-04"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "LOT-2025-14: 1400 units received 19 Jun 2025; 214 units shipped to customers between 20 Jun and 31 Jul; 1186 units remained on hand at inspection"
+          - "sample inspection of 200 units found 17 defective (8.5%); full cull of all 1186 remaining units set aside 109 defective units for scrap"
+          - "failure mode: edge-stitch delamination -- the edge binding separates from the mat core and the edge curls; humidity accelerates it, reproduced in chamber at 85% RH for 48 hours"
+          - "field failures to date: 8 confirmed tickets"
+          - "1077 cleared units held in quarantine pending a humidity-cycle test on 8 sample units, results due 2025-08-11"
+          - "recommended actions: support macro, recall-handling SOP, formal claim to Verdant Textiles (VEN-01) against INV-VRD-2025-118"
+        length_words: {min: 350, max: 600}
+  - beat: 7
+    date: "2025-08-06"
+    event: >-
+      Priya deploys a Helprise macro standardizing the LOT-2025-14 response;
+      Dmitri and Hank publish a recall-handling SOP two days later.
+    produces:
+      - doc_id: macro-lot-2025-14-mat-warp
+        domain: customer-support
+        doc_type: process
+        in_world_date: "2025-08-06"
+        author: "Priya Raman"
+        required_facts:
+          - "applies to Alder desk mats LS-MAT-001-CHL, LS-MAT-001-SND, LS-MAT-001-SGE on orders placed on or after 2025-06-20"
+          - "customer choice: full refund including shipping, or a free replacement; replacements ship the week of 2025-08-11 once cleared stock is released"
+          - "no return required: customer photographs the curled edge and recycles the mat; no restocking fee -- the 10% fee applies only to opened non-defective returns"
+          - "tag every ticket lot-2025-14 in Helprise and retro-tag the six pre-macro tickets"
+          - "B2B accounts escalate to Tom Aldridge; do not send the standard macro text to B2B contacts"
+        length_words: {min: 200, max: 350}
+      - doc_id: sop-defective-lot-recall-handling
+        domain: operations
+        doc_type: sop
+        in_world_date: "2025-08-08"
+        author: "Dmitri Okafor"
+        required_facts:
+          - "scope: any production lot with a confirmed defect pattern; written during the LOT-2025-14 mat recall"
+          - "quarantine the full lot at ParcelPoint within 24 hours of QA confirmation"
+          - "cull criterion per Hank Morrow: edge-stitch gap over 1/16 inch, or edge lifting more than 1/4 inch off a flat surface at rest"
+          - "culled units are photographed, counted, scrapped, and written off in Ledgerly at landed cost"
+          - "replacements ship only from cleared stock; Helprise tickets carry the lot tag; defect counts go to Dmitri Okafor every Friday"
+        length_words: {min: 300, max: 500}
+  - beat: 8
+    date: "2025-08-08"
+    event: >-
+      Spike peak: six more tickets through 2025-08-19, including Stonebridge
+      Accounting reporting 5 delaminated mats. The humidity-cycle sample passes
+      on 2025-08-11 and cleared stock is released for replacements.
+    produces:
+      - doc_id: ticket-freya-lindholm-mat-warp
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-08"
+        author: "Freya Lindholm"
+        required_facts:
+          - "ticket HD-2025-04431, order #LS21653 placed 2025-07-15"
+          - "LS-MAT-001-SND Alder desk mat, sand, 59.00"
+          - "Celeste Marin uses the new macro flow: photo of the curled edge, no return, ticket tagged lot-2025-14"
+          - "replacement shipped 2025-08-12 from cleared stock"
+        length_words: {min: 150, max: 280}
+      - doc_id: ticket-alma-reyes-mat-warp
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-09"
+        author: "Alma Reyes"
+        required_facts:
+          - "ticket HD-2025-04446, order #LS21687 placed 2025-07-18"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal, 59.00"
+          - "Priya Raman handles; macro applied, ticket tagged lot-2025-14"
+          - "replacement shipped 2025-08-12"
+          - "tone: disappointed but calm; she read about the issue in a home-office forum thread"
+        length_words: {min: 150, max: 280}
+      - doc_id: ticket-leo-vance-mat-warp
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-11"
+        author: "Leo Vance"
+        required_facts:
+          - "ticket HD-2025-04477, order #LS21704 placed 2025-07-20"
+          - "LS-MAT-001-CHL Alder desk mat, charcoal, 59.00"
+          - "Jonah Beck handles with the macro; replacement shipped 2025-08-12"
+          - "tone: blunt; threatens a card dispute if the replacement warps too"
+        length_words: {min: 150, max: 280}
+      - doc_id: ticket-stonebridge-mats-delaminated
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-12"
+        author: "Priti Shah (Stonebridge Accounting)"
+        required_facts:
+          - "ticket HD-2025-04489, order #LS21419 placed 2025-06-22; add-on order of 5 Alder mats (3 LS-MAT-001-CHL, 2 LS-MAT-001-SND) at 59.00 each, order total 295.00, free shipping over the 75.00 threshold, Oregon, no sales tax"
+          - "5 of Stonebridge's 12 Alder mats delaminated at the edges; the other 7 predate LOT-2025-14 and are fine"
+          - "Priya Raman escalates to Tom Aldridge per the macro's B2B rule; CRM opportunity PW-stonebridge-refresh"
+          - "5 replacement mats shipped 2025-08-13 from cleared stock in one batch"
+          - "tone: professional but cooling; Priti Shah notes the office looked shabby in front of clients"
+        length_words: {min: 220, max: 380}
+      - doc_id: ticket-desmond-cole-mat-warp-gift
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-14"
+        author: "Desmond Cole"
+        required_facts:
+          - "ticket HD-2025-04502, order #LS21745 placed 2025-07-24"
+          - "LS-MAT-001-SND Alder desk mat, sand, 59.00 -- bought as a gift for his sister"
+          - "tone: angry; the gift warped within three weeks and he found out at a family dinner"
+          - "Jonah Beck apologizes twice, applies the macro, ships the replacement 2025-08-15 directly to the sister's address"
+        length_words: {min: 180, max: 320}
+      - doc_id: ticket-ivy-chen-mat-warp-repeat
+        domain: customer-support
+        doc_type: ticket
+        in_world_date: "2025-08-19"
+        author: "Ivy Chen"
+        required_facts:
+          - "ticket HD-2025-04521, order #LS21790 placed 2025-07-29"
+          - "LS-MAT-001-SGE Alder desk mat, sage, 59.00, for her studio"
+          - "tone: sharp; a customer since March 2024 and says this is the first Larkstead product that failed on her"
+          - "Celeste Marin applies the macro; replacement shipped 2025-08-20"
+          - "final ticket of the incident: 14 tickets total tagged lot-2025-14"
+        length_words: {min: 180, max: 320}
+  - beat: 9
+    date: "2025-08-21"
+    event: >-
+      Mara signs a formal defect claim to Verdant Textiles, drafted with
+      Dmitri: 127 defective units, credit demanded against INV-VRD-2025-118,
+      payment held pending resolution.
+    produces:
+      - doc_id: letter-larkstead-verdant-defect-claim
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-08-21"
+        author: "Mara Voss"
+        required_facts:
+          - "formal claim letter from Larkstead Goods Co. to Verdant Textiles Co. (VEN-01), signed Mara Voss, defect data prepared by Dmitri Okafor"
+          - "127 defective units of 1400 in LOT-2025-14 (9.07%): 109 culled at the warehouse plus 18 confirmed field failures across 14 support tickets"
+          - "demand: credit of 1841.50 against INV-VRD-2025-118 -- 1638.30 for goods (127 x 12.90 invoice price) plus 203.20 pro-rated inbound freight and receiving (127 x 1.60)"
+          - "INV-VRD-2025-118 totals 18060.00 (1400 x 12.90), dated 2025-06-24, Net-45, due 2025-08-08; payment held pending resolution of this claim"
+          - "requests a corrective action plan within 10 business days; closes with one pointed question about when the plan arrives"
+        length_words: {min: 250, max: 450}
+  - beat: 10
+    date: "2025-08-29"
+    event: >-
+      Verdant Textiles responds: accepts the goods credit, declines the freight
+      claim, names the root cause, and attaches a corrective action plan.
+    produces:
+      - doc_id: letter-verdant-response-credit-offer
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-08-29"
+        author: "Lan Pham (Verdant Textiles Co.)"
+        required_facts:
+          - "Verdant accepts the goods credit of 1638.30 (127 units x 12.90) against INV-VRD-2025-118"
+          - "Verdant declines the 203.20 freight and receiving claim, citing contract terms limiting liability to goods value"
+          - "root cause: an adhesive cure oven ran 12 degrees C low for one shift on production date 2025-05-27; edge-stitch lamination did not fully bond"
+          - "corrective action plan attached; Verdant offers third-party pre-shipment inspection at its own cost for the next 3 lots"
+          - "payment hold on INV-VRD-2025-118 through resolution accepted"
+        length_words: {min: 250, max: 450}
+  - beat: 11
+    date: "2025-09-02"
+    event: >-
+      Larkstead accepts the corrective action plan; Verdant issues the credit
+      memo. Ana records the credit in Ledgerly and remits the adjusted balance.
+    produces:
+      - doc_id: credit-memo-vrd-2025-118-entry
+        domain: internal-admin
+        doc_type: invoice
+        in_world_date: "2025-09-02"
+        author: "Ana Petrova"
+        required_facts:
+          - "Verdant Textiles credit memo dated 2025-09-02, applied against INV-VRD-2025-118; corrective action plan accepted the same day"
+          - "credit amount 1638.30 = 127 defective units x 12.90 invoice price"
+          - "original invoice 18060.00 (1400 x 12.90, dated 2025-06-24, Net-45); adjusted payable 16421.70 = 18060.00 - 1638.30"
+          - "ACH remittance of 16421.70 sent 2025-09-05 via Ledgerly"
+          - "declined freight claim of 203.20 absorbed by Larkstead"
+        length_words: {min: 120, max: 250}
+  - beat: 12
+    date: "2025-09-08"
+    event: >-
+      Ana issues a refund exception memo formalizing what the macro already
+      practiced: LOT-2025-14 mats are refundable regardless of purchase date.
+      Mara approves the same day.
+    produces:
+      - doc_id: memo-refund-exception-lot-2025-14
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-09-08"
+        author: "Ana Petrova"
+        required_facts:
+          - "subject line carries [APPROVAL] per Ana's threshold habit"
+          - "exception: any Alder mat traced to LOT-2025-14 is refundable or replaceable regardless of purchase date, through 2025-12-31, no restocking fee; supersedes the standing 30-day refund window (effective 2024-01-15) for this lot only"
+          - "the 10% restocking fee does not apply because these are defective, not non-defective opened returns"
+          - "cumulative program cost to date 2056.35, above the 1000.00 CEO approval threshold in the expense policy effective 2025-07-01; Mara Voss approved 2025-09-08"
+          - "exception applies retroactively from 2025-08-06, the macro deployment date"
+        length_words: {min: 250, max: 450}
+  - beat: 13
+    date: "2025-09-12"
+    event: >-
+      A QC addendum drafted by Colefield & Tran LLP is added to the Verdant
+      supply agreement, signed by Mara Voss and Lan Pham.
+    produces:
+      - doc_id: contract-addendum-verdant-qc
+        domain: internal-admin
+        doc_type: contract
+        in_world_date: "2025-09-12"
+        author: "Mara Voss"
+        required_facts:
+          - "addendum to the Verdant Textiles Co. supply agreement dated 2023-04-01; drafted by Colefield & Tran LLP; effective 2025-09-12; signed Mara Voss (Larkstead) and Lan Pham (Verdant)"
+          - "pre-shipment sampling: AQL 2.5, general inspection level II, on every lot"
+          - "humidity-cycle test: 8 units per lot at 85% RH for 48 hours before shipment; failed lots do not ship"
+          - "third-party pre-shipment inspection at Verdant's cost for the next 3 lots"
+          - "any future lot with a confirmed defect rate above 2% triggers an automatic credit at Larkstead's landed cost (invoice price plus freight and receiving) plus replacement freight"
+        length_words: {min: 300, max: 550}
+  - beat: 14
+    date: "2025-09-26"
+    event: >-
+      Ana closes the incident with a finance memo tallying gross cost, the
+      Verdant credit, and net cost to Larkstead.
+    produces:
+      - doc_id: memo-finance-lot-2025-14-cost-tally
+        domain: internal-admin
+        doc_type: memo
+        in_world_date: "2025-09-26"
+        author: "Ana Petrova"
+        required_facts:
+          - "customer refunds 129.90 (2 refunds x 64.95: tickets HD-2025-04301 and HD-2025-04371)"
+          - "replacement stock consumed 232.00 (16 units x 14.50 landed cost: 11 B2C replacements + 5 Stonebridge)"
+          - "outbound replacement shipping 113.95 (11 parcels x 7.40 = 81.40, plus one 5-unit Stonebridge batch at 32.55, per the ParcelPoint statement); replacements shipped from Reno because LOT-2025-14 stock lived at the ParcelPoint warehouse, months before the 2026-01 full outbound cutover"
+          - "scrap write-off 1580.50 (109 culled units x 14.50 landed cost); gross program cost 2056.35"
+          - "Verdant credit 1638.30 applied against INV-VRD-2025-118; adjusted payable 16421.70 remitted by ACH 2025-09-05; net cost to Larkstead 418.05 = 2056.35 - 1638.30"
+          - "14 tickets, roughly 11.5 support hours, excluded from the claim; the 4 replacements shipped before quarantine came from the same lot and were re-checked by email in September -- zero re-failures reported as of 2025-09-26"
+        length_words: {min: 300, max: 500}
