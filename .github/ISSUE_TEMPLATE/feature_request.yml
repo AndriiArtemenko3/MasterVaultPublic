@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability or an improvement.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that MasterVault does not support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like it to do? A command, a flag, a config knob?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - ingestion
+        - retrieval / ask
+        - review queue
+        - storage / sync
+        - eval harness
+        - dataset
+        - CLI / config
+        - docs
+        - other
+    validations:
+      required: true

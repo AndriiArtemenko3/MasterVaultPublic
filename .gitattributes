@@ -1,0 +1,10 @@
+# Large precomputed artifact: the keyless demo reads this straight from the
+# clone, so it stays in-tree on purpose. Mark it binary + generated so it does
+# not skew language stats or show noisy diffs. See datasets/larkstead/README.md.
+datasets/larkstead/embeddings/embeddings.jsonl.gz binary linguist-generated
+
+# Lockfile: keep out of language stats and collapse diffs by default.
+uv.lock linguist-generated
+
+# Normalize line endings for text sources.
+* text=auto eol=lf

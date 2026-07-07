@@ -99,6 +99,13 @@ def status() -> None:
         stats = backend.stats()
     finally:
         backend.close()
+    if stats.get("initialized") is False:
+        typer.echo(
+            "index not initialized (no schema yet). run:\n"
+            "  mvault init && mvault demo load   # load the shipped demo dataset\n"
+            "  mvault init && mvault sync         # or index your own vault"
+        )
+        return
     table = Table(title="mastervault status")
     table.add_column("key")
     table.add_column("value")

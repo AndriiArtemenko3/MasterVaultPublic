@@ -1,5 +1,20 @@
 # MasterVault
 
+[![CI](https://github.com/AndriiArtemenko3/MasterVaultPublic/actions/workflows/ci.yml/badge.svg)](https://github.com/AndriiArtemenko3/MasterVaultPublic/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![Keyless demo](https://img.shields.io/badge/demo-keyless%20%2F%20%240.00-brightgreen.svg)](#quickstart)
+
+> Status: `0.1.0`, alpha. A single-user CLI you run locally. The default path
+> (SQLite + local embeddings + a mock LLM) runs with no API keys and no
+> network after first install.
+
+**Contents:** [Why this shape](#why-this-shape) · [Quickstart](#quickstart) ·
+[Architecture](#architecture-at-a-glance) · [The 10-minute tour](#the-10-minute-tour) ·
+[Eval numbers](#honest-eval-numbers) · [Command reference](#command-reference) ·
+[The dataset](#the-dataset) · [FAQ and troubleshooting](#faq-and-troubleshooting) ·
+[Documentation](#documentation) · [License](#license)
+
 MasterVault is an internal-OS RAG stack for small businesses: a Markdown vault
 of tickets, policies, contracts, and memos becomes a searchable, citable
 knowledge base without anyone hand-building a knowledge graph. Every file on
@@ -9,7 +24,9 @@ already believes, flagging contradictions instead of overwriting them.
 Retrieval fuses lexical search, vector search, and a wiki alias graph through
 Reciprocal Rank Fusion, and an agentic `ask` command runs multiple retrieval
 rounds behind a sufficiency judge before it answers, with every claim in the
-answer tied to a `[claim-id]` you can trace back to a file and a line.
+answer tied to a `[claim-id]` you can trace back to the source note it was
+extracted from (and, through that note's `provenance:`, to the raw file behind
+it).
 
 ## Why this shape
 
@@ -33,7 +50,7 @@ so `demo load` never calls an embedding model either.
 ```bash
 uv sync                        # installs mastervault + local embeddings (fastembed, keyless)
 mvault init                    # creates the workspace + index schema
-mvault demo load                # loads the Larkstead Goods Co. dataset (~9s, no network)
+mvault demo load                # loads the Larkstead Goods Co. dataset (seconds, no network)
 mvault search "refund window"   # hybrid search, fully keyless
 ```
 
@@ -53,6 +70,32 @@ keyless against a deterministic extractive fallback. The tour below uses the
 mock path so every command works with zero setup.
 
 ## Architecture at a glance
+
+```mermaid
+flowchart TD
+    raw["raw/ documents<br/>customer-support · sales-crm · operations · internal-admin"]
+    ingest["INGEST<br/>extract claims → validate → concept-match → corpus-check → route"]
+    vault["vault/ (Markdown + YAML, the canonical store)<br/>sources/ · wiki/ · decisions/ · strategy/"]
+    review["review queue<br/>human approves cross-refs, edits, contradictions"]
+    sync["SYNC → index<br/>SQLite (sqlite-vec + FTS5) or Postgres (pgvector + tsvector)"]
+    retrieval["RETRIEVAL<br/>alias front-door + lexical + vector kNN + wiki graph<br/>→ Reciprocal Rank Fusion → MMR → optional rerank"]
+    search["mvault search<br/>single hybrid pass, ranked hits"]
+    ask["mvault ask<br/>retrieve → sufficiency judge → re-query (≤3 rounds)<br/>→ grounded synthesis with [claim-id] citations<br/>→ citation gate → extractive fallback"]
+
+    raw --> ingest --> vault --> sync --> retrieval
+    ingest -. queues contradictions/edits .-> review
+    review -. approved changes .-> vault
+    retrieval --> search
+    retrieval --> ask
+
+    classDef store fill:#e8f0fe,stroke:#4285f4,color:#0b2545;
+    classDef human fill:#fff4e5,stroke:#f5a623,color:#5c3d00;
+    class vault,sync store;
+    class review human;
+```
+
+<details>
+<summary>Text version of the diagram</summary>
 
 ```
 raw/  (customer-support, sales-crm, operations, internal-admin)
@@ -80,6 +123,8 @@ mvault ask      (retrieve → sufficiency judge → re-query, up to 3 rounds
                  → grounded synthesis with [claim-id] citations
                  → citation gate → extractive fallback)
 ```
+
+</details>
 
 New evidence never overwrites a wiki concept directly. Ingestion routes each
 claim into one of four buckets: it links to an existing concept, it
@@ -300,11 +345,84 @@ first real user. Five interlocking storylines, four seeded contradictions,
 and the full account of how the corpus was built and QC'd are in
 [docs/DATASET.md](docs/DATASET.md).
 
+## FAQ and troubleshooting
+
+**Do I actually need an API key?**
+Not for `search`, `eval`, `demo`, `status`, or `lint --mechanical-only`. Those
+run on the default keyless path (SQLite, local `bge-small` embeddings, mock
+LLM). You need `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` only for generated `ask`
+answers, real `ingest` extraction, and the semantic half of `lint`.
+
+**Why does `ask` print bullet points instead of a written answer?**
+Because `llm.provider` is `mock` (the default). The retrieval is real and every
+bullet is a cited piece of evidence, but the prose is stitched, not generated.
+Set an API key and the same evidence goes through grounded synthesis. The
+command prints a one-line note when it is running in mock mode.
+
+**`mvault status` says "index not initialized".**
+Run `mvault init` first, then `mvault demo load` (for the demo) or `mvault sync`
+(for your own vault). `status` only reports; it does not create the index.
+
+**`mvault lint --mechanical-only` exits with code 1.**
+That is expected on the shipped demo. The corpus has 75 `affects:` entries
+pointing at a wiki slug typo that has not been fixed, so the mechanical check
+reports it rather than hiding it. See [docs/DATASET.md](docs/DATASET.md) for the
+full account.
+
+**`hybrid+rerank: N/A` in the eval output.**
+Cross-encoder reranking needs a key. Set `COHERE_API_KEY` (or a real
+`reranker.backend`) and run `mvault eval --config all` to add that row. The
+headline hybrid numbers do not depend on it.
+
+**Is `demo load` calling the network?**
+No. It imports the precomputed embeddings sidecar shipped in the repo, so it
+never embeds anything. The first time you run `mvault eval` (or a real `sync`),
+the local `bge-small` model downloads once to embed queries; after that it is
+offline.
+
+**How do I point it at my own documents?**
+Drop `.md`, `.txt`, or `.pdf` files in a folder and run
+`mvault ingest ./my-docs --domain operations` (domains: `customer-support`,
+`sales-crm`, `operations`, `internal-admin`). Use `--dry-run` first to see the
+plan and cost estimate. PDF ingestion is raw text extraction, with no OCR.
+
+**How do I use Postgres instead of SQLite?**
+`docker compose up -d`, then export the `DATABASE_URL` shown in the Quickstart
+and run `mvault init`. The backend is `auto`: it picks Postgres when
+`DATABASE_URL` is reachable, else SQLite. Note the compose file uses port 5433,
+not the default 5432.
+
+**How do I reset or remove the demo?**
+`mvault demo reset` restores the pristine demo (wipes the index, clears the
+review queue, re-imports). `mvault demo delete` removes the whole workspace.
+`mvault drop` deletes the index but leaves the vault files.
+
+**Which model does it use, and how do I change it?**
+Defaults live in `mastervault.toml`; every key is overridable by an `MV_`
+environment variable with `__` between sections, e.g.
+`MV_LLM__PROVIDER=openai`, `MV_EMBEDDING__PROVIDER=local`. Secrets are read only
+from the environment or `.env`, never from the TOML.
+
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the three-layer data model, retrieval path, review-queue lifecycle, storage schema, provider seams
+Start here, then follow the code map into any subsystem. Every source package
+also carries its own `README.md`.
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the three-layer data model, retrieval math, review-queue lifecycle, storage schema, provider seams
 - [docs/DATASET.md](docs/DATASET.md) — how Larkstead was built, the storylines, the QC gates
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, how to add a raw doc, golden-query rules
+- [CHANGELOG.md](CHANGELOG.md) — release notes
+- [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — reporting and community norms
+
+**Code map** (each links to a folder README):
+
+- [src/mastervault](src/mastervault) — package overview and subsystem map
+  - [pipelines](src/mastervault/pipelines) — the `ingest`, `ask`, and `lint` orchestrators
+  - [ingest](src/mastervault/ingest) · [retrieval](src/mastervault/retrieval) · [review](src/mastervault/review) — the three subsystems that make it more than vector search
+  - [storage](src/mastervault/storage) · [sync](src/mastervault/sync) · [providers](src/mastervault/providers) — backends and swappable model seams
+  - [contracts](src/mastervault/contracts) · [prompts](src/mastervault/prompts) · [core](src/mastervault/core) · [vaultfs](src/mastervault/vaultfs) · [cli](src/mastervault/cli) · [evals](src/mastervault/evals) — supporting layers
+- [datasets/larkstead](datasets/larkstead) — the synthetic corpus and its [golden set](datasets/larkstead/golden)
+- [tests](tests) · [migrations](migrations) — test suite and the Postgres schema
 
 ## License
 

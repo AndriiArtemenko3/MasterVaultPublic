@@ -5,6 +5,30 @@ description = "Internal-OS agentic RAG for small businesses: Markdown-canonical 
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
+authors = [{ name = "Andrii Artemenko", email = "andrii.art.design@gmail.com" }]
+keywords = [
+    "rag",
+    "retrieval-augmented-generation",
+    "hybrid-search",
+    "vector-search",
+    "knowledge-base",
+    "llm",
+    "pgvector",
+    "sqlite-vec",
+    "citations",
+    "agentic",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+]
 dependencies = [
     "typer>=0.12",
     "rich>=13.7",
@@ -38,6 +62,13 @@ dev = [
 [project.scripts]
 mvault = "mastervault.cli.app:main"
 vault = "mastervault.cli.app:main"
+
+[project.urls]
+Homepage = "https://github.com/AndriiArtemenko3/MasterVaultPublic"
+Repository = "https://github.com/AndriiArtemenko3/MasterVaultPublic"
+Documentation = "https://github.com/AndriiArtemenko3/MasterVaultPublic/blob/main/docs/ARCHITECTURE.md"
+Changelog = "https://github.com/AndriiArtemenko3/MasterVaultPublic/blob/main/CHANGELOG.md"
+Issues = "https://github.com/AndriiArtemenko3/MasterVaultPublic/issues"
 
 [build-system]
 requires = ["hatchling"]

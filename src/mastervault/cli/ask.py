@@ -10,7 +10,7 @@ import typer
 
 from mastervault.config import load_settings
 from mastervault.pipelines.ask import run_ask
-from mastervault.providers import get_embedding_provider, get_llm, get_reranker
+from mastervault.providers import get_embedding_provider, get_llm
 from mastervault.storage import get_backend
 
 ask_app = typer.Typer(help="Ask a grounded question against the vault.")
@@ -30,10 +30,9 @@ def ask_cmd(
     backend = get_backend(settings)
     embedder = get_embedding_provider(settings)
     llm = get_llm(settings)
-    reranker = get_reranker(settings)
     try:
         outcome = run_ask(
-            question, settings, backend, embedder, llm, reranker,
+            question, settings, backend, embedder, llm,
             domain=domain, max_rounds=max_rounds, budget_usd=budget,
         )
     finally:
@@ -82,4 +81,11 @@ def ask_cmd(
     for w in outcome.warnings:
         typer.echo(f"warning: {w}", err=True)
     typer.echo(f"\n{outcome.trace}")
+    if settings.llm.provider == "mock" and not outcome.zero_evidence:
+        typer.echo(
+            "\nnote: llm.provider=mock — this is the deterministic extractive fallback"
+            " (retrieval is real; the answer is stitched from evidence, not generated)."
+            " Set ANTHROPIC_API_KEY or OPENAI_API_KEY for generated synthesis.",
+            err=True,
+        )
     raise typer.Exit(outcome.exit_code)

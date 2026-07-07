@@ -363,14 +363,19 @@ class PostgresBackend:
     # -- maintenance ---------------------------------------------------------------
 
     def stats(self) -> dict[str, Any]:
+        meta = self._read_meta()
+        if meta is None:
+            # No meta table means the schema was never created; querying the
+            # content tables would raise UndefinedTable. Report it cleanly.
+            return {"backend": "postgres", "initialized": False}
         counts = {
             table: self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
             for table in ("documents", "claims", "claim_affects", "wiki_aliases",
                           "chunks", "embeddings")
         }
-        meta = self._read_meta() or {}
         return {
             "backend": "postgres",
+            "initialized": True,
             "counts": counts,
             "embedding_model": meta.get(META_KEY_MODEL),
             "dimensions": meta.get(META_KEY_DIM),

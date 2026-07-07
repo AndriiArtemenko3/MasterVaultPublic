@@ -44,7 +44,6 @@ from mastervault.core.runctx import RunContext
 from mastervault.models import Confidence, Hit
 from mastervault.providers.embedding import EmbeddingProvider
 from mastervault.providers.llm import LLMProvider, StructuredOutputError
-from mastervault.providers.reranker import Reranker
 from mastervault.retrieval.channels import vector_channel
 from mastervault.retrieval.mmr import mmr_select_texts
 from mastervault.retrieval.search import hybrid_search
@@ -164,7 +163,6 @@ def run_ask(
     backend: StorageBackend,
     embedder: EmbeddingProvider,
     llm: LLMProvider,
-    reranker: Reranker | None = None,
     *,
     domain: str | None = None,
     max_rounds: int | None = None,
@@ -182,7 +180,7 @@ def run_ask(
         ctx.emit(event, stage="ask", payload=payload)
 
     # -- zero-evidence short-circuit -------------------------------------------
-    round0 = hybrid_search(question, settings, backend, embedder, reranker, domain=domain)
+    round0 = hybrid_search(question, settings, backend, embedder, domain=domain)
     if not round0.hits and round0.wiki_card is None:
         nearest = _nearest_wiki_titles(backend, embedder, question)
         message = "corpus has no grounding for this question"
@@ -207,7 +205,7 @@ def run_ask(
         round_snapshot: dict[str, list[str]] = {}
         for q in queries_this_round:
             result = round0 if (round_idx == 1 and q == question) else hybrid_search(
-                q, settings, backend, embedder, reranker, domain=domain
+                q, settings, backend, embedder, domain=domain
             )
             round_snapshot[q] = [h.record_id for h in result.hits]
             for h in result.hits:

@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in MasterVault does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for the report. Please fill in enough to reproduce it.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you run, and what went wrong?
+      placeholder: "`mvault ask \"...\"` printed a traceback instead of an answer."
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact commands, starting from a clean state if you can.
+      placeholder: |
+        1. mvault init
+        2. mvault demo load
+        3. mvault ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Storage backend
+      options: ["sqlite (default)", "postgres", "not sure"]
+    validations:
+      required: true
+  - type: dropdown
+    id: llm
+    attributes:
+      label: LLM provider
+      options: ["mock (default / keyless)", "anthropic", "openai", "not sure"]
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, and `mvault version`.
+      placeholder: "macOS 14, Python 3.12, mastervault 0.1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Paste the error or the `--json` output. This is rendered as code.
+      render: shell

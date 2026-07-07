@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/AndriiArtemenko3/MasterVaultPublic/discussions
+    about: Ask how to use MasterVault, or discuss design and direction here.
+  - name: Security report
+    url: https://github.com/AndriiArtemenko3/MasterVaultPublic/security/advisories/new
+    about: Report a vulnerability privately (see SECURITY.md). Do not open a public issue.
