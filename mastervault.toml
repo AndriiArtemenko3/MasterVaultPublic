@@ -14,7 +14,9 @@ batch_size = 128
 cost_cap_usd = 1.00
 
 [llm]
-provider = "anthropic"    # anthropic | openai | mock
+# mock is keyless (deterministic extractive answers). Set to anthropic or openai
+# with the matching API key for real generative synthesis in `ask`/`ingest`.
+provider = "mock"         # anthropic | openai | mock
 # base_url = ""           # optional override for provider=openai (e.g. a compatible gateway)
 model_small = "claude-haiku-4-5"
 model_medium = "claude-sonnet-5"

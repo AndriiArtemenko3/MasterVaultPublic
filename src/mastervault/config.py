@@ -34,7 +34,10 @@ class EmbeddingCfg(BaseModel):
 
 
 class LLMCfg(BaseModel):
-    provider: Literal["anthropic", "openai", "mock"] = "anthropic"
+    # Default to the keyless mock provider so a fresh clone runs `ask`/`ingest`
+    # without an API key (deterministic extractive answers). Override with
+    # anthropic/openai + a key for real generative synthesis.
+    provider: Literal["anthropic", "openai", "mock"] = "mock"
     base_url: str | None = None  # provider="openai" only: compatible gateways
     model_small: str = "claude-haiku-4-5"
     model_medium: str = "claude-sonnet-5"

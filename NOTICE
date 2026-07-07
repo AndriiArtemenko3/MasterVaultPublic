@@ -1,0 +1,41 @@
+MasterVault — NOTICE
+
+NOTE TO REVIEWERS: this license split (Apache-2.0 code / CC BY 4.0 dataset)
+is the default the project shipped with. It is pending the repository
+owner's explicit confirmation before the first public release.
+
+------------------------------------------------------------------------------
+
+MasterVault
+Copyright 2026 Andrii A.
+
+Licensing is split by directory:
+
+1. Code — everything under `src/`, `tests/`, `migrations/`, and the
+   top-level tooling (`pyproject.toml`, `docker-compose.yml`, and this
+   repository's CLI/build scripts) is licensed under the Apache License,
+   Version 2.0. See LICENSE for the full text.
+
+2. Dataset — everything under `datasets/larkstead/` (the raw document
+   corpus, the processed vault, the bible, the golden query set, and the
+   precomputed embeddings sidecar) is licensed under the Creative Commons
+   Attribution 4.0 International License (CC BY 4.0):
+   https://creativecommons.org/licenses/by/4.0/
+
+   Attribution: "Larkstead Goods Co. dataset, MasterVault project,
+   Andrii A., 2026."
+
+3. Fictional entities — Larkstead Goods Co. and every person, company,
+   vendor, product, ticket, invoice, and transaction named in
+   `datasets/larkstead/` is entirely fictional, generated for this
+   project. Any resemblance to a real company or person is coincidental.
+   The dataset's `bible/company.yaml` maintains a `banned_strings`
+   denylist of real company and product names (Shopify, Zendesk, HubSpot,
+   Amazon, IKEA, Steelcase, and others); those names appear in that file
+   only as a denylist enforced by the corpus's mechanical checker, not as
+   references used anywhere in the dataset itself.
+
+This project embeds or depends on third-party open-source software under
+its own respective license, per the dependency list in `pyproject.toml`
+and `uv.lock`. No third-party source code is vendored into this
+repository.
