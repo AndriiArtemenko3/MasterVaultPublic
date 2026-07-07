@@ -22,7 +22,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-local = ["fastembed>=0.3"]
+local = [
+    "fastembed>=0.3",
+    # onnxruntime stopped shipping x86_64 macOS wheels after 1.20
+    "onnxruntime<1.20; sys_platform == 'darwin' and platform_machine == 'x86_64'",
+]
 rerank = ["cohere>=5.5"]
 dev = [
     "pytest>=8.2",
