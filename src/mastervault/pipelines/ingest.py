@@ -63,7 +63,7 @@ from mastervault.vaultfs.frontmatter import (
 )
 from mastervault.vaultfs.notes import slugify
 
-EXTRACT_MAX_TOKENS = 1024  # matches Contract.dispatch's default, for cost estimates
+EXTRACT_MAX_TOKENS = 4096  # matches Contract.dispatch's default, for cost estimates
 
 
 @dataclass

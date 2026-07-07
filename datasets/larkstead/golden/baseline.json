@@ -1,0 +1,1709 @@
+{
+  "generated": "2026-07-07T14:37:45+00:00",
+  "golden_query_count": 52,
+  "dataset": "larkstead",
+  "embedding_model": "BAAI/bge-small-en-v1.5",
+  "notes": [
+    "hybrid+rerank: N/A (no reranker configured -- set COHERE_API_KEY or reranker.backend to enable it)"
+  ],
+  "configs": {
+    "lexical-only": {
+      "config": "lexical-only",
+      "overall": {
+        "recall_at_5": 0.318182,
+        "recall_at_10": 0.318182,
+        "ndcg_at_10": 0.308424,
+        "mrr": 0.30303,
+        "abstention_rate": 1.0
+      },
+      "per_class": {
+        "easy-lexical": {
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.969332,
+          "mrr": 0.952381,
+          "n": 14
+        },
+        "semantic-paraphrase": {
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "n": 12
+        },
+        "cross-domain-multi-hop": {
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "n": 10
+        },
+        "contradiction": {
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "n": 8
+        },
+        "negative-no-answer": {
+          "abstention_rate": 1.0,
+          "n": 8
+        }
+      },
+      "queries": [
+        {
+          "id": "el-01",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-02",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-03",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-04",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-05",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-06",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-07",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-08",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-09",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-10",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-11",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-12",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5706417189553201,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-13",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-14",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-01",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-02",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-03",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-04",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-05",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-06",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-07",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-08",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-09",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-10",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-11",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-12",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-01",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-02",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-03",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-04",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-05",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-06",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-07",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-08",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-09",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-10",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-01",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-02",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-03",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-04",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-05",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-06",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-07",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-08",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "neg-01",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-02",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-03",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-04",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-05",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-06",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-07",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        },
+        {
+          "id": "neg-08",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": null
+        }
+      ]
+    },
+    "vector-only": {
+      "config": "vector-only",
+      "overall": {
+        "recall_at_5": 0.556818,
+        "recall_at_10": 0.715909,
+        "ndcg_at_10": 0.527324,
+        "mrr": 0.500271,
+        "abstention_rate": 1.0
+      },
+      "per_class": {
+        "easy-lexical": {
+          "recall_at_5": 0.892857,
+          "recall_at_10": 0.928571,
+          "ndcg_at_10": 0.890177,
+          "mrr": 0.892857,
+          "n": 14
+        },
+        "semantic-paraphrase": {
+          "recall_at_5": 0.375,
+          "recall_at_10": 0.666667,
+          "ndcg_at_10": 0.375446,
+          "mrr": 0.280754,
+          "n": 12
+        },
+        "cross-domain-multi-hop": {
+          "recall_at_5": 0.35,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.336274,
+          "mrr": 0.414286,
+          "n": 10
+        },
+        "contradiction": {
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.6875,
+          "ndcg_at_10": 0.35896,
+          "mrr": 0.25,
+          "n": 8
+        },
+        "negative-no-answer": {
+          "abstention_rate": 1.0,
+          "n": 8
+        }
+      },
+      "queries": [
+        {
+          "id": "el-01",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-02",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-03",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-04",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-05",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-06",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-07",
+          "class": "easy-lexical",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-08",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-09",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.6309297535714575,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-10",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-11",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-12",
+          "class": "easy-lexical",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.8315546295836225,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-13",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-14",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-01",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-02",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.3333333333333333,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-03",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.3562071871080222,
+          "mrr": 0.16666666666666666,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-04",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.48247555939075504,
+          "mrr": 0.25,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-05",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-06",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-07",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.3333333333333333,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-08",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-09",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-10",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-11",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-12",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-01",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.3065735963827292,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-02",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.2960819109658652,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-03",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.21840743681816419,
+          "mrr": 0.16666666666666666,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-04",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.23463936301137822,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-05",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-06",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.3065735963827292,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-07",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.20438239758848611,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-08",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.38685280723454163,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-09",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.6131471927654584,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-10",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.2960819109658652,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-01",
+          "class": "contradiction",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5012658353418871,
+          "mrr": 0.25,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-02",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-03",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-04",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.4911492931622974,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-05",
+          "class": "contradiction",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5437713091520254,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-06",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.2640681225725909,
+          "mrr": 0.25,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-07",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5714285040141098,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-08",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "neg-01",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-02",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-03",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-04",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-05",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-06",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-07",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-08",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        }
+      ]
+    },
+    "hybrid": {
+      "config": "hybrid",
+      "overall": {
+        "recall_at_5": 0.590909,
+        "recall_at_10": 0.715909,
+        "ndcg_at_10": 0.56464,
+        "mrr": 0.551407,
+        "abstention_rate": 0.875
+      },
+      "per_class": {
+        "easy-lexical": {
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.98931,
+          "mrr": 1.0,
+          "n": 14
+        },
+        "semantic-paraphrase": {
+          "recall_at_5": 0.458333,
+          "recall_at_10": 0.666667,
+          "ndcg_at_10": 0.425406,
+          "mrr": 0.346627,
+          "n": 12
+        },
+        "cross-domain-multi-hop": {
+          "recall_at_5": 0.3,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.311089,
+          "mrr": 0.365238,
+          "n": 10
+        },
+        "contradiction": {
+          "recall_at_5": 0.4375,
+          "recall_at_10": 0.5625,
+          "ndcg_at_10": 0.347255,
+          "mrr": 0.30625,
+          "n": 8
+        },
+        "negative-no-answer": {
+          "abstention_rate": 0.875,
+          "n": 8
+        }
+      },
+      "queries": [
+        {
+          "id": "el-01",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-02",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-03",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-04",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-05",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-06",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-07",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-08",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-09",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-10",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-11",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-12",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.8503449055347546,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-13",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "el-14",
+          "class": "easy-lexical",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-01",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-02",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-03",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.2890648263178879,
+          "mrr": 0.1,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-04",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.48247555939075504,
+          "mrr": 0.25,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-05",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-06",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-07",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.3333333333333333,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-08",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 1.0,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-09",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-10",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-11",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "sp-12",
+          "class": "semantic-paraphrase",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-01",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.20438239758848611,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-02",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.2960819109658652,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-03",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.21840743681816419,
+          "mrr": 0.16666666666666666,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-04",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.23463936301137822,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-05",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-06",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.3065735963827292,
+          "mrr": 0.3333333333333333,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-07",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.20438239758848611,
+          "mrr": 0.14285714285714285,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-08",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.23719771276929622,
+          "mrr": 0.2,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-09",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.6131471927654584,
+          "mrr": 1.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "cd-10",
+          "class": "cross-domain-multi-hop",
+          "recall_at_5": 0.3333333333333333,
+          "recall_at_10": 0.3333333333333333,
+          "ndcg_at_10": 0.2960819109658652,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-01",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.5912352048230277,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-02",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-03",
+          "class": "contradiction",
+          "recall_at_5": 1.0,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.6934264036172708,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-04",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.38685280723454163,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-05",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 1.0,
+          "ndcg_at_10": 0.6052602440527057,
+          "mrr": 0.5,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-06",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.2640681225725909,
+          "mrr": 0.25,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-07",
+          "class": "contradiction",
+          "recall_at_5": 0.5,
+          "recall_at_10": 0.5,
+          "ndcg_at_10": 0.23719771276929622,
+          "mrr": 0.2,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "ct-08",
+          "class": "contradiction",
+          "recall_at_5": 0.0,
+          "recall_at_10": 0.0,
+          "ndcg_at_10": 0.0,
+          "mrr": 0.0,
+          "abstained": null,
+          "top1_score": null
+        },
+        {
+          "id": "neg-01",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-02",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-03",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": false,
+          "top1_score": 0.02938
+        },
+        {
+          "id": "neg-04",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-05",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-06",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-07",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        },
+        {
+          "id": "neg-08",
+          "class": "negative-no-answer",
+          "recall_at_5": null,
+          "recall_at_10": null,
+          "ndcg_at_10": null,
+          "mrr": null,
+          "abstained": true,
+          "top1_score": 0.016393
+        }
+      ]
+    }
+  }
+}

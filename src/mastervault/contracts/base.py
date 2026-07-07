@@ -100,7 +100,7 @@ class Contract[OutModelT: BaseModel]:
         ledger: BudgetLedger | None = None,
         emit: EmitFn | None = None,
         version: int | None = None,
-        max_tokens: int = 1024,
+        max_tokens: int = 4096,
     ) -> DispatchResult[OutModelT]:
         ctx = ctx or {}
         send: EmitFn = emit or (lambda event, payload: None)

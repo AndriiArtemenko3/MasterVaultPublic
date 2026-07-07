@@ -1,0 +1,496 @@
+# Golden retrieval eval set for the Larkstead demo corpus.
+# 52 queries across 5 classes; see datasets/larkstead/golden/resolved.yaml for
+# the verified doc-path / claim-id resolution (100% must resolve; the resolver
+# is a build error otherwise). Built by hand against
+# datasets/larkstead/bible/storylines/*.yaml and grep-verified against the
+# actual datasets/larkstead/processed/ corpus -- every relevant_docs path and
+# relevant_claims id below was confirmed to exist at authoring time.
+- id: el-01
+  class: easy-lexical
+  query: employee who refers a candidate that Larkstead hires receives a 500.00 bonus
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-hiring-referral.md
+  relevant_claims:
+  - hr-policy-hr-policy-hiring-referral-01
+  notes: Direct fact lookup, HR policy; near-verbatim of the claim statement.
+- id: el-02
+  class: easy-lexical
+  query: employee accrues 15 days of paid time off per calendar year
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-pto-v1.md
+  relevant_claims:
+  - hr-policy-hr-policy-pto-v1-01
+  - hr-policy-hr-policy-pto-v1-02
+  notes: Direct fact lookup, HR policy; near-verbatim of the claim statement.
+- id: el-03
+  class: easy-lexical
+  query: employees receive 30% off the current list price
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-employee-product-purchase.md
+  relevant_claims:
+  - hr-policy-hr-policy-employee-product-purchase-01
+  notes: Direct fact lookup, HR policy; near-verbatim of the claim statement.
+- id: el-04
+  class: easy-lexical
+  query: Larkstead will match the list price of an identical-spec item sold by a US-based seller
+  relevant_docs:
+  - customer-support/sources/policy-policy-price-match-v2.md
+  relevant_claims:
+  - policy-policy-price-match-v2-01
+  notes: Direct fact lookup, current price-match policy; near-verbatim of the claim statement. Grounded
+    on v2 only (dropped superseded v1, which shares no vocabulary with this phrasing and isn't one of
+    the C1-C4 seeded tensions this golden set tracks).
+- id: el-05
+  class: easy-lexical
+  query: 12% off list at 30 or more units
+  relevant_docs:
+  - sales-crm/sources/policy-sl3-policy-b2b-tiers-v2.md
+  relevant_claims:
+  - policy-sl3-policy-b2b-tiers-v2-01
+  notes: Direct fact lookup, current pricing tier only; near-verbatim of the claim statement.
+- id: el-06
+  class: easy-lexical
+  query: orders of 99.00 or more in merchandise value ship free
+  relevant_docs:
+  - customer-support/sources/policy-sl5-shipping-policy-2026-01.md
+  relevant_claims:
+  - policy-sl5-shipping-policy-2026-01-01
+  - policy-sl5-shipping-policy-2026-01-10
+  notes: Direct fact lookup, current threshold only; near-verbatim of the claim statement.
+- id: el-07
+  class: easy-lexical
+  query: standard one-year warranty on all items effective January 15 2024
+  relevant_docs:
+  - sales-crm/wiki/warranty-policy.md
+  relevant_claims: []
+  notes: Wiki-only grounding (wiki entries carry no key_claims); tests the lexical_docs channel over the
+    wiki body rather than the claims channel. Near-verbatim of the wiki Definition section.
+- id: el-08
+  class: easy-lexical
+  query: escalation to Dmitri occurs on day 7 without a confirmed restock date
+  relevant_docs:
+  - operations/sources/sop-sop-backorder-communication-cadence.md
+  relevant_claims:
+  - sop-sop-backorder-communication-cadence-06
+  notes: Direct fact lookup, operations SOP; near-verbatim of the claim statement.
+- id: el-09
+  class: easy-lexical
+  query: kitting fee of 6.00 per kit
+  relevant_docs:
+  - operations/sources/project-sl3-fulfillment-plan-cobalt.md
+  relevant_claims:
+  - project-sl3-fulfillment-plan-cobalt-04
+  - project-sl3-fulfillment-plan-cobalt-05
+  notes: Direct fact lookup, SL3 fulfillment plan; near-verbatim of the claim statement.
+- id: el-10
+  class: easy-lexical
+  query: flicker at roughly 0.5 Hz during sleep-mode dim on firmware v1.2
+  relevant_docs:
+  - operations/sources/bug-report-bitgrove-bug-report-flicker-01.md
+  relevant_claims:
+  - bug-report-bitgrove-bug-report-flicker-01-03
+  - bug-report-bitgrove-bug-report-flicker-01-04
+  notes: Direct fact lookup, SL4 vendor bug report; near-verbatim of the claim statement.
+- id: el-11
+  class: easy-lexical
+  query: customers may return any item within 45 days of the delivery date
+  relevant_docs:
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  relevant_claims:
+  - policy-sl2-policy-returns-v2-01
+  notes: Direct fact lookup, current returns policy only; exact claim statement.
+- id: el-12
+  class: easy-lexical
+  query: 10 restocking fee opened defective
+  relevant_docs:
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  - customer-support/sources/faq-sl2-faq-returns.md
+  relevant_claims:
+  - policy-sl2-policy-returns-v2-08
+  - faq-sl2-faq-returns-05
+  notes: Direct fact lookup, restocking fee (10%) — telegraphic keyword form chosen so every token is
+    shared by both the stale-FAQ and current-policy claim statements (this fee is stable across both,
+    not part of the C1 tension). Value is stable across both stale and current returns docs.
+- id: el-13
+  class: easy-lexical
+  query: sparrow cable kit order is missing the adhesive clips
+  relevant_docs:
+  - customer-support/sources/ticket-ticket-derek-holt-sparrow-clips.md
+  relevant_claims:
+  - ticket-ticket-derek-holt-sparrow-clips-01
+  - ticket-ticket-derek-holt-sparrow-clips-04
+  notes: Direct fact lookup, single support ticket; near-verbatim of the claim statement.
+- id: el-14
+  class: easy-lexical
+  query: CEO threshold in the expense policy is 1,000.00
+  relevant_docs:
+  - internal-admin/sources/memo-sl3-memo-pricing-exception.md
+  relevant_claims:
+  - memo-sl3-memo-pricing-exception-05
+  notes: Direct fact lookup, expense-policy threshold; near-verbatim of the claim statement.
+- id: sp-01
+  class: semantic-paraphrase
+  query: if I'm not happy with something I bought how much time do I have to send it back
+  relevant_docs:
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  relevant_claims:
+  - policy-sl2-policy-returns-v2-01
+  notes: Paraphrase of the current return-window fact, no shared vocabulary with 'return' framing beyond
+    the concept.
+- id: sp-02
+  class: semantic-paraphrase
+  query: does my order qualify for shipping at no extra cost
+  relevant_docs:
+  - customer-support/sources/policy-sl5-shipping-policy-2026-01.md
+  relevant_claims:
+  - policy-sl5-shipping-policy-2026-01-01
+  notes: Paraphrase of the free-shipping threshold.
+- id: sp-03
+  class: semantic-paraphrase
+  query: will Larkstead beat a cheaper price I found somewhere else
+  relevant_docs:
+  - customer-support/sources/policy-policy-price-match-v2.md
+  relevant_claims:
+  - policy-policy-price-match-v2-01
+  notes: Paraphrase of the current price-match policy.
+- id: sp-04
+  class: semantic-paraphrase
+  query: why does my Vireo lamp flash on and off at night
+  relevant_docs:
+  - customer-support/wiki/vireo-flicker.md
+  - operations/sources/bug-report-bitgrove-bug-report-flicker-01.md
+  relevant_claims:
+  - bug-report-bitgrove-bug-report-flicker-01-03
+  notes: Paraphrase of the firmware flicker symptom ('flash on and off' vs 'flicker').
+- id: sp-05
+  class: semantic-paraphrase
+  query: how much money can I save buying a lot of desks at once for my office
+  relevant_docs:
+  - sales-crm/sources/policy-sl3-policy-b2b-tiers-v2.md
+  - sales-crm/wiki/pricing-tier.md
+  relevant_claims:
+  - policy-sl3-policy-b2b-tiers-v2-01
+  notes: Paraphrase of the B2B volume discount tier.
+- id: sp-06
+  class: semantic-paraphrase
+  query: what happens if I refer a friend who gets hired
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-hiring-referral.md
+  relevant_claims:
+  - hr-policy-hr-policy-hiring-referral-01
+  - hr-policy-hr-policy-hiring-referral-02
+  notes: Paraphrase of the referral bonus policy.
+- id: sp-07
+  class: semantic-paraphrase
+  query: how much vacation time do new hires build up
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-pto-v1.md
+  relevant_claims:
+  - hr-policy-hr-policy-pto-v1-01
+  notes: Paraphrase of PTO accrual ('vacation time' / 'build up' vs 'PTO' / 'accrue').
+- id: sp-08
+  class: semantic-paraphrase
+  query: can staff buy the furniture for themselves at a lower price
+  relevant_docs:
+  - internal-admin/sources/hr-policy-hr-policy-employee-product-purchase.md
+  relevant_claims:
+  - hr-policy-hr-policy-employee-product-purchase-01
+  notes: Paraphrase of the employee product discount.
+- id: sp-09
+  class: semantic-paraphrase
+  query: what do I do if my furniture shipment is delayed because it's out of stock
+  relevant_docs:
+  - operations/sources/sop-sop-backorder-communication-cadence.md
+  relevant_claims:
+  - sop-sop-backorder-communication-cadence-05
+  notes: Paraphrase of the backorder communication SOP.
+- id: sp-10
+  class: semantic-paraphrase
+  query: who has to approve a big spending exception above a thousand dollars
+  relevant_docs:
+  - internal-admin/sources/memo-sl3-memo-pricing-exception.md
+  relevant_claims:
+  - memo-sl3-memo-pricing-exception-05
+  notes: Paraphrase of the CEO approval threshold.
+- id: sp-11
+  class: semantic-paraphrase
+  query: how long is coverage on the desk lamp if it had that firmware problem
+  relevant_docs:
+  - internal-admin/sources/memo-vireo-goodwill-warranty-memo.md
+  relevant_claims:
+  - memo-vireo-goodwill-warranty-memo-01
+  - memo-vireo-goodwill-warranty-memo-03
+  notes: Paraphrase of the goodwill warranty extension for firmware-affected Vireo units.
+- id: sp-12
+  class: semantic-paraphrase
+  query: was the Cobalt Dental furniture order shipped in one big delivery or split up
+  relevant_docs:
+  - operations/sources/project-sl3-fulfillment-plan-cobalt.md
+  relevant_claims:
+  - project-sl3-fulfillment-plan-cobalt-07
+  notes: Paraphrase of the four-wave Cobalt Dental fulfillment plan.
+- id: cd-01
+  class: cross-domain-multi-hop
+  query: what caused the Alder desk mat warping complaints and how many units were affected
+  relevant_docs:
+  - customer-support/sources/chat-log-chat-priya-dmitri-mat-curl-pattern.md
+  - operations/sources/bug-report-bug-report-lot-2025-14-edge-stitch-delamination.md
+  relevant_claims:
+  - chat-log-chat-priya-dmitri-mat-curl-pattern-05
+  - bug-report-bug-report-lot-2025-14-edge-stitch-delamination-04
+  - bug-report-bug-report-lot-2025-14-edge-stitch-delamination-07
+  notes: 'SL1 alder-mat-defect: customer-support ticket pattern -> operations QA root cause. Hop 1 of
+    2.'
+- id: cd-02
+  class: cross-domain-multi-hop
+  query: what did Larkstead recover from Verdant Textiles after the defective mat lot, and are LOT-2025-14
+    customers refunded regardless of purchase date
+  relevant_docs:
+  - internal-admin/sources/memo-letter-larkstead-verdant-defect-claim.md
+  - internal-admin/sources/memo-memo-refund-exception-lot-2025-14.md
+  - operations/sources/bug-report-bug-report-lot-2025-14-edge-stitch-delamination.md
+  relevant_claims:
+  - memo-letter-larkstead-verdant-defect-claim-08
+  - memo-memo-refund-exception-lot-2025-14-01
+  notes: 'SL1 alder-mat-defect: operations defect finding -> internal-admin vendor claim + refund exception.
+    Hop 2 of 2.'
+- id: cd-03
+  class: cross-domain-multi-hop
+  query: how much did extending the return window from 30 to 45 days cost Larkstead in extra refunds
+  relevant_docs:
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  - internal-admin/sources/memo-sl2-memo-finance-impact.md
+  relevant_claims:
+  - policy-sl2-policy-returns-v2-01
+  - memo-sl2-memo-finance-impact-08
+  notes: 'SL2 refund-window-change: customer-support policy -> internal-admin finance-impact memo. Hop
+    1 of 2.'
+- id: cd-04
+  class: cross-domain-multi-hop
+  query: which customers had late returns denied under the old 30-day policy that would have been approved
+    under the new 45-day window
+  relevant_docs:
+  - customer-support/sources/ticket-sl2-ticket-hd-2024-02311.md
+  - customer-support/sources/ticket-sl2-ticket-hd-2025-01592.md
+  - internal-admin/sources/memo-sl2-memo-finance-impact.md
+  relevant_claims:
+  - ticket-sl2-ticket-hd-2024-02311-05
+  - ticket-sl2-ticket-hd-2025-01592-06
+  - memo-sl2-memo-finance-impact-09
+  notes: 'SL2 refund-window-change: two customer-support denial tickets -> internal-admin memo naming
+    both tickets retroactively. Hop 2 of 2.'
+- id: cd-05
+  class: cross-domain-multi-hop
+  query: why did the Cobalt Dental deal need CEO approval and what discount did Cobalt end up getting
+  relevant_docs:
+  - sales-crm/sources/proposal-sl3-proposal-v2.md
+  - internal-admin/sources/memo-sl3-memo-pricing-exception.md
+  relevant_claims:
+  - proposal-sl3-proposal-v2-08
+  - memo-sl3-memo-pricing-exception-04
+  - memo-sl3-memo-pricing-exception-05
+  notes: 'SL3 cobalt-dental-deal: sales-crm proposal -> internal-admin CEO-approval memo. Hop 1 of 2.'
+- id: cd-06
+  class: cross-domain-multi-hop
+  query: how was the signed Cobalt Dental order fulfilled across their four clinics
+  relevant_docs:
+  - sales-crm/sources/lead-note-sl3-lead-note-closed-won.md
+  - operations/sources/project-sl3-fulfillment-plan-cobalt.md
+  relevant_claims:
+  - lead-note-sl3-lead-note-closed-won-07
+  - project-sl3-fulfillment-plan-cobalt-07
+  notes: 'SL3 cobalt-dental-deal: sales-crm closed-won note -> operations fulfillment wave plan. Hop 2
+    of 2.'
+- id: cd-07
+  class: cross-domain-multi-hop
+  query: what firmware update caused the Vireo lamp flicker and how did Larkstead fix it for affected
+    customers
+  relevant_docs:
+  - operations/sources/bug-report-bitgrove-bug-report-flicker-01.md
+  - operations/sources/postmortem-vireo-v12-flicker-postmortem.md
+  relevant_claims:
+  - bug-report-bitgrove-bug-report-flicker-01-02
+  - postmortem-vireo-v12-flicker-postmortem-04
+  - postmortem-vireo-v12-flicker-postmortem-05
+  notes: 'SL4 vireo-firmware-flicker: operations vendor bug report -> operations postmortem covering the
+    fix. Hop 1 of 2 (support tickets feed both).'
+- id: cd-08
+  class: cross-domain-multi-hop
+  query: what warranty do customers with the flickering Vireo lamp get compared to a normal Vireo lamp
+  relevant_docs:
+  - internal-admin/sources/memo-vireo-goodwill-warranty-memo.md
+  - customer-support/sources/faq-vireo-help-doc-2024.md
+  relevant_claims:
+  - memo-vireo-goodwill-warranty-memo-01
+  - memo-vireo-goodwill-warranty-memo-04
+  - faq-vireo-help-doc-2024-05
+  notes: 'SL4 vireo-firmware-flicker: internal-admin goodwill memo -> customer-support help doc (also
+    the C4 contradiction pair). Hop 2 of 2.'
+- id: cd-09
+  class: cross-domain-multi-hop
+  query: what went wrong during the ParcelPoint fulfillment cutover and how many orders shipped late
+  relevant_docs:
+  - operations/sources/postmortem-sl5-cutover-postmortem.md
+  - customer-support/sources/ticket-sl5-ticket-hd-2026-00118.md
+  relevant_claims:
+  - postmortem-sl5-cutover-postmortem-02
+  - postmortem-sl5-cutover-postmortem-03
+  - ticket-sl5-ticket-hd-2026-00118-07
+  notes: 'SL5 parcelpoint-cutover: operations postmortem -> customer-support delay ticket. Hop 1 of 2.'
+- id: cd-10
+  class: cross-domain-multi-hop
+  query: what billing dispute did Larkstead have with ParcelPoint after the cutover and how was it resolved
+  relevant_docs:
+  - internal-admin/sources/memo-sl5-dim-weight-dispute-memo.md
+  - internal-admin/sources/contract-sl5-parcelpoint-rate-amendment-2026.md
+  - operations/sources/postmortem-sl5-cutover-postmortem.md
+  relevant_claims:
+  - memo-sl5-dim-weight-dispute-memo-02
+  - contract-sl5-parcelpoint-rate-amendment-2026-08
+  - contract-sl5-parcelpoint-rate-amendment-2026-09
+  notes: 'SL5 parcelpoint-cutover: operations cutover postmortem context -> internal-admin dispute memo
+    + rate amendment resolution. Hop 2 of 2.'
+- id: ct-01
+  class: contradiction
+  query: how many days do customers have to return an item
+  relevant_docs:
+  - customer-support/sources/faq-sl2-faq-returns.md
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  relevant_claims:
+  - faq-sl2-faq-returns-01
+  - policy-sl2-policy-returns-v2-01
+  notes: 'C1: stale FAQ says 30 days, current policy v2 says 45 days (permanent from 2026-01-12, in force
+    since 2025-11-03). Both sides should surface.'
+- id: ct-02
+  class: contradiction
+  query: is the 30 day return window still accurate
+  relevant_docs:
+  - customer-support/sources/policy-sl2-policy-returns-v1.md
+  - customer-support/sources/policy-sl2-policy-returns-v2.md
+  - customer-support/sources/sop-sl2-macros-returns-helprise.md
+  relevant_claims:
+  - policy-sl2-policy-returns-v1-01
+  - policy-sl2-policy-returns-v2-01
+  - sop-sl2-macros-returns-helprise-07
+  notes: 'C1: original policy v1 and the never-updated Helprise macro both still say 30 days; policy v2
+    supersedes at 45 days.'
+- id: ct-03
+  class: contradiction
+  query: what order total qualifies for free shipping
+  relevant_docs:
+  - customer-support/sources/faq-sl5-shipping-faq-2024.md
+  - customer-support/sources/policy-sl5-shipping-policy-2026-01.md
+  relevant_claims:
+  - faq-sl5-shipping-faq-2024-01
+  - policy-sl5-shipping-policy-2026-01-01
+  notes: 'C2: stale 2024 FAQ says 75.00, current 2026-01 policy says 99.00 (effective 2026-01-15). Both
+    sides should surface.'
+- id: ct-04
+  class: contradiction
+  query: did the free shipping minimum change recently
+  relevant_docs:
+  - customer-support/sources/faq-sl5-shipping-faq-2024.md
+  - customer-support/sources/policy-sl5-shipping-policy-2026-01.md
+  relevant_claims:
+  - faq-sl5-shipping-faq-2024-02
+  - policy-sl5-shipping-policy-2026-01-10
+  notes: 'C2: same tension as ct-03, phrased to probe the change itself rather than the current number.'
+- id: ct-05
+  class: contradiction
+  query: what is the B2B volume discount percentage and unit minimum
+  relevant_docs:
+  - sales-crm/sources/policy-sl3-onepager-b2b-pricing.md
+  - sales-crm/sources/policy-sl3-policy-b2b-tiers-v2.md
+  relevant_claims:
+  - policy-sl3-onepager-b2b-pricing-01
+  - policy-sl3-policy-b2b-tiers-v2-01
+  notes: 'C3: stale 2024-06 one-pager says 15% at 25+, current 2025-12-08 tier sheet says 12% at 30+.
+    Both sides should surface.'
+- id: ct-06
+  class: contradiction
+  query: has the bulk order discount tier for business customers changed
+  relevant_docs:
+  - sales-crm/sources/policy-sl3-onepager-b2b-pricing.md
+  - sales-crm/sources/policy-sl3-policy-b2b-tiers-v2.md
+  relevant_claims:
+  - policy-sl3-onepager-b2b-pricing-01
+  - policy-sl3-policy-b2b-tiers-v2-05
+  notes: 'C3: same tension as ct-05, phrased to probe the change itself.'
+- id: ct-07
+  class: contradiction
+  query: how long is the warranty on the Vireo smart desk lamp
+  relevant_docs:
+  - customer-support/sources/faq-vireo-help-doc-2024.md
+  - internal-admin/sources/memo-vireo-goodwill-warranty-memo.md
+  relevant_claims:
+  - faq-vireo-help-doc-2024-05
+  - memo-vireo-goodwill-warranty-memo-01
+  notes: 'C4: stale 2024 help doc says 1 year for every unit, current 2026-01-20 goodwill memo says 2
+    years for the 618 firmware-v1.2-affected units only. Both sides should surface.'
+- id: ct-08
+  class: contradiction
+  query: is the Vireo lamp warranty longer for units affected by the firmware flicker
+  relevant_docs:
+  - customer-support/sources/faq-vireo-help-doc-2024.md
+  - internal-admin/sources/memo-vireo-goodwill-warranty-memo.md
+  relevant_claims:
+  - faq-vireo-help-doc-2024-05
+  - memo-vireo-goodwill-warranty-memo-03
+  - memo-vireo-goodwill-warranty-memo-04
+  notes: 'C4: same tension as ct-07, phrased to probe the scoped exception directly.'
+- id: neg-01
+  class: negative-no-answer
+  query: does Larkstead accept cryptocurrency payments
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-02
+  class: negative-no-answer
+  query: does Larkstead offer franchise licensing opportunities
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-03
+  class: negative-no-answer
+  query: does Larkstead offer employee stock options or equity compensation
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-04
+  class: negative-no-answer
+  query: is Larkstead involved in any patent litigation
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-05
+  class: negative-no-answer
+  query: does Larkstead have a celebrity endorsement deal
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-06
+  class: negative-no-answer
+  query: does Larkstead have an augmented reality showroom feature
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-07
+  class: negative-no-answer
+  query: does Larkstead run a carbon offset program
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.
+- id: neg-08
+  class: negative-no-answer
+  query: does Larkstead have a union collective bargaining agreement
+  relevant_docs: []
+  relevant_claims: []
+  notes: Confirmed absent from the corpus (zero case-insensitive grep hits across datasets/larkstead/processed
+    at authoring time); expects abstention / low top-1 score.

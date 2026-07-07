@@ -33,6 +33,16 @@ try:
 except ImportError:
     runs_app = None
 
+try:
+    from mastervault.cli.demo import demo_app
+except ImportError:
+    demo_app = None
+
+try:
+    from mastervault.cli.evals import eval_app
+except ImportError:
+    eval_app = None
+
 app = typer.Typer(
     name="mvault",
     help="MasterVault: internal-OS agentic RAG for small businesses.",
@@ -71,6 +81,12 @@ if lint_app is not None:
 
 if runs_app is not None:
     app.add_typer(runs_app, name="runs")
+
+if demo_app is not None:
+    app.add_typer(demo_app, name="demo")
+
+if eval_app is not None:
+    app.registered_commands += eval_app.registered_commands
 
 
 def main() -> None:

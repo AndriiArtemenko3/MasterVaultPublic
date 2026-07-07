@@ -177,12 +177,58 @@ def _prepare(note: NoteRef, loaded: LoadedNote) -> _Prepared:
     return _Prepared(doc=doc, claims=claims, chunks=chunks, aliases=aliases, units=units)
 
 
+def prepare_vault(
+    vault_dir: Path | str, *, progress: Progress | None = None
+) -> tuple[list[_Prepared], list[SkippedFile]]:
+    """Walk + prepare every indexable note, without touching backend or embedder.
+
+    Shared by `sync_vault` (which upserts the result) and any caller that only
+    needs the current record_id/content_hash space of the vault, e.g. the
+    sidecar-embedding importer matching a precomputed vector file against the
+    live vault's current text.
+    """
+
+    def emit(message: str) -> None:
+        if progress is not None:
+            progress(message)
+
+    walk = walk_vault(vault_dir)
+    skipped = list(walk.skipped)
+    emit(f"walked {len(walk.notes)} notes ({len(walk.skipped)} skipped)")
+
+    prepared: list[_Prepared] = []
+    for note in walk.notes:
+        try:
+            loaded = read_note(note.abs_path)
+        except (FrontmatterError, ValidationError) as exc:
+            skipped.append(SkippedFile(note.rel_path, f"invalid note: {exc}"))
+            continue
+        prepared.append(_prepare(note, loaded))
+    return prepared, skipped
+
+
+def record_content_hashes(vault_dir: Path | str) -> dict[str, str]:
+    """{record_id: content_hash} for every current embeddable unit in the vault.
+
+    Used to validate a precomputed embeddings sidecar against the live vault
+    text before importing a vector — a record_id whose stored content_hash
+    disagrees with this map is stale and must not be imported blind.
+    """
+    prepared, _skipped = prepare_vault(vault_dir)
+    hashes: dict[str, str] = {}
+    for p in prepared:
+        for unit in p.units:
+            hashes.setdefault(unit.record_id, unit.content_hash)
+    return hashes
+
+
 def sync_vault(
     vault_dir: Path | str,
     backend: StorageBackend,
     embedder: EmbeddingProvider,
     *,
     full: bool = False,
+    embed: bool = True,
     progress: Progress | None = None,
 ) -> SyncReport:
     """Synchronise the vault tree into the storage index.
@@ -192,24 +238,20 @@ def sync_vault(
     files (walker gate or note-load failure) are reported, not indexed; a
     previously indexed version of a now-broken file is removed like any
     other absent document.
+
+    `embed=False` skips the embedding pass entirely (no `needs_embedding` /
+    `embed` / `upsert_embeddings` calls) — a metadata-only sync that populates
+    documents/claims/chunks/aliases without paying the embed-provider cost.
+    Pair it with a sidecar vector import (`mastervault.sync.load`) or a later
+    `embed=True` sync to backfill embeddings.
     """
 
     def emit(message: str) -> None:
         if progress is not None:
             progress(message)
 
-    walk = walk_vault(vault_dir)
-    report = SyncReport(skipped=list(walk.skipped))
-    emit(f"walked {len(walk.notes)} notes ({len(walk.skipped)} skipped)")
-
-    prepared: list[_Prepared] = []
-    for note in walk.notes:
-        try:
-            loaded = read_note(note.abs_path)
-        except (FrontmatterError, ValidationError) as exc:
-            report.skipped.append(SkippedFile(note.rel_path, f"invalid note: {exc}"))
-            continue
-        prepared.append(_prepare(note, loaded))
+    prepared, skipped = prepare_vault(vault_dir, progress=progress)
+    report = SyncReport(skipped=skipped)
 
     stored_hashes = {
         row.doc_id: row.content_hash
@@ -226,6 +268,10 @@ def sync_vault(
     present = {p.doc.rel_path for p in prepared}
     report.docs_deleted = len(backend.delete_documents_not_in(present))
     emit(f"deleted {report.docs_deleted} documents")
+
+    if not embed:
+        emit("embedding pass skipped (embed=False)")
+        return report
 
     # Embedding pass over every current unit, not just changed documents, so a
     # previously interrupted run converges. Duplicate record_ids keep the first

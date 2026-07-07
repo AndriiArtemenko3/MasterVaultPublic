@@ -13,12 +13,16 @@ Pipeline:
    then trim to k.
 
 Every stage tolerates empty channels — an index with no embeddings, no
-aliases, or no claims still searches cleanly.
+aliases, or no claims still searches cleanly. The same tolerance backs the
+`channels` / `use_alias` ablation knobs below: excluding a channel is just
+skipping its computation and leaving its ranked list empty, no special-casing
+needed downstream in fuse/hydrate.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +47,8 @@ GRAPH_K = 20
 GRAPH_SEED_VECTOR_TOP = 10
 
 _DOC_BODY_EXCERPT_CHARS = 600
+
+CHANNELS = ("lexical_claims", "lexical_docs", "vector", "graph")
 
 
 class SearchResult(BaseModel):
@@ -124,8 +130,21 @@ def hybrid_search(
     domain: str | None = None,
     record_types: list[str] | None = None,
     rerank: bool = False,
+    channels: Iterable[str] | None = None,
+    use_alias: bool = True,
 ) -> SearchResult:
+    """`channels` and `use_alias` are ablation knobs for the retrieval eval
+    harness (`mastervault.evals`): `channels` restricts which of the four
+    fused lists get computed (default: all four, identical to omitting the
+    argument), and `use_alias=False` disables the alias front-door (no
+    `wiki_card`, no alias-seeded graph entry). Both default to the full
+    pipeline, so existing callers are unaffected.
+    """
     timings: dict[str, float] = {}
+    active = set(CHANNELS) if channels is None else set(channels)
+    unknown = active - set(CHANNELS)
+    if unknown:
+        raise ValueError(f"unknown channel(s) {sorted(unknown)}; choose from {CHANNELS}")
 
     def timed(name: str, fn):
         start = time.perf_counter()
@@ -133,12 +152,24 @@ def hybrid_search(
         timings[name] = round(time.perf_counter() - start, 6)
         return out
 
-    wiki_doc_id, _matched_alias = timed("alias", lambda: alias_frontdoor(query, backend))
-    lex_claims = timed(
-        "lexical_claims", lambda: lexical_claims(query, backend, LEXICAL_CLAIMS_K, domain)
+    wiki_doc_id, _matched_alias = (
+        timed("alias", lambda: alias_frontdoor(query, backend)) if use_alias else (None, None)
     )
-    lex_docs = timed("lexical_docs", lambda: lexical_docs(query, backend, LEXICAL_DOCS_K, domain))
-    vec = timed("vector", lambda: vector_channel(query, backend, embedder, VECTOR_K, domain))
+    lex_claims = (
+        timed("lexical_claims", lambda: lexical_claims(query, backend, LEXICAL_CLAIMS_K, domain))
+        if "lexical_claims" in active
+        else []
+    )
+    lex_docs = (
+        timed("lexical_docs", lambda: lexical_docs(query, backend, LEXICAL_DOCS_K, domain))
+        if "lexical_docs" in active
+        else []
+    )
+    vec = (
+        timed("vector", lambda: vector_channel(query, backend, embedder, VECTOR_K, domain))
+        if "vector" in active
+        else []
+    )
 
     seed_slugs: list[str] = []
     if wiki_doc_id is not None:
@@ -148,7 +179,11 @@ def hybrid_search(
             slug = _wiki_slug(record_id)
             if slug not in seed_slugs:
                 seed_slugs.append(slug)
-    graph = timed("graph", lambda: graph_channel(seed_slugs, backend, GRAPH_K))
+    graph = (
+        timed("graph", lambda: graph_channel(seed_slugs, backend, GRAPH_K))
+        if "graph" in active
+        else []
+    )
 
     channel_lists = {
         "lexical_claims": lex_claims,
