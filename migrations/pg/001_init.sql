@@ -47,8 +47,10 @@ CREATE TABLE IF NOT EXISTS wiki_aliases (
   alias     TEXT NOT NULL,
   wiki_slug TEXT NOT NULL,
   domain    TEXT NOT NULL,
+  doc_id    TEXT REFERENCES documents ON DELETE CASCADE,
   PRIMARY KEY (alias, wiki_slug)
 );
+CREATE INDEX IF NOT EXISTS idx_aliases_doc ON wiki_aliases (doc_id);
 
 CREATE TABLE IF NOT EXISTS chunks (
   chunk_id     TEXT PRIMARY KEY,
