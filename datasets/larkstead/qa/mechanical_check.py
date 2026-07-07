@@ -8,7 +8,6 @@ qa/violations.jsonl. Read-only: never edits corpus files.
 Run from the datasets/larkstead directory or anywhere -- paths are
 resolved relative to this script's own location.
 
-    cd /Users/andriiartemenko/Desktop/MasterVaultPublic
     uv run python datasets/larkstead/qa/mechanical_check.py
 
 Checks (see run_all_checks for the numbered list):
