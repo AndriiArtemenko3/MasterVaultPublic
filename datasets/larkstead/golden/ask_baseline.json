@@ -1,0 +1,661 @@
+{
+  "overall": {
+    "cases": 14,
+    "cases_passed": 14,
+    "checks": 82,
+    "checks_passed": 82
+  },
+  "per_class": {
+    "direct-factual": {
+      "n": 2,
+      "passed": 2
+    },
+    "semantic-paraphrase": {
+      "n": 1,
+      "passed": 1
+    },
+    "cross-domain-multi-hop": {
+      "n": 1,
+      "passed": 1
+    },
+    "active-contradiction": {
+      "n": 1,
+      "passed": 1
+    },
+    "superseded-policy": {
+      "n": 1,
+      "passed": 1
+    },
+    "negative-no-answer": {
+      "n": 1,
+      "passed": 1
+    },
+    "malformed-synthesis": {
+      "n": 2,
+      "passed": 2
+    },
+    "citation-hallucination": {
+      "n": 2,
+      "passed": 2
+    },
+    "repeated-followup": {
+      "n": 1,
+      "passed": 1
+    },
+    "no-new-evidence": {
+      "n": 1,
+      "passed": 1
+    },
+    "max-rounds": {
+      "n": 1,
+      "passed": 1
+    }
+  },
+  "limitations": [
+    {
+      "id": "ask-negative-01",
+      "class": "negative-no-answer",
+      "limitation": "`ask` does not abstain on an unanswerable question: it returns a low-confidence extractive answer built from the nearest (irrelevant) records. The zero-evidence short-circuit only fires when retrieval returns literally nothing, which cannot happen against a populated index because the vector channel always yields its k nearest neighbours. Two candidate score gates were measured against the 52-query golden set and both were rejected: RRF top-1 puts 7 of 8 negatives at exactly 1/61, the same modal value as 11 of 12 semantic-paraphrase queries; raw top-1 cosine puts negatives at 0.708-0.790 while answerable paraphrases run 0.693-0.888, so negatives score HIGHER than the hardest real questions. Any threshold that abstains on the negatives suppresses most paraphrase and multi-hop answers. Abstention needs a signal these scores do not carry."
+    },
+    {
+      "id": "ask-no-new-evidence-01",
+      "class": "no-new-evidence",
+      "limitation": "The novelty floor (\"a round that adds zero new record_ids forces a stop\") cannot be triggered against this corpus at k=10: every reworded follow-up surfaces at least one record the previous round missed. Fourteen candidate rewordings were measured and the minimum novelty was 1 new record, so any ask-eval case claiming to exercise the floor here would be asserting something else. The guard is covered where it is deterministic instead -- tests/unit/pipelines/test_ask_pipeline.py:: test_novelty_floor_forces_stop_despite_insufficient_verdict, against a fixture smaller than k, where any two queries return the same records."
+    }
+  ],
+  "cases": [
+    {
+      "id": "ask-direct-01",
+      "class": "direct-factual",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_claims",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "answer_contains",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-direct-02",
+      "class": "direct-factual",
+      "passed": true,
+      "rounds": 1,
+      "extractive": false,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 2,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_claims",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "cited_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-paraphrase-01",
+      "class": "semantic-paraphrase",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-multihop-01",
+      "class": "cross-domain-multi-hop",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_domains_min",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-contradiction-01",
+      "class": "active-contradiction",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "conflicting_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-superseded-01",
+      "class": "superseded-policy",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "conflicting_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-negative-01",
+      "class": "negative-no-answer",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "`ask` does not abstain on an unanswerable question: it returns a low-confidence extractive answer built from the nearest (irrelevant) records. The zero-evidence short-circuit only fires when retrieval returns literally nothing, which cannot happen against a populated index because the vector channel always yields its k nearest neighbours. Two candidate score gates were measured against the 52-query golden set and both were rejected: RRF top-1 puts 7 of 8 negatives at exactly 1/61, the same modal value as 11 of 12 semantic-paraphrase queries; raw top-1 cosine puts negatives at 0.708-0.790 while answerable paraphrases run 0.693-0.888, so negatives score HIGHER than the hardest real questions. Any threshold that abstains on the negatives suppresses most paraphrase and multi-hop answers. Abstention needs a signal these scores do not carry.",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-malformed-01",
+      "class": "malformed-synthesis",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "answer_contains",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-malformed-02",
+      "class": "malformed-synthesis",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-hallucination-01",
+      "class": "citation-hallucination",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "answer_contains",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "warnings_contain",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-hallucination-02",
+      "class": "citation-hallucination",
+      "passed": true,
+      "rounds": 1,
+      "extractive": false,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 1,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "min_citations",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "cited_docs",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "warnings_contain",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-repeated-followup-01",
+      "class": "repeated-followup",
+      "passed": true,
+      "rounds": 1,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 10,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-no-new-evidence-01",
+      "class": "no-new-evidence",
+      "passed": true,
+      "rounds": 3,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 30,
+      "citation_count": 5,
+      "known_limitation": "The novelty floor (\"a round that adds zero new record_ids forces a stop\") cannot be triggered against this corpus at k=10: every reworded follow-up surfaces at least one record the previous round missed. Fourteen candidate rewordings were measured and the minimum novelty was 1 new record, so any ask-eval case claiming to exercise the floor here would be asserting something else. The guard is covered where it is deterministic instead -- tests/unit/pipelines/test_ask_pipeline.py:: test_novelty_floor_forces_stop_despite_insufficient_verdict, against a fixture smaller than k, where any two queries return the same records.",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "evidence_min",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds_max",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "id": "ask-max-rounds-01",
+      "class": "max-rounds",
+      "passed": true,
+      "rounds": 2,
+      "extractive": true,
+      "zero_evidence": false,
+      "evidence_count": 20,
+      "citation_count": 5,
+      "known_limitation": "",
+      "checks": [
+        {
+          "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "deterministic",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "extractive",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "rounds_max",
+          "passed": true,
+          "detail": ""
+        }
+      ]
+    }
+  ],
+  "uncovered_classes": []
+}

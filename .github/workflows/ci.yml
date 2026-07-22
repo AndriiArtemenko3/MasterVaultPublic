@@ -82,7 +82,7 @@ jobs:
         run: uv run pytest -q
 
   eval:
-    name: retrieval eval regression gate
+    name: retrieval + ask eval regression gates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,5 +109,11 @@ jobs:
           uv run mvault init
           uv run mvault demo load
 
-      - name: Eval regression gate vs frozen baseline
+      # Two gates, deliberately reported separately: `eval` grades retrieval
+      # ranking, `ask-eval` grades the whole ask pipeline end to end. A single
+      # merged number would move for either reason and mean neither.
+      - name: Retrieval eval regression gate vs frozen baseline
         run: uv run mvault eval --compare datasets/larkstead/golden/baseline.json
+
+      - name: End-to-end ask eval regression gate vs frozen baseline
+        run: uv run mvault ask-eval --compare datasets/larkstead/golden/ask_baseline.json
