@@ -80,6 +80,39 @@ Five classes, each graded differently:
   failure mode than declining to answer, and the metric keeps them separate
   on purpose.
 
+  Read that number narrowly. It says "no channel agreed on a top hit", which
+  is true of unanswerable queries *and* of hard-but-answerable ones: measured
+  across the 52-query set, 7 of 8 negatives and 11 of 12 semantic-paraphrase
+  queries share the same modal RRF top-1 score of 1/61. It is a retrieval
+  diagnostic, not a claim that `mvault ask` declines to answer — it does not.
+  See the `ask-negative-01` limitation in `golden/ask_cases.yaml`.
+
+## End-to-end ask evaluation
+
+`datasets/larkstead/golden/ask_cases.yaml` is the second, separate gate, run
+by `mvault ask-eval`. Where `mvault eval` grades retrieval ranking, this
+grades the whole `ask` pipeline: multi-round retrieval, the sufficiency
+judge, its mechanical guards, grounded synthesis, and the citation gate. The
+two are kept apart so neither number moves for the other's reasons.
+
+Cases are keyless and deterministic: each drives the real pipeline with a
+scripted mock provider and is graded mechanically — set membership, counts,
+booleans — never by an LLM judge. Two checks run on every case whether or not
+they are listed under `expect`: no answer may cite a record that was never
+retrieved, and the same case run twice must answer identically.
+
+Adding a case: give it an `id`, one of the classes in
+`mastervault.evals.ask_harness.ASK_CASE_CLASSES`, a `question`, and an
+`expect` block whose assertions would actually fail if the behaviour it names
+broke. Script `sufficiency_judge` / `grounded_synthesis` turns only when the
+case needs a path the cold mock cannot reach (malformed output, a forged
+citation, a looping judge). If a case pins behaviour that is not what we would
+want, say so in `known_limitation` rather than asserting the wrong thing — the
+report prints those, and a test refuses a limitation without an explanation.
+Then run `mvault ask-eval`, and refresh the frozen baseline with
+`mvault ask-eval --json > datasets/larkstead/golden/ask_baseline.json` only
+when the new result is deliberate.
+
 Adding a query: pick a real question, grep-confirm the answer's location (or
 its absence, for a negative), add it to `queries.yaml` with a `notes:` field
 explaining why it belongs in that class, then run `mvault eval` and check
