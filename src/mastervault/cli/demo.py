@@ -35,8 +35,8 @@ from rich.table import Table
 from mastervault.config import Settings, load_settings
 from mastervault.providers import get_embedding_provider
 from mastervault.storage import (
+    FileBackedBackend,
     SchemaMismatchError,
-    SqliteBackend,
     StorageBackend,
     StorageError,
     get_backend,
@@ -355,14 +355,13 @@ def delete_cmd(
     except StorageError:
         backend = None
     if backend is not None:
-        if isinstance(backend, SqliteBackend):
+        # A file-backed index lives inside the workspace and goes with the
+        # rmtree below; a server-backed one has to give its schema back first.
+        if isinstance(backend, FileBackedBackend):
             backend.close()
         else:
             try:
-                backend.conn.execute(
-                    "DROP TABLE IF EXISTS meta, documents, claims, claim_affects,"
-                    " wiki_aliases, chunks, embeddings CASCADE"
-                )
+                backend.drop_schema()
             finally:
                 backend.close()
 

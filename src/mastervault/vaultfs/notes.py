@@ -76,6 +76,9 @@ def read_note(path: Path | str) -> LoadedNote:
     path = Path(path)
     data, body = parse_frontmatter(path.read_text(encoding="utf-8"))
     raw_type = data.get("type")
+    if not isinstance(raw_type, str):
+        # A missing or non-string `type:` is the same defect as an unknown one.
+        raise FrontmatterError(f"unknown note type: {raw_type!r}")
     try:
         note_type = NoteType(raw_type)
     except ValueError:

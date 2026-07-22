@@ -429,16 +429,17 @@ def run_ingest(
             summary={"error": str(exc)},
         )
 
+    plan: dict[str, Any]
     if resume_run_id is None:
         files = discover_units(path)
         existing_hashes = _existing_provenance_hashes(vault_dir)
-        units: list[dict[str, Any]] = []
+        planned_units: list[dict[str, Any]] = []
         for f in files:
             raw = read_raw_text(f)
             sha = content_hash(raw)
             if sha in existing_hashes:
                 continue
-            units.append(
+            planned_units.append(
                 {
                     "unit_id": _rel_unit_id(path, f),
                     "src_path": str(f),
@@ -454,16 +455,17 @@ def run_ingest(
                 "auto_approve": auto_approve,
                 "fail_fast": fail_fast,
             },
-            "units": units,
+            "units": planned_units,
         }
         ctx.freeze_plan(plan)
     else:
         plan = ctx.plan or {}
-        domain = Domain(plan.get("args", {}).get("domain", domain.value))
-        auto_approve = plan.get("args", {}).get("auto_approve", auto_approve)
-        fail_fast = plan.get("args", {}).get("fail_fast", fail_fast)
+        args: dict[str, Any] = plan.get("args") or {}
+        domain = Domain(args.get("domain", domain.value))
+        auto_approve = args.get("auto_approve", auto_approve)
+        fail_fast = args.get("fail_fast", fail_fast)
 
-    units: list[dict[str, Any]] = plan.get("units", [])
+    units: list[dict[str, Any]] = plan.get("units") or []
 
     if dry_run:
         summary = {
@@ -581,11 +583,15 @@ def run_ingest(
     new_concept_tally: dict[str, list[tuple[str, str]]] = {}
     review_counter = [0]
 
-    written: dict[str, str] = {
-        unit_id: ev.payload.get("note")
-        for unit_id, ev in ctx.completed_units.items()
-        if ev.event == EventName.UNIT_COMPLETED and ev.payload.get("note")
-    }
+    # Replayed from the event log, so `note` is whatever JSON was written --
+    # only a non-empty string names a note we can reopen.
+    written: dict[str, str] = {}
+    for unit_id, ev in ctx.completed_units.items():
+        if ev.event != EventName.UNIT_COMPLETED:
+            continue
+        note = ev.payload.get("note")
+        if isinstance(note, str) and note:
+            written[unit_id] = note
     written.update(newly_completed)
 
     for unit_id, note_rel in written.items():

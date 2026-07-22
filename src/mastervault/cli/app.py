@@ -2,46 +2,37 @@
 
 from __future__ import annotations
 
+import importlib
+
 import typer
 
 from mastervault import __version__
 from mastervault.cli.admin import admin_app
 from mastervault.cli.query import query_app
 
-try:  # the review CLI lands separately; the root app must not depend on it
-    from mastervault.cli.review import review_app
-except ImportError:
-    review_app = None
 
-try:  # the pipeline CLIs land separately; the root app must not depend on them
-    from mastervault.cli.ask import ask_app
-except ImportError:
-    ask_app = None
+def _optional_typer(module: str, attr: str) -> typer.Typer | None:
+    """Load a sub-app that may not be installed, or None.
 
-try:
-    from mastervault.cli.ingest import ingest_app
-except ImportError:
-    ingest_app = None
+    The review/pipeline/demo/eval CLIs land separately, so the root app must
+    stay importable without them; an ImportError anywhere in a sub-app's own
+    import graph simply drops that command group.
+    """
+    try:
+        loaded = importlib.import_module(module)
+    except ImportError:
+        return None
+    sub_app = getattr(loaded, attr, None)
+    return sub_app if isinstance(sub_app, typer.Typer) else None
 
-try:
-    from mastervault.cli.lint import lint_app
-except ImportError:
-    lint_app = None
 
-try:
-    from mastervault.cli.runs import runs_app
-except ImportError:
-    runs_app = None
-
-try:
-    from mastervault.cli.demo import demo_app
-except ImportError:
-    demo_app = None
-
-try:
-    from mastervault.cli.evals import eval_app
-except ImportError:
-    eval_app = None
+review_app = _optional_typer("mastervault.cli.review", "review_app")
+ask_app = _optional_typer("mastervault.cli.ask", "ask_app")
+ingest_app = _optional_typer("mastervault.cli.ingest", "ingest_app")
+lint_app = _optional_typer("mastervault.cli.lint", "lint_app")
+runs_app = _optional_typer("mastervault.cli.runs", "runs_app")
+demo_app = _optional_typer("mastervault.cli.demo", "demo_app")
+eval_app = _optional_typer("mastervault.cli.evals", "eval_app")
 
 app = typer.Typer(
     name="mvault",

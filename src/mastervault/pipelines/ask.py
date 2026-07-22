@@ -273,24 +273,26 @@ def run_ask(
             emit=emit,
         )
     except (BudgetExceeded, StructuredOutputError):
-        extractive = True
         synth_result = None
 
-    if not extractive:
-        if not synth_result.ok or synth_result.parsed is None:
+    # Every way synthesis can fail to produce a usable grounded answer -- it
+    # raised, it came back not-ok, it parsed to nothing, or the citation gate
+    # stripped every id -- funnels into the same extractive fallback.
+    parsed = synth_result.parsed if synth_result is not None and synth_result.ok else None
+    if parsed is None:
+        extractive = True
+    else:
+        cleaned, valid_ids, strip_warnings = _apply_citation_gate(
+            parsed.answer_markdown, set(evidence_by_id)
+        )
+        warnings.extend(strip_warnings)
+        if not valid_ids:
             extractive = True
         else:
-            cleaned, valid_ids, strip_warnings = _apply_citation_gate(
-                synth_result.parsed.answer_markdown, set(evidence_by_id)
-            )
-            warnings.extend(strip_warnings)
-            if not valid_ids:
-                extractive = True
-            else:
-                answer_markdown = cleaned
-                confidence = synth_result.parsed.confidence.value
-                gaps = list(synth_result.parsed.gaps)
-                cited_hits = [evidence_by_id[i] for i in valid_ids if i in evidence_by_id]
+            answer_markdown = cleaned
+            confidence = parsed.confidence.value
+            gaps = list(parsed.gaps)
+            cited_hits = [evidence_by_id[i] for i in valid_ids if i in evidence_by_id]
 
     if extractive:
         top5 = _mmr_pick(question, all_hits, EXTRACTIVE_CARDS_N, settings.retrieval.mmr_lambda)

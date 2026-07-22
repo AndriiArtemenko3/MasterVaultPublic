@@ -30,6 +30,8 @@ from mastervault.storage.base import (
     ClaimRow,
     DocumentRow,
     EmbeddingRow,
+    HydratedChunkRow,
+    HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
     overfetch_limit,
@@ -39,8 +41,20 @@ _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations" / "
 
 _CONFIDENCE_ORDER_SQL = "CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
 
+_INDEX_TABLES = (
+    "meta",
+    "documents",
+    "claims",
+    "claim_affects",
+    "wiki_aliases",
+    "chunks",
+    "embeddings",
+)
+
 
 class PostgresBackend:
+    name = "postgres"
+
     def __init__(
         self,
         url: str,
@@ -63,9 +77,16 @@ class PostgresBackend:
             register_vector(self.conn)
             self._vector_registered = True
 
+    def _scalar(self, sql: str) -> Any:
+        """First column of the first row of a query that returns exactly one row."""
+        row = self.conn.execute(sql).fetchone()
+        if row is None:  # pragma: no cover — the callers below always yield a row
+            raise StorageError(f"expected exactly one row from: {sql}")
+        return row[0]
+
     def _read_meta(self) -> dict[str, Any] | None:
         """meta rows as a dict, or None when the meta table does not exist yet."""
-        if self.conn.execute("SELECT to_regclass('meta')").fetchone()[0] is None:
+        if self._scalar("SELECT to_regclass('meta')") is None:
             return None
         rows = self.conn.execute("SELECT key, value FROM meta").fetchall()
         return dict(rows)
@@ -317,7 +338,7 @@ class PostgresBackend:
         }
         return [by_id[d] for d in doc_ids if d in by_id]
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]:
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
         if not claim_ids:
             return []
         rows = self.conn.execute(
@@ -333,7 +354,7 @@ class PostgresBackend:
             (claim_ids,),
         ).fetchall()
         by_id = {
-            r[0]: ClaimRow(
+            r[0]: HydratedClaimRow(
                 claim_id=r[0], doc_id=r[1], ordinal=r[2], statement=r[3], confidence=r[4],
                 content_hash=r[5], affects=list(r[8]), rel_path=r[6], domain=r[7],
             )
@@ -341,7 +362,7 @@ class PostgresBackend:
         }
         return [by_id[c] for c in claim_ids if c in by_id]
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
         if not chunk_ids:
             return []
         rows = self.conn.execute(
@@ -352,7 +373,7 @@ class PostgresBackend:
             (chunk_ids,),
         ).fetchall()
         by_id = {
-            r[0]: ChunkRow(
+            r[0]: HydratedChunkRow(
                 chunk_id=r[0], doc_id=r[1], ordinal=r[2], text=r[3], content_hash=r[4],
                 rel_path=r[5], domain=r[6],
             )
@@ -369,7 +390,7 @@ class PostgresBackend:
             # content tables would raise UndefinedTable. Report it cleanly.
             return {"backend": "postgres", "initialized": False}
         counts = {
-            table: self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            table: self._scalar(f"SELECT count(*) FROM {table}")
             for table in ("documents", "claims", "claim_affects", "wiki_aliases",
                           "chunks", "embeddings")
         }
@@ -387,6 +408,12 @@ class PostgresBackend:
             self.conn.execute(
                 "TRUNCATE documents, claims, claim_affects, wiki_aliases, chunks,"
                 " embeddings CASCADE"
+            )
+
+    def drop_schema(self) -> None:
+        with self.conn.transaction():
+            self.conn.execute(
+                f"DROP TABLE IF EXISTS {', '.join(_INDEX_TABLES)} CASCADE"
             )
 
     def close(self) -> None:

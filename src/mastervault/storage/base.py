@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -44,6 +45,8 @@ class DocumentRow:
 
 @dataclass
 class ClaimRow:
+    """Write transport for a claim. Carries only what the claims table stores."""
+
     claim_id: str
     doc_id: str
     ordinal: int
@@ -51,21 +54,40 @@ class ClaimRow:
     confidence: str  # low | medium | high
     content_hash: str
     affects: list[str] = field(default_factory=list)  # wiki slugs -> claim_affects
-    # Hydration-only fields: populated by get_claims() via join; ignored on write.
-    rel_path: str | None = None
-    domain: str | None = None
+
+
+@dataclass
+class HydratedClaimRow(ClaimRow):
+    """A claim joined with its document.
+
+    Read transport returned by get_claims(): rel_path/domain come from the
+    documents join and are therefore always populated, unlike on the write
+    transport where they do not exist at all. Keeping the two shapes distinct
+    means retrieval never has to defensively narrow a value the query already
+    guarantees.
+    """
+
+    rel_path: str = ""
+    domain: str = ""
 
 
 @dataclass
 class ChunkRow:
+    """Write transport for a chunk. Carries only what the chunks table stores."""
+
     chunk_id: str
     doc_id: str
     ordinal: int
     text: str
     content_hash: str
-    # Hydration-only fields: populated by get_chunks() via join; ignored on write.
-    rel_path: str | None = None
-    domain: str | None = None
+
+
+@dataclass
+class HydratedChunkRow(ChunkRow):
+    """A chunk joined with its document; see HydratedClaimRow."""
+
+    rel_path: str = ""
+    domain: str = ""
 
 
 @dataclass
@@ -119,6 +141,15 @@ def overfetch_limit(k: int, record_types: list[str] | None, domain: str | None) 
 @runtime_checkable
 class StorageBackend(Protocol):
     """One index backend. All methods are synchronous; one connection per instance."""
+
+    @property
+    def name(self) -> str:
+        """Stable backend identifier: "sqlite" | "postgres".
+
+        Lets application layers report which backend they acted on without
+        importing a concrete backend class or reaching for its driver handle.
+        """
+        ...
 
     def init_schema(self, dim: int, model_version: str) -> None:
         """Create or validate the schema.
@@ -192,9 +223,13 @@ class StorageBackend(Protocol):
 
     def get_documents(self, doc_ids: list[str]) -> list[DocumentRow]: ...
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]: ...
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
+        """Claims joined with their documents, in input order; unknown ids dropped."""
+        ...
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]: ...
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
+        """Chunks joined with their documents, in input order; unknown ids dropped."""
+        ...
 
     def stats(self) -> dict[str, Any]: ...
 
@@ -203,4 +238,27 @@ class StorageBackend(Protocol):
         wiki_aliases/chunks/embeddings). Keeps the meta identity rows."""
         ...
 
+    def drop_schema(self) -> None:
+        """Remove every schema object this backend owns, meta included.
+
+        The destructive counterpart to wipe(): wipe() empties the content but
+        keeps the index identity, drop_schema() takes the schema itself away so
+        a later init_schema() rebuilds it from nothing (and may pick a new
+        embedding model/dim without tripping SchemaMismatchError). Idempotent.
+        """
+        ...
+
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class FileBackedBackend(StorageBackend, Protocol):
+    """Capability: the whole index lives in one local file.
+
+    Lets `mvault drop` / `mvault demo delete` remove a file-backed index by
+    deleting its file rather than dropping tables, without the application
+    layer importing a concrete backend class or touching its driver handle.
+    """
+
+    @property
+    def db_path(self) -> Path: ...

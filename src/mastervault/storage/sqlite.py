@@ -33,6 +33,8 @@ from mastervault.storage.base import (
     ClaimRow,
     DocumentRow,
     EmbeddingRow,
+    HydratedChunkRow,
+    HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
     overfetch_limit,
@@ -146,7 +148,22 @@ def _placeholders(n: int) -> str:
     return ",".join("?" * n)
 
 
+_ALL_TABLES = (
+    "claim_affects",
+    "claims",
+    "chunks",
+    "wiki_aliases",
+    "embeddings",
+    "documents",
+    "vec_records",
+    "claims_fts",
+    "documents_fts",
+)
+
+
 class SqliteBackend:
+    name = "sqlite"
+
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -486,7 +503,7 @@ class SqliteBackend:
         }
         return [by_id[d] for d in doc_ids if d in by_id]
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]:
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
         if not claim_ids:
             return []
         ph = _placeholders(len(claim_ids))
@@ -506,7 +523,7 @@ class SqliteBackend:
         ):
             affects.setdefault(r["claim_id"], []).append(r["wiki_slug"])
         by_id = {
-            r["claim_id"]: ClaimRow(
+            r["claim_id"]: HydratedClaimRow(
                 claim_id=r["claim_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
                 statement=r["statement"], confidence=r["confidence"],
                 content_hash=r["content_hash"], affects=affects.get(r["claim_id"], []),
@@ -516,7 +533,7 @@ class SqliteBackend:
         }
         return [by_id[c] for c in claim_ids if c in by_id]
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
         if not chunk_ids:
             return []
         rows = self.conn.execute(
@@ -528,7 +545,7 @@ class SqliteBackend:
             chunk_ids,
         ).fetchall()
         by_id = {
-            r["chunk_id"]: ChunkRow(
+            r["chunk_id"]: HydratedChunkRow(
                 chunk_id=r["chunk_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
                 text=r["text"], content_hash=r["content_hash"],
                 rel_path=r["rel_path"], domain=r["domain"],
@@ -562,10 +579,16 @@ class SqliteBackend:
 
     def wipe(self) -> None:
         with self.conn:
-            for table in ("claim_affects", "claims", "chunks", "wiki_aliases",
-                          "embeddings", "documents", "vec_records", "claims_fts",
-                          "documents_fts"):
+            for table in _ALL_TABLES:
                 self.conn.execute(f"DELETE FROM {table}")
+
+    def drop_schema(self) -> None:
+        # Child-before-parent order so the implicit row removal behind each
+        # DROP TABLE never trips a foreign key. `meta` goes last: while it
+        # exists the index still advertises an embedding model/dim.
+        with self.conn:
+            for table in (*_ALL_TABLES, "meta"):
+                self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     def close(self) -> None:
         self.conn.close()

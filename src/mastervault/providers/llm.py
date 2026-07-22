@@ -138,7 +138,14 @@ class AnthropicLLM:
     def _tool_input(response: Any) -> dict[str, Any]:
         for block in response.content:
             if getattr(block, "type", None) == "tool_use":
-                return block.input
+                # SDK boundary: the block payload is untyped, and a tool_use
+                # input is a JSON object by protocol -- verify rather than assume.
+                tool_input = block.input
+                if not isinstance(tool_input, dict):
+                    raise ValueError(
+                        f"tool_use block carried {type(tool_input).__name__}, expected an object"
+                    )
+                return tool_input
         raise ValueError("response contained no tool_use block")
 
     @staticmethod
@@ -318,9 +325,13 @@ def _schema_default(prop: dict[str, Any]) -> Any:
     if "default" in prop:
         return prop["default"]
     prop_type = prop.get("type")
-    if isinstance(prop_type, list) and prop_type:
-        prop_type = prop_type[0]
-    return {
+    if isinstance(prop_type, list):
+        # JSON Schema allows a type union (["string", "null"]); take the first.
+        prop_type = prop_type[0] if prop_type else None
+    if not isinstance(prop_type, str):
+        # Absent, empty-union, or exotic ($ref/anyOf-only) -> no usable default.
+        return None
+    defaults: dict[str, Any] = {
         "string": "",
         "integer": 0,
         "number": 0.0,
@@ -328,7 +339,8 @@ def _schema_default(prop: dict[str, Any]) -> Any:
         "array": [],
         "object": {},
         "null": None,
-    }.get(prop_type)
+    }
+    return defaults.get(prop_type)
 
 
 def _default_instance(response_model: type[BaseModel], overrides: dict[str, Any]) -> BaseModel:

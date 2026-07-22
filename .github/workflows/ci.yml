@@ -28,9 +28,8 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check src tests
 
-      - name: Type check (mypy, non-blocking)
+      - name: Type check (mypy)
         run: uv run mypy src
-        continue-on-error: true
 
       - name: Tests
         run: uv run pytest -q
