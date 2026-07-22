@@ -1,17 +1,37 @@
 name: Publish to PyPI
 
-# Runs only when a version tag is pushed, e.g. `git tag v0.1.0 && git push --tags`.
+# Runs only when a version tag is pushed, e.g. `git tag v0.2.0 && git push --tags`.
 # Inert until then. Uses PyPI Trusted Publishing (OIDC): configure a trusted
 # publisher for this repo at https://pypi.org/manage/project/mastervault/settings/publishing/
 # (no API token needed once that is set up).
+#
+# SAFETY GATE: a tag cannot reach PyPI on an unverified commit. The `verify` job
+# below runs the whole CI workflow against the tagged commit itself -- ruff,
+# blocking mypy, the SQLite suite, the PostgreSQL/pgvector suite, the coverage
+# floor, the retrieval and ask eval regression gates, and the package
+# build/clean-install smoke test. `build` and `publish` both require it, so a
+# failure anywhere in that suite stops the release.
 
 on:
   push:
     tags: ["v*"]
 
+# Least privilege by default; the publish job widens this for OIDC only. The
+# reusable workflow called below inherits these, which is all `checkout` needs.
+permissions:
+  contents: read
+
 jobs:
+  # The complete mandatory suite, for this exact commit. Reusing CI via
+  # workflow_call rather than duplicating its jobs means there is exactly one
+  # definition of "verified" for both pull requests and releases.
+  verify:
+    name: verify (full CI suite)
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: build distribution
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,22 +41,31 @@ jobs:
           python-version: "3.12"
       - name: Build sdist + wheel
         run: uv build
+      # Named `pypi-dist`, NOT `dist`: the `verify` job above runs ci.yml in
+      # this same workflow run, and its `package` job already uploads a `dist`
+      # artifact. Artifact names must be unique per run under upload-artifact
+      # v4, so reusing the name would fail the release with a conflict.
+      # Deliberately not `overwrite: true` -- clobbering the verified CI
+      # artifact would destroy the audit trail for what was actually checked.
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: pypi-dist
           path: dist/
 
   publish:
     name: publish to PyPI
-    needs: build
+    # `build` already implies `verify`, but naming both means dropping the gate
+    # takes a deliberate edit here and not just an accident upstream.
+    needs: [verify, build]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write  # required for trusted publishing
+      contents: read
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: pypi-dist
           path: dist/
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1

@@ -24,13 +24,11 @@ key_claims:
 - id: competitor-note-competitor-note-ergonest-support-es-e4404fc6-04
   statement: ErgoNest offers a 10-18% price band with weekly codes.
   confidence: high
-  affects:
-  - price-posture
+  affects: []
 - id: competitor-note-competitor-note-ergonest-support-es-e4404fc6-05
   statement: ErgoNest has lower prices and 2-day shipping on desks.
   confidence: high
-  affects:
-  - shipping-speed
+  affects: []
 - id: competitor-note-competitor-note-ergonest-support-es-e4404fc6-06
   statement: ErgoNest offers 9 chair models compared to our 1.
   confidence: high

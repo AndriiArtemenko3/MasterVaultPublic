@@ -6,6 +6,9 @@ backends; postgres tests skip only when DATABASE_URL is unset or unreachable.
 
 from __future__ import annotations
 
+import sqlite3
+
+import psycopg
 import pytest
 
 from mastervault.models import content_hash
@@ -16,11 +19,17 @@ from mastervault.storage.base import (
     DocumentRow,
     EmbeddingRow,
     SchemaMismatchError,
+    StorageError,
 )
 
 pytestmark = pytest.mark.integration
 
 DIM = 8
+
+# Both drivers raise their own DB-API IntegrityError subclass for a duplicate
+# primary key; the parity assertion is that *some* integrity error escapes and
+# the write is undone, not which class it is.
+INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
 
 
 # ---------------------------------------------------------------------------
@@ -438,3 +447,236 @@ def test_wipe_truncates_everything_but_stays_usable(backend, dim, model_version)
     backend.init_schema(dim, model_version)
     seed_zebra_doc(backend)
     assert backend.stats()["counts"]["documents"] == 1
+
+
+# ---------------------------------------------------------------------------
+# drop_schema
+# ---------------------------------------------------------------------------
+
+
+def test_drop_schema_removes_the_index_and_its_identity(backend, dim, model_version):
+    doc, _, _ = seed_zebra_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+    ])
+
+    backend.drop_schema()
+
+    # No schema means no identity to compare against, so stats() must say so
+    # rather than raising "no such table" / UndefinedTable.
+    assert backend.stats()["initialized"] is False
+
+    # ...and the index can be rebuilt from nothing, including under a different
+    # embedding model, which init_schema would otherwise refuse.
+    backend.init_schema(dim, "a-completely-different-model-v3")
+    assert backend.stats()["counts"]["documents"] == 0
+    assert backend.knn(basis(0), k=3) == []
+
+
+def test_drop_schema_is_idempotent(backend):
+    seed_zebra_doc(backend)
+    backend.drop_schema()
+    backend.drop_schema()
+    assert backend.stats()["initialized"] is False
+
+
+# ---------------------------------------------------------------------------
+# transaction rollback
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_document_rolls_back_every_table_on_failure(backend, model_version):
+    """A mid-transaction failure must leave the previous document untouched.
+
+    upsert_document is a replace: it rewrites the document row and deletes the
+    old claims/chunks/aliases before inserting the new ones. If the claim insert
+    fails partway (here: a duplicate claim_id inside the batch), a
+    non-transactional implementation would leave the document updated and its
+    claims gone.
+    """
+    doc, claims, chunks = seed_zebra_doc(backend)
+    seed_wiki_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+    ])
+
+    poisoned = doc_row(
+        doc.doc_id, doc.rel_path, domain="operations",
+        title="Rewritten title", body="Rewritten body that must never be persisted.",
+    )
+    duplicate_claims = [
+        claim_row("dupe-claim", doc.doc_id, 0, "First insert of the duplicated id."),
+        claim_row("dupe-claim", doc.doc_id, 1, "Second insert of the duplicated id."),
+    ]
+
+    with pytest.raises(INTEGRITY_ERRORS):
+        backend.upsert_document(poisoned, duplicate_claims, [], [])
+
+    # document row unchanged
+    got_doc = backend.get_documents([doc.doc_id])[0]
+    assert got_doc.title == doc.title
+    assert got_doc.body == doc.body
+    # claims, their affects edges, chunks and the lexical indexes all survived
+    assert [c.claim_id for c in backend.get_claims([c.claim_id for c in claims])] == [
+        c.claim_id for c in claims
+    ]
+    assert backend.get_claims(["dupe-claim"]) == []
+    assert backend.claims_for_wiki(["migration-corridor"], k=10) == [
+        "zebra-note-01", "zebra-note-02",
+    ]
+    assert len(backend.get_chunks([chunks[0].chunk_id])) == 1
+    assert backend.lexical_claims("refreshed quarterly", k=5) == ["zebra-note-01"]
+    assert backend.lexical_docs("zebra migration corridor", k=5) == [doc.doc_id]
+    # and the vector index still resolves
+    assert [rid for rid, _ in backend.knn(basis(0), k=3)] == ["claim:zebra-note-01"]
+
+
+def test_upsert_embeddings_leaves_no_partial_batch_on_failure(backend, model_version):
+    """A rejected row in a batch must not half-apply the batch."""
+    doc, _, _ = seed_zebra_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+    ])
+
+    batch = [
+        emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
+        emb_row(f"chunk:{doc.doc_id}#0", [0.0] * DIM, record_type="chunk",
+                doc_id=doc.doc_id, model=model_version),
+    ]
+    with pytest.raises(StorageError):
+        backend.upsert_embeddings(batch)
+
+    # neither the good row nor the bad row from the failed batch landed
+    assert backend.stats()["counts"]["embeddings"] == 1
+    assert "claim:zebra-note-02" not in {rid for rid, _ in backend.knn(basis(1), k=5)}
+    assert backend.needs_embedding(
+        [("claim:zebra-note-02", batch[0].content_hash)], model_version
+    ) == ["claim:zebra-note-02"]
+    # the pre-existing embedding is untouched and still exactly on basis(0)
+    survivors = backend.knn(basis(0), k=5)
+    assert [rid for rid, _ in survivors] == ["claim:zebra-note-01"]
+    assert survivors[0][1] == pytest.approx(1.0, abs=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# vector hygiene
+# ---------------------------------------------------------------------------
+
+
+def test_zero_vector_is_refused_on_write_and_query(backend, model_version):
+    """Cosine has no direction for the zero vector, so both backends refuse it.
+
+    Postgres would otherwise accept it, return NaN from `<=>`, and have the
+    HNSW cosine index silently drop the row -- leaving a record that
+    needs_embedding() considers indexed but knn() can never return.
+    """
+    doc, _, _ = seed_zebra_doc(backend)
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.upsert_embeddings([
+            emb_row("claim:zebra-note-01", [0.0] * DIM, doc_id=doc.doc_id,
+                    model=model_version),
+        ])
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.knn([0.0] * DIM, k=3)
+
+
+def test_reupserting_an_embedding_replaces_it_rather_than_duplicating(backend, model_version):
+    """Re-embedding the same record_id moves it in the ANN index, once."""
+    doc, _, _ = seed_zebra_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+    ])
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(1), doc_id=doc.doc_id, model=model_version,
+                text="an edited statement"),
+    ])
+
+    assert backend.stats()["counts"]["embeddings"] == 1
+    # the old position no longer matches, the new one does, and only once
+    assert [rid for rid, _ in backend.knn(basis(1), k=5)] == ["claim:zebra-note-01"]
+    old_hits = backend.knn(basis(0), k=5)
+    assert [rid for rid, _ in old_hits] == ["claim:zebra-note-01"]
+    assert old_hits[0][1] == pytest.approx(0.0, abs=1e-3)  # now orthogonal
+    # and the stored content hash moved with it
+    assert backend.needs_embedding(
+        [("claim:zebra-note-01", content_hash("an edited statement"))], model_version
+    ) == []
+
+
+# ---------------------------------------------------------------------------
+# Vector hygiene, part 2: defects found in the 0.2.0 data-integrity audit
+# ---------------------------------------------------------------------------
+
+
+def test_a_vector_whose_float32_norm_underflows_is_refused(backend, model_version):
+    """`any(vector)` was not enough, and the gap was backend-asymmetric.
+
+    A vector of tiny components is non-zero in Python but zero-norm in float32.
+    SQLite rejected it; Postgres accepted it, clamped `dot / 0` to a similarity
+    of 1.0, and the row became the top hit for EVERY query.
+    """
+    doc, _, _ = seed_zebra_doc(backend)
+    tiny = [1e-25] * DIM
+    assert any(tiny), "the fixture must be non-zero in Python, or it tests nothing"
+
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.upsert_embeddings([
+            emb_row("claim:zebra-note-01", tiny, doc_id=doc.doc_id, model=model_version),
+        ])
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.knn(tiny, k=3)
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf"])
+def test_a_vector_containing_nan_or_infinity_is_refused(backend, model_version, bad: str):
+    doc, _, _ = seed_zebra_doc(backend)
+    vector = basis(0)
+    vector[1] = float(bad)
+    with pytest.raises(StorageError, match="NaN or infinity"):
+        backend.upsert_embeddings([
+            emb_row("claim:zebra-note-01", vector, doc_id=doc.doc_id, model=model_version),
+        ])
+    with pytest.raises(StorageError, match="NaN or infinity"):
+        backend.knn(vector, k=3)
+
+
+def test_shrinking_a_document_removes_its_dropped_records_vectors(backend, model_version):
+    """A document that loses a claim or chunk must lose their vectors too.
+
+    Embeddings cascade on doc_id, which still exists after an edit, so the
+    stranded vectors used to survive forever: needs_embedding() called them
+    fresh, and they kept occupying k-NN slots while hydrating to nothing --
+    silent recall decay on every edit, unrepairable by a later sync.
+    """
+    doc, claims, chunks = seed_zebra_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
+        emb_row(chunks[0].chunk_id, basis(2), record_type="chunk", doc_id=doc.doc_id,
+                model=model_version),
+    ])
+    assert backend.stats()["counts"]["embeddings"] == 3
+
+    # Re-upsert the document with only the first claim and no chunks.
+    backend.upsert_document(doc, [claims[0]], [], [])
+
+    assert backend.stats()["counts"]["embeddings"] == 1
+    assert [rid for rid, _ in backend.knn(basis(1), k=5)] == ["claim:zebra-note-01"]
+    assert [rid for rid, _ in backend.knn(basis(2), k=5)] == ["claim:zebra-note-01"]
+    # ...and the survivor is untouched.
+    survivor = backend.knn(basis(0), k=5)
+    assert [rid for rid, _ in survivor] == ["claim:zebra-note-01"]
+    assert survivor[0][1] == pytest.approx(1.0, abs=1e-3)
+
+
+def test_shrinking_a_wiki_document_keeps_its_own_wiki_vector(backend, model_version):
+    """The cleanup must target claim:/chunk: records, not the document's own."""
+    wiki = seed_wiki_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("wiki:operations:migration-corridor", basis(0), record_type="wiki",
+                doc_id=wiki.doc_id, model=model_version),
+    ])
+    backend.upsert_document(wiki, [], [], [])
+    assert [rid for rid, _ in backend.knn(basis(0), k=3)] == [
+        "wiki:operations:migration-corridor"
+    ]

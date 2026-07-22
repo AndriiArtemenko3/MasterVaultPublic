@@ -1,16 +1,23 @@
 """Storage layer contract: shared row dataclasses + the StorageBackend Protocol.
 
 Both backends (Postgres+pgvector, SQLite+sqlite-vec+FTS5) implement the same
-logical schema (see migrations/pg/001_init.sql) and the same Protocol below.
+logical schema (see storage/migrations/pg/001_init.sql) and the same Protocol
+below.
 Row dataclasses are plain transport types — validation happens upstream in
-mastervault.models; this module stays dependency-light (stdlib only).
+mastervault.models. The only non-stdlib import is numpy, for the shared vector
+guard: that check has to run in the same float32 precision the vector indexes
+use, or the two backends disagree about which vectors are indexable.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
 
 
 class StorageError(RuntimeError):
@@ -44,6 +51,8 @@ class DocumentRow:
 
 @dataclass
 class ClaimRow:
+    """Write transport for a claim. Carries only what the claims table stores."""
+
     claim_id: str
     doc_id: str
     ordinal: int
@@ -51,21 +60,40 @@ class ClaimRow:
     confidence: str  # low | medium | high
     content_hash: str
     affects: list[str] = field(default_factory=list)  # wiki slugs -> claim_affects
-    # Hydration-only fields: populated by get_claims() via join; ignored on write.
-    rel_path: str | None = None
-    domain: str | None = None
+
+
+@dataclass
+class HydratedClaimRow(ClaimRow):
+    """A claim joined with its document.
+
+    Read transport returned by get_claims(): rel_path/domain come from the
+    documents join and are therefore always populated, unlike on the write
+    transport where they do not exist at all. Keeping the two shapes distinct
+    means retrieval never has to defensively narrow a value the query already
+    guarantees.
+    """
+
+    rel_path: str = ""
+    domain: str = ""
 
 
 @dataclass
 class ChunkRow:
+    """Write transport for a chunk. Carries only what the chunks table stores."""
+
     chunk_id: str
     doc_id: str
     ordinal: int
     text: str
     content_hash: str
-    # Hydration-only fields: populated by get_chunks() via join; ignored on write.
-    rel_path: str | None = None
-    domain: str | None = None
+
+
+@dataclass
+class HydratedChunkRow(ChunkRow):
+    """A chunk joined with its document; see HydratedClaimRow."""
+
+    rel_path: str = ""
+    domain: str = ""
 
 
 @dataclass
@@ -97,6 +125,46 @@ META_KEY_DIM = "dimensions"
 META_KEY_SCHEMA = "schema_version"
 
 
+def normalized_vector(vector: Sequence[float]) -> np.ndarray:
+    """float32 unit vector, or StorageError if the input is not indexable.
+
+    Both backends index by cosine, which needs a direction. Three inputs have
+    none, and all three must be refused identically or the backends diverge:
+
+    - the zero vector;
+    - a vector whose float32 sum-of-squares underflows to zero (every component
+      around 1e-23 or smaller). This is the dangerous one. Testing `any(vector)`
+      is not enough: such a vector is non-zero in Python but zero-norm in
+      float32, so SQLite rejects it while pgvector accepts it, clamps
+      `dot / 0 = inf` to a similarity of 1.0, and turns the row into the top hit
+      for *every* query. That is silent corpus-wide corruption, and the demo
+      sidecar is a route for it;
+    - NaN or infinity, which propagate through every distance computation.
+
+    Refusing all three in one place is what keeps the contract identical: loud
+    failure, never silent data loss. Uses numpy (already a hard dependency of
+    both backends) precisely because the check has to be done in the same
+    precision the index uses.
+    """
+    arr = np.asarray(vector, dtype=np.float32)
+    if arr.ndim != 1 or arr.size == 0:
+        raise StorageError(f"expected a 1-D non-empty vector, got shape {arr.shape}")
+    if not bool(np.all(np.isfinite(arr))):
+        raise StorageError("cannot index or query a vector containing NaN or infinity")
+    norm = float(np.linalg.norm(arr))
+    if not math.isfinite(norm) or norm == 0.0:
+        raise StorageError(
+            "cannot index or query a zero vector (its float32 norm is zero, so it has"
+            " no direction for cosine similarity)"
+        )
+    return arr / norm
+
+
+def ensure_indexable_vector(vector: Sequence[float]) -> None:
+    """Raise StorageError unless `vector` can be cosine-indexed. See normalized_vector."""
+    normalized_vector(vector)
+
+
 def overfetch_limit(k: int, record_types: list[str] | None, domain: str | None) -> int:
     """How many neighbours to pull from the ANN index before post-filtering.
 
@@ -119,6 +187,15 @@ def overfetch_limit(k: int, record_types: list[str] | None, domain: str | None) 
 @runtime_checkable
 class StorageBackend(Protocol):
     """One index backend. All methods are synchronous; one connection per instance."""
+
+    @property
+    def name(self) -> str:
+        """Stable backend identifier: "sqlite" | "postgres".
+
+        Lets application layers report which backend they acted on without
+        importing a concrete backend class or reaching for its driver handle.
+        """
+        ...
 
     def init_schema(self, dim: int, model_version: str) -> None:
         """Create or validate the schema.
@@ -192,9 +269,13 @@ class StorageBackend(Protocol):
 
     def get_documents(self, doc_ids: list[str]) -> list[DocumentRow]: ...
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]: ...
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
+        """Claims joined with their documents, in input order; unknown ids dropped."""
+        ...
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]: ...
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
+        """Chunks joined with their documents, in input order; unknown ids dropped."""
+        ...
 
     def stats(self) -> dict[str, Any]: ...
 
@@ -203,4 +284,27 @@ class StorageBackend(Protocol):
         wiki_aliases/chunks/embeddings). Keeps the meta identity rows."""
         ...
 
+    def drop_schema(self) -> None:
+        """Remove every schema object this backend owns, meta included.
+
+        The destructive counterpart to wipe(): wipe() empties the content but
+        keeps the index identity, drop_schema() takes the schema itself away so
+        a later init_schema() rebuilds it from nothing (and may pick a new
+        embedding model/dim without tripping SchemaMismatchError). Idempotent.
+        """
+        ...
+
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class FileBackedBackend(StorageBackend, Protocol):
+    """Capability: the whole index lives in one local file.
+
+    Lets `mvault drop` / `mvault demo delete` remove a file-backed index by
+    deleting its file rather than dropping tables, without the application
+    layer importing a concrete backend class or touching its driver handle.
+    """
+
+    @property
+    def db_path(self) -> Path: ...

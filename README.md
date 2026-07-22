@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![Keyless demo](https://img.shields.io/badge/demo-keyless%20%2F%20%240.00-brightgreen.svg)](#quickstart)
 
-> Status: `0.1.0`, alpha. A single-user CLI you run locally. The default path
+> Status: `0.2.0`, alpha. A single-user CLI you run locally. The default path
 > (SQLite + local embeddings + a mock LLM) runs with no API keys and no
 > network after first install.
 
@@ -47,12 +47,35 @@ No API keys required. SQLite is the default backend, so there is no database
 to stand up, and the shipped demo dataset ships with precomputed embeddings,
 so `demo load` never calls an embedding model either.
 
+### From a repository checkout
+
+The Larkstead demo corpus lives in this repository, so `demo load` needs a
+clone:
+
 ```bash
+git clone https://github.com/AndriiArtemenko3/MasterVaultPublic
+cd MasterVaultPublic
 uv sync                        # installs mastervault + local embeddings (fastembed, keyless)
 mvault init                    # creates the workspace + index schema
 mvault demo load                # loads the Larkstead Goods Co. dataset (seconds, no network)
 mvault search "refund window"   # hybrid search, fully keyless
 ```
+
+### From the installed package
+
+The PyPI wheel ships the code, not the demo corpus — `mvault demo load` from an
+installed package will tell you the dataset is missing. Point MasterVault at
+your own material instead:
+
+```bash
+pip install mastervault         # or: uv tool install mastervault
+mvault init                     # creates the workspace + index schema
+mvault ingest ./my-docs --domain operations   # or drop notes in the vault and run `mvault sync`
+mvault search "refund window"
+```
+
+Clone the repository if you specifically want the bundled Larkstead demo and
+the 10-minute tour below.
 
 Postgres + pgvector is available as a swap-in for the index, not a
 requirement:

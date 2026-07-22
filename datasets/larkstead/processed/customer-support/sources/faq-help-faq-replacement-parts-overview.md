@@ -22,8 +22,7 @@ key_claims:
 - id: faq-help-faq-replacement-parts-overview-03
   statement: It helps to know the exact part number to order the right thing, but it's not required.
   confidence: high
-  affects:
-  - ordering-process
+  affects: []
 - id: faq-help-faq-replacement-parts-overview-04
   statement: You can tell support what broke and what it's attached to, and they will confirm the right part.
   confidence: high
@@ -57,8 +56,7 @@ key_claims:
 - id: faq-help-faq-replacement-parts-overview-10
   statement: Parts typically ship within two business days from the Portland warehouse.
   confidence: high
-  affects:
-  - shipping
+  affects: []
 provenance: datasets/larkstead/raw/customer-support/faq-help/faq-replacement-parts-overview.md
 provenance_hash: 64055b1400248bbe
 ---

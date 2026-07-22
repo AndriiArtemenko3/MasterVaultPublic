@@ -9,6 +9,13 @@ __pycache__/
 dist/
 build/
 
+# Test + coverage output (CI writes these; the sdist excludes them too)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit-*.xml
+
 # Runtime workspace (derived index, run dirs, user demo vault)
 vault_workspace/
 

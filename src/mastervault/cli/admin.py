@@ -12,7 +12,7 @@ from rich.table import Table
 
 from mastervault.config import Settings, load_settings
 from mastervault.providers import get_embedding_provider
-from mastervault.storage import SchemaMismatchError, SqliteBackend, get_backend
+from mastervault.storage import FileBackedBackend, SchemaMismatchError, get_backend
 from mastervault.sync import SyncReport, sync_vault
 
 admin_app = typer.Typer(help="Index administration.")
@@ -147,17 +147,17 @@ def drop(
         typer.confirm("Drop the whole index? This cannot be undone.", abort=True)
     settings = load_settings()
     backend = get_backend(settings)
-    if isinstance(backend, SqliteBackend):
+    # A file-backed index is dropped by removing its file; a server-backed one
+    # by dropping the schema objects it owns.
+    if isinstance(backend, FileBackedBackend):
         db_path = backend.db_path
+        name = backend.name
         backend.close()
         db_path.unlink(missing_ok=True)
-        typer.echo(f"dropped sqlite index at {db_path}")
+        typer.echo(f"dropped {name} index at {db_path}")
         return
     try:
-        backend.conn.execute(
-            "DROP TABLE IF EXISTS meta, documents, claims, claim_affects,"
-            " wiki_aliases, chunks, embeddings CASCADE"
-        )
+        backend.drop_schema()
     finally:
         backend.close()
-    typer.echo("dropped postgres index tables")
+    typer.echo(f"dropped {backend.name} index tables")

@@ -1,6 +1,6 @@
 """SQLite backend: sqlite-vec (vec0) for vectors, FTS5 for lexical search.
 
-Mirrors the logical schema of migrations/pg/001_init.sql. Three extras that
+Mirrors the logical schema of storage/migrations/pg/001_init.sql. Three extras
 Postgres gets for free are handled by hand here:
 
 - FTS5 virtual tables (claims_fts, documents_fts) are rebuilt for the touched
@@ -33,8 +33,11 @@ from mastervault.storage.base import (
     ClaimRow,
     DocumentRow,
     EmbeddingRow,
+    HydratedChunkRow,
+    HydratedClaimRow,
     SchemaMismatchError,
-    StorageError,
+    ensure_indexable_vector,
+    normalized_vector,
     overfetch_limit,
 )
 
@@ -131,11 +134,8 @@ def l2_to_cosine(distance: float) -> float:
 
 
 def _normalize(vector: Sequence[float]) -> np.ndarray:
-    arr = np.asarray(vector, dtype=np.float32)
-    norm = float(np.linalg.norm(arr))
-    if norm == 0.0:
-        raise StorageError("cannot index or query a zero vector")
-    return arr / norm
+    """Shared guard + unit-normalization; see storage.base.normalized_vector."""
+    return normalized_vector(vector)
 
 
 def _now() -> str:
@@ -146,7 +146,22 @@ def _placeholders(n: int) -> str:
     return ",".join("?" * n)
 
 
+_ALL_TABLES = (
+    "claim_affects",
+    "claims",
+    "chunks",
+    "wiki_aliases",
+    "embeddings",
+    "documents",
+    "vec_records",
+    "claims_fts",
+    "documents_fts",
+)
+
+
 class SqliteBackend:
+    name = "sqlite"
+
     def __init__(self, db_path: Path | str) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +260,7 @@ class SqliteBackend:
             self.conn.execute("DELETE FROM claims WHERE doc_id = ?", (doc.doc_id,))
             self.conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.doc_id,))
             self.conn.execute("DELETE FROM wiki_aliases WHERE doc_id = ?", (doc.doc_id,))
+            self._drop_orphan_record_vectors(doc, claims, chunks)
             if claims:
                 self.conn.executemany(
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
@@ -286,6 +302,35 @@ class SqliteBackend:
                 "INSERT INTO documents_fts (doc_id, title, body) VALUES (?, ?, ?)",
                 (doc.doc_id, doc.title, doc.body),
             )
+
+    def _drop_orphan_record_vectors(
+        self, doc: DocumentRow, claims: list[ClaimRow], chunks: list[ChunkRow]
+    ) -> None:
+        """Remove embeddings for claims/chunks this document no longer has.
+
+        Embeddings cascade on doc_id, so a document that *shrinks* -- an edit
+        that removes a claim or shortens the body -- leaves its old claim/chunk
+        vectors behind: the doc_id still exists, nothing deletes them, and
+        needs_embedding() keeps reporting them fresh. They then occupy k-NN
+        slots forever and hydrate to nothing, so recall decays silently with
+        every edit. Only claim:/chunk: records are considered; a wiki record's
+        vector belongs to the document itself, not to a row deleted here.
+        """
+        keep = {f"claim:{c.claim_id}" for c in claims} | {ch.chunk_id for ch in chunks}
+        stale = [
+            r["record_id"]
+            for r in self.conn.execute(
+                "SELECT record_id FROM embeddings WHERE doc_id = ?"
+                " AND record_type IN ('claim', 'chunk')",
+                (doc.doc_id,),
+            )
+            if r["record_id"] not in keep
+        ]
+        if not stale:
+            return
+        ph = _placeholders(len(stale))
+        self.conn.execute(f"DELETE FROM vec_records WHERE record_id IN ({ph})", stale)
+        self.conn.execute(f"DELETE FROM embeddings WHERE record_id IN ({ph})", stale)
 
     def _delete_claims_fts(self, claim_ids: list[str]) -> None:
         if claim_ids:
@@ -351,6 +396,10 @@ class SqliteBackend:
     def upsert_embeddings(self, rows: list[EmbeddingRow]) -> None:
         if not rows:
             return
+        # Validate the whole batch before writing any of it, so a bad row later
+        # in the batch cannot depend on transaction rollback to stay invisible.
+        for r in rows:
+            ensure_indexable_vector(r.vector)
         now = _now()
         with self.conn:
             for r in rows:
@@ -486,7 +535,7 @@ class SqliteBackend:
         }
         return [by_id[d] for d in doc_ids if d in by_id]
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]:
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
         if not claim_ids:
             return []
         ph = _placeholders(len(claim_ids))
@@ -506,7 +555,7 @@ class SqliteBackend:
         ):
             affects.setdefault(r["claim_id"], []).append(r["wiki_slug"])
         by_id = {
-            r["claim_id"]: ClaimRow(
+            r["claim_id"]: HydratedClaimRow(
                 claim_id=r["claim_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
                 statement=r["statement"], confidence=r["confidence"],
                 content_hash=r["content_hash"], affects=affects.get(r["claim_id"], []),
@@ -516,7 +565,7 @@ class SqliteBackend:
         }
         return [by_id[c] for c in claim_ids if c in by_id]
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
         if not chunk_ids:
             return []
         rows = self.conn.execute(
@@ -528,7 +577,7 @@ class SqliteBackend:
             chunk_ids,
         ).fetchall()
         by_id = {
-            r["chunk_id"]: ChunkRow(
+            r["chunk_id"]: HydratedChunkRow(
                 chunk_id=r["chunk_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
                 text=r["text"], content_hash=r["content_hash"],
                 rel_path=r["rel_path"], domain=r["domain"],
@@ -562,10 +611,16 @@ class SqliteBackend:
 
     def wipe(self) -> None:
         with self.conn:
-            for table in ("claim_affects", "claims", "chunks", "wiki_aliases",
-                          "embeddings", "documents", "vec_records", "claims_fts",
-                          "documents_fts"):
+            for table in _ALL_TABLES:
                 self.conn.execute(f"DELETE FROM {table}")
+
+    def drop_schema(self) -> None:
+        # Child-before-parent order so the implicit row removal behind each
+        # DROP TABLE never trips a foreign key. `meta` goes last: while it
+        # exists the index still advertises an embedding model/dim.
+        with self.conn:
+            for table in (*_ALL_TABLES, "meta"):
+                self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     def close(self) -> None:
         self.conn.close()

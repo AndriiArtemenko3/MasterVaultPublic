@@ -48,8 +48,7 @@ key_claims:
 - id: invoice-invoice-inv-bgl-2024-003-10
   statement: The milestone for Vireo firmware v1.0 was accepted ahead of the launch window.
   confidence: medium
-  affects:
-  - milestone-acceptance
+  affects: []
 provenance: datasets/larkstead/raw/internal-admin/invoice/invoice-inv-bgl-2024-003.md
 provenance_hash: c456a05ec448d1ba
 ---

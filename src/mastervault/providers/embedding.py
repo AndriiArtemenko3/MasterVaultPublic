@@ -121,17 +121,20 @@ class OpenAIEmbedding:
 
     def _create_with_backoff(self, batch: list[str]) -> list[list[float]]:
         client = self._get_client()
-        last_exc: Exception | None = None
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 response = client.embeddings.create(model=self._model, input=batch)
-                return [item.embedding for item in response.data]
             except Exception as exc:
                 if not _is_retryable(exc) or attempt == self.MAX_RETRIES:
                     raise
-                last_exc = exc
                 self._sleep(2.0**attempt)
-        raise last_exc  # pragma: no cover — loop always returns or raises
+                continue
+            # The SDK response is untyped at this boundary; coerce here so the
+            # rest of the pipeline only ever sees list[list[float]].
+            return [[float(x) for x in item.embedding] for item in response.data]
+        raise AssertionError(  # pragma: no cover — the loop returns or re-raises
+            "unreachable: the retry loop either returns vectors or re-raises"
+        )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

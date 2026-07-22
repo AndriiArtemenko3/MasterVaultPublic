@@ -44,8 +44,7 @@ key_claims:
 - id: troubleshooting-kb-heron-arm-drift-09
   statement: The standard 1-year warranty for the monitor arm is effective 2024-01-15.
   confidence: high
-  affects:
-  - warranty
+  affects: []
 - id: troubleshooting-kb-heron-arm-drift-10
   statement: Re-tightening the clamp bolt takes thirty seconds.
   confidence: high

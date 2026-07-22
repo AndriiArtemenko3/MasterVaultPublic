@@ -16,6 +16,8 @@ Safety order, per item:
 from __future__ import annotations
 
 import contextlib
+import errno
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ from pathlib import Path
 
 from mastervault.core.errors import PatchError, UsageError
 from mastervault.core.events import Clock
+from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.models import content_hash
 from mastervault.review.queue import LoadedReview, ReviewQueue
 from mastervault.vaultfs.frontmatter import (
@@ -39,6 +42,40 @@ _HUNK_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))?"
     r" \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
 )
+
+
+def _write_no_follow(path: Path, text: str) -> None:
+    """Write `path`, refusing to follow it if its FINAL component is a symlink.
+
+    resolve_within() checked this path before the item was read, hashed and
+    patched. O_NOFOLLOW re-checks exactly one thing at the moment of the write:
+    that `path` itself is not a symlink. That closes the window in which the
+    final component is replaced by a link after the check.
+
+    It does not make the write race-proof, and it is not claimed to:
+
+    - a parent directory that passed resolution can still be swapped for a
+      symlink pointing outside the root before this open(), and O_NOFOLLOW
+      inspects only the last component, so that race is not defended against;
+    - hard links are invisible to every symlink-aware check, including this one.
+
+    Both require an attacker with concurrent write access to the vault
+    directory, which is outside this tool's threat model -- a single-operator
+    local CLI. See SECURITY.md for the enforced/not-enforced split.
+
+    Platform note: O_NOFOLLOW exists on Linux and macOS. Where the constant is
+    absent the flag degrades to 0 and only the earlier resolve_within() check
+    applies.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o644)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            raise PathBoundaryError(f"target became a symlink before the write: {path}") from exc
+        raise
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 @dataclass(frozen=True)
@@ -185,9 +222,25 @@ def apply(
         # pending/ and archive/ are siblings under <workspace>/review/.
         queue = ReviewQueue(item_path.parent, item_path.parent.parent / "archive", clock=clock)
 
-    loaded: LoadedReview = queue.load(item_path)
+    try:
+        loaded: LoadedReview = queue.load(item_path)
+    except UsageError as exc:
+        # Malformed or unsafe on disk (e.g. a planted `target:` the model
+        # refuses). Nothing is applied and nothing is rewritten -- the file is
+        # not trustworthy enough to stamp a status into.
+        return ConflictResult(target=Path(vault_root), reason=str(exc))
     item = loaded.item
-    target = vault_root / item.target
+
+    # `target:` arrives from a queue file written by an LLM-driven producer, so
+    # it is untrusted input: an absolute path or a `..` walk would otherwise
+    # make this write anywhere the process can reach. Treated like any other
+    # unapplyable item -- marked conflict, nothing written.
+    try:
+        target = resolve_within(vault_root, item.target)
+    except PathBoundaryError as exc:
+        reason = f"unsafe target path: {exc}"
+        queue.mark_conflict(item_path, reason)
+        return ConflictResult(target=Path(vault_root), reason=reason)
 
     if not target.is_file():
         reason = f"target file missing: {item.target}"
@@ -219,7 +272,15 @@ def apply(
             new_text, "updated", f"updated: {tick().date().isoformat()}"
         )
 
-    target.write_text(new_text, encoding="utf-8")
+    try:
+        _write_no_follow(target, new_text)
+    except PathBoundaryError as exc:
+        # The confinement check happened before the hash/patch work above; if
+        # the target itself became a symlink in between, refuse rather than
+        # follow it. Parent-component swaps are not covered -- see
+        # _write_no_follow.
+        queue.mark_conflict(item_path, str(exc))
+        return ConflictResult(target=target, reason=str(exc))
     archived_to = queue.archive(
         item_path,
         outcome="applied",

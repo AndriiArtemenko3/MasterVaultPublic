@@ -1,6 +1,6 @@
 [project]
 name = "mastervault"
-version = "0.1.0"
+version = "0.2.0"
 description = "Internal-OS agentic RAG for small businesses: Markdown-canonical knowledge vault with a PostgreSQL+pgvector index, hybrid retrieval, and an agentic ingestion/ask pipeline."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -54,6 +54,7 @@ rerank = ["cohere>=5.5"]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
     "types-pyyaml",
@@ -77,11 +78,58 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/mastervault"]
 
+# The sdist carries what is needed to build AND test the package, and nothing
+# else. `raw/` and `bible/` are the corpus-*generation* inputs -- the source
+# documents and the story bible the Larkstead corpus was written from. Nothing
+# at build, install or test time reads them, so they are repository history,
+# not distribution content. `processed/`, `embeddings/`, `golden/` and `qa/`
+# stay: the integration tests and both eval gates read them, and an sdist whose
+# own test suite cannot run is not much of a source distribution.
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "datasets/larkstead/raw",
+  "datasets/larkstead/bible",
+  # developer workspaces, caches, and test output
+  "vault_workspace",
+  "_build",
+  "dist",
+  ".venv",
+  ".coverage",
+  "coverage.xml",
+  "htmlcov",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".mypy_cache",
+  "**/__pycache__",
+  ".env",
+  "*.key",
+  "*.log",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: needs a storage backend (sqlite always; postgres when DATABASE_URL is reachable)",
+]
+
+[tool.coverage.run]
+source = ["src/mastervault"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise AssertionError",
+    "@(abc\\.)?abstractmethod",
+    # Protocol/stub bodies ONLY: a bare `...` on its own line. An unanchored
+    # "\\.\\.\\." also matches a `typer.Option(...)` default inside a multi-line
+    # signature, and coverage maps an excluded line back to the statement it
+    # belongs to -- which silently removed 254 statements, whole CLI command
+    # bodies included, from the denominator the CI floor is measured against.
+    "^\\s*\\.\\.\\.\\s*$",
 ]
 
 [tool.ruff]
@@ -97,3 +145,22 @@ ignore = ["E501"]
 python_version = "3.12"
 strict = false
 ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# The load-bearing contracts -- storage backends, retrieval, the external
+# provider boundaries, and the pipelines -- are additionally held to fully
+# annotated signatures. The CLI and dataset-shaped helpers stay on the baseline
+# above rather than growing annotations that buy nothing.
+[[tool.mypy.overrides]]
+module = [
+    "mastervault.storage.*",
+    "mastervault.retrieval.*",
+    "mastervault.providers.*",
+    "mastervault.pipelines.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

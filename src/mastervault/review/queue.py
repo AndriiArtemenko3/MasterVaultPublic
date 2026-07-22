@@ -21,9 +21,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+from pydantic import ValidationError
+
 from mastervault.config import Settings
 from mastervault.core.errors import UsageError
 from mastervault.core.events import Clock
+from mastervault.core.paths import resolve_within
 from mastervault.models import ReviewItem, ReviewStatus
 from mastervault.vaultfs.frontmatter import (
     join_frontmatter,
@@ -111,7 +114,14 @@ def _render_item(item: ReviewItem, rationale: str, proposal: str, kind: str, res
 
 def _parse_item(path: Path) -> LoadedReview:
     data, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-    item = ReviewItem.model_validate(data)
+    try:
+        item = ReviewItem.model_validate(data)
+    except ValidationError as exc:
+        # A queue file is data on disk: it can be hand-edited or planted, so a
+        # rejected field (notably an unsafe `target:`/`id:`) has to surface as a
+        # typed, handleable error rather than a pydantic traceback from inside
+        # `mvault review apply`.
+        raise UsageError(f"{path}: invalid review item: {exc}") from None
     sections = _split_sections(body)
     proposal_section = sections.get("Proposal", "")
     m = _PROPOSAL_FENCE_RE.search(proposal_section)
@@ -161,7 +171,10 @@ class ReviewQueue:
             }
         )
         self.pending_dir.mkdir(parents=True, exist_ok=True)
-        path = self.pending_dir / f"{item.id}.md"
+        # `item.id` is producer-derived (it embeds ctx.run_id, which resume
+        # reads back out of events.jsonl), so it is untrusted here: joining it
+        # raw would let an id of "../../x" write outside the queue entirely.
+        path = resolve_within(self.pending_dir, f"{item.id}.md")
         path.write_text(
             _render_item(item, item.rationale, proposal, kind, resolution=""),
             encoding="utf-8",

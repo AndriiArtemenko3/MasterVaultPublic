@@ -24,8 +24,7 @@ key_claims:
 - id: ticket-sl5-ticket-hd-2026-00219-04
   statement: The free shipping threshold rose from 75.00 to 99.00 on January 15, 2026.
   confidence: high
-  affects:
-  - shipping-threshold
+  affects: []
 - id: ticket-sl5-ticket-hd-2026-00219-05
   statement: Orders totaling 78.00 do not qualify for free shipping under the current policy.
   confidence: high

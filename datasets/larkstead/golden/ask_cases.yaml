@@ -1,0 +1,410 @@
+# Frozen end-to-end `ask` evaluation set.
+#
+# Separate from golden/queries.yaml on purpose. That file grades retrieval
+# ranking; this one grades the whole ask pipeline -- multi-round retrieval, the
+# sufficiency judge, the judge's mechanical guards, grounded synthesis and the
+# citation gate -- and is graded mechanically (set membership, counts,
+# booleans), never by an LLM judge.
+#
+# Every case runs keyless against the shipped Larkstead demo with MockLLM.
+# `script` supplies the model turns for a case; a case with no `script` runs the
+# cold-mock path a keyless user actually gets (empty registry -> judge
+# hard-fail -> synthesis hard-fail -> deterministic extractive answer).
+#
+# A scripted response may be:
+#   - a mapping, validated against the task's output model, or
+#   - a string, handed back as raw text -- how malformed model output is
+#     expressed. Contract.dispatch retries once, so a case that must stay
+#     malformed scripts two raw strings.
+#
+# Two checks run on EVERY case whether or not they are listed under `expect`:
+#   citations_within_evidence -- no emitted citation may name a record that was
+#                                never retrieved
+#   deterministic             -- the same case run twice must answer identically
+
+# ---------------------------------------------------------------------------
+# Direct factual answers
+# ---------------------------------------------------------------------------
+
+- id: ask-direct-01
+  class: direct-factual
+  question: how many days of paid time off does an employee accrue each year
+  notes: >-
+    Cold mock, no script: the keyless default path end to end. Both PTO policy
+    claims must be collected, and the answer must be the deterministic
+    extractive fallback rather than an invented synthesis.
+  expect:
+    evidence_docs:
+      - internal-admin/sources/hr-policy-hr-policy-pto-v1.md
+    evidence_claims:
+      - claim:hr-policy-hr-policy-pto-v1-01
+      - claim:hr-policy-hr-policy-pto-v1-02
+    min_citations: 1
+    extractive: true
+    confidence: low
+    rounds: 1
+    answer_contains:
+      - "Extractive answer (no generative synthesis):"
+
+- id: ask-direct-02
+  class: direct-factual
+  question: how many days do customers have to return an item
+  notes: >-
+    The grounded-synthesis success path: a judge that stops at round 1 and a
+    synthesis whose citations all resolve. Proves a real generative answer is
+    kept intact, cited, and confidence-tagged -- the counterpart to the
+    malformed and hallucinated cases below.
+  script:
+    sufficiency_judge:
+      - sufficient: true
+        missing_aspects: []
+        followup_queries: []
+        rationale: Both the superseded and current return windows are already in evidence.
+    grounded_synthesis:
+      - answer_markdown: >-
+          Customers have 45 days to return an item under the current policy
+          [claim:policy-sl2-policy-returns-v2-01]. An older policy stating 30
+          days is superseded [claim:policy-sl2-policy-returns-v1-01].
+        confidence: high
+        gaps: []
+  expect:
+    evidence_claims:
+      - claim:policy-sl2-policy-returns-v2-01
+      - claim:policy-sl2-policy-returns-v1-01
+    cited_docs:
+      - customer-support/sources/policy-sl2-policy-returns-v2.md
+      - customer-support/sources/policy-sl2-policy-returns-v1.md
+    min_citations: 2
+    extractive: false
+    confidence: high
+    rounds: 1
+
+# ---------------------------------------------------------------------------
+# Semantic paraphrase
+# ---------------------------------------------------------------------------
+
+- id: ask-paraphrase-01
+  class: semantic-paraphrase
+  question: if I refer someone who gets hired what do I get
+  notes: >-
+    No lexical overlap with the policy's wording ("referral bonus", "500.00");
+    the referral policy must still be collected through the vector and graph
+    channels.
+  expect:
+    evidence_docs:
+      - internal-admin/sources/hr-policy-hr-policy-hiring-referral.md
+    min_citations: 1
+    extractive: true
+    rounds: 1
+
+# ---------------------------------------------------------------------------
+# Cross-domain multi-hop
+# ---------------------------------------------------------------------------
+
+- id: ask-multihop-01
+  class: cross-domain-multi-hop
+  question: what caused the Alder desk mat warping complaints and how many units were affected
+  notes: >-
+    SL1: customer-support ticket pattern -> operations QA root cause. The
+    evidence pool must span more than one domain, and must reach the operations
+    bug report that carries the cause and the unit count.
+  expect:
+    evidence_docs:
+      - operations/sources/bug-report-bug-report-lot-2025-14-edge-stitch-delamination.md
+    evidence_domains_min: 2
+    min_citations: 1
+    extractive: true
+
+# ---------------------------------------------------------------------------
+# Active contradiction
+# ---------------------------------------------------------------------------
+
+- id: ask-contradiction-01
+  class: active-contradiction
+  question: how many days do customers have to return an item
+  notes: >-
+    Seeded contradiction C1. Both sides must reach the evidence pool: the
+    original 30-day policy and the 45-day policy that supersedes it. Surfacing
+    only one side would be a silent wrong answer, which is the failure this
+    case exists to catch.
+  expect:
+    conflicting_docs:
+      - customer-support/sources/policy-sl2-policy-returns-v1.md
+      - customer-support/sources/policy-sl2-policy-returns-v2.md
+    min_citations: 1
+    extractive: true
+
+# ---------------------------------------------------------------------------
+# Superseded / time-sensitive policy evidence
+# ---------------------------------------------------------------------------
+
+- id: ask-superseded-01
+  class: superseded-policy
+  question: what order total qualifies for free shipping
+  notes: >-
+    Seeded contradiction C2: a stale 2024 FAQ says 75.00, the 2026-01 policy
+    says 99.00. The stale document must not be silently dropped -- a user
+    asking this needs to see that the number changed.
+  expect:
+    conflicting_docs:
+      - customer-support/sources/faq-sl5-shipping-faq-2024.md
+      - customer-support/sources/policy-sl5-shipping-policy-2026-01.md
+    min_citations: 1
+    extractive: true
+
+# ---------------------------------------------------------------------------
+# Negative / no-answer
+# ---------------------------------------------------------------------------
+
+- id: ask-negative-01
+  class: negative-no-answer
+  question: does Larkstead offer employee stock options or equity compensation
+  notes: >-
+    The corpus contains no answer. What IS mechanically guaranteed today is
+    pinned here: the answer stays extractive and low-confidence, and every
+    citation names a record that was really retrieved, so nothing is invented.
+    What is NOT guaranteed is recorded in known_limitation below.
+  expect:
+    extractive: true
+    confidence: low
+    rounds: 1
+    # The discriminating part: whatever it returns, it must not put the thing
+    # the corpus does not contain into the answer. A fabricated synthesis would
+    # name the scheme; the deterministic extractive path quotes real records and
+    # therefore cannot.
+    answer_excludes:
+      - stock option
+      - equity compensation
+      - vesting
+      - share grant
+  known_limitation: >-
+    `ask` does not abstain on an unanswerable question: it returns a
+    low-confidence extractive answer built from the nearest (irrelevant)
+    records. The zero-evidence short-circuit only fires when retrieval returns
+    literally nothing, which cannot happen against a populated index because the
+    vector channel always yields its k nearest neighbours. Two candidate
+    score gates were measured against the 52-query golden set and both were
+    rejected: RRF top-1 puts 7 of 8 negatives at exactly 1/61, the same modal
+    value as 11 of 12 semantic-paraphrase queries; raw top-1 cosine puts
+    negatives at 0.708-0.790 while answerable paraphrases run 0.693-0.888, so
+    negatives score HIGHER than the hardest real questions. Any threshold that
+    abstains on the negatives suppresses most paraphrase and multi-hop answers.
+    Abstention needs a signal these scores do not carry.
+
+# ---------------------------------------------------------------------------
+# Malformed / missing model output
+# ---------------------------------------------------------------------------
+
+- id: ask-malformed-01
+  class: malformed-synthesis
+  question: how many days of paid time off does an employee accrue each year
+  notes: >-
+    Synthesis returns prose instead of structured output, twice (the first
+    attempt and dispatch's single retry). The pipeline must fall back to the
+    deterministic extractive answer rather than surfacing the raw text or
+    raising.
+  script:
+    sufficiency_judge:
+      - sufficient: true
+        missing_aspects: []
+        followup_queries: []
+        rationale: Evidence is sufficient.
+    grounded_synthesis:
+      - "I'm afraid I can't produce JSON right now."
+      - "Still not JSON, sorry."
+  expect:
+    extractive: true
+    confidence: low
+    min_citations: 1
+    rounds: 1
+    answer_contains:
+      - "Extractive answer (no generative synthesis):"
+
+- id: ask-malformed-02
+  class: malformed-synthesis
+  question: what order total qualifies for free shipping
+  notes: >-
+    Structurally valid output that fails the contract's own hard-fail check --
+    an empty answer_markdown -- on both the first attempt and the retry. Same
+    destination as unparseable output: deterministic extraction.
+  script:
+    sufficiency_judge:
+      - sufficient: true
+        missing_aspects: []
+        followup_queries: []
+        rationale: Evidence is sufficient.
+    grounded_synthesis:
+      - answer_markdown: ""
+        confidence: high
+        gaps: []
+      - answer_markdown: ""
+        confidence: high
+        gaps: []
+  expect:
+    extractive: true
+    min_citations: 1
+
+# ---------------------------------------------------------------------------
+# Citation hallucination
+# ---------------------------------------------------------------------------
+
+- id: ask-hallucination-01
+  class: citation-hallucination
+  question: how many days do customers have to return an item
+  notes: >-
+    Synthesis cites only record ids that were never retrieved. The citation
+    gate must strip every one, warn, and -- with no surviving citation -- fall
+    back to extraction rather than emitting an uncited generative answer.
+  script:
+    sufficiency_judge:
+      - sufficient: true
+        missing_aspects: []
+        followup_queries: []
+        rationale: Evidence is sufficient.
+    grounded_synthesis:
+      - answer_markdown: >-
+          Customers have 90 days to return an item
+          [claim:totally-invented-policy-99] as confirmed by the returns desk
+          [claim:another-fabricated-id-01].
+        confidence: high
+        gaps: []
+      - answer_markdown: >-
+          Customers have 90 days to return an item
+          [claim:totally-invented-policy-99].
+        confidence: high
+        gaps: []
+  expect:
+    extractive: true
+    warnings_contain:
+      - "stripped citation not in evidence pool: [claim:totally-invented-policy-99]"
+    answer_contains:
+      - "Extractive answer (no generative synthesis):"
+
+- id: ask-hallucination-02
+  class: citation-hallucination
+  question: how many days do customers have to return an item
+  notes: >-
+    A mixed answer: one real citation, one fabricated. The fabricated id must
+    be stripped and warned about while the grounded answer survives on the real
+    one -- proving the gate removes exactly the bad citation rather than
+    discarding the whole answer.
+  script:
+    sufficiency_judge:
+      - sufficient: true
+        missing_aspects: []
+        followup_queries: []
+        rationale: Evidence is sufficient.
+    grounded_synthesis:
+      - answer_markdown: >-
+          The current return window is 45 days
+          [claim:policy-sl2-policy-returns-v2-01], and a support macro claims
+          otherwise [claim:this-id-does-not-exist-42].
+        confidence: medium
+        gaps: []
+  expect:
+    extractive: false
+    confidence: medium
+    min_citations: 1
+    cited_docs:
+      - customer-support/sources/policy-sl2-policy-returns-v2.md
+    warnings_contain:
+      - "stripped citation not in evidence pool: [claim:this-id-does-not-exist-42]"
+
+# ---------------------------------------------------------------------------
+# Repeated follow-up query (dedup guard)
+# ---------------------------------------------------------------------------
+
+- id: ask-repeated-followup-01
+  class: repeated-followup
+  question: how many days do customers have to return an item
+  notes: >-
+    The judge asks for another round, but its only follow-up differs from the
+    original question by stopwords alone. The dedup guard must drop it, and
+    with no surviving follow-up the pipeline must stop at round 1 instead of
+    re-running the same search.
+  max_rounds: 3
+  script:
+    sufficiency_judge:
+      - sufficient: false
+        missing_aspects: [the exact return window]
+        followup_queries:
+          - how many days customers have return item
+        rationale: Need to confirm the current window.
+  expect:
+    rounds: 1
+    extractive: true
+
+# ---------------------------------------------------------------------------
+# No new evidence (novelty floor)
+# ---------------------------------------------------------------------------
+
+- id: ask-no-new-evidence-01
+  class: no-new-evidence
+  question: how many days do customers have to return an item
+  notes: >-
+    Multi-round evidence accumulation against the real corpus: three rounds of
+    genuinely new follow-ups must merge into one growing pool (no round
+    silently replacing the last) and the run must still terminate. The novelty
+    floor that would cut this short is not reachable here -- see
+    known_limitation.
+  max_rounds: 3
+  script:
+    sufficiency_judge:
+      - sufficient: false
+        missing_aspects: [whether the window was updated]
+        followup_queries: [return window policy update]
+        rationale: Check for a newer policy.
+      - sufficient: false
+        missing_aspects: [how refunds are processed]
+        followup_queries: [refund processing timeline after a return]
+        rationale: Refund handling is still uncovered.
+      - sufficient: false
+        missing_aspects: [restocking fees]
+        followup_queries: [restocking fee on returned furniture]
+        rationale: Fees are still uncovered.
+  expect:
+    rounds: 3
+    rounds_max: 3
+    evidence_min: 20
+    extractive: true
+  known_limitation: >-
+    The novelty floor ("a round that adds zero new record_ids forces a stop")
+    cannot be triggered against this corpus at k=10: every reworded follow-up
+    surfaces at least one record the previous round missed. Fourteen candidate
+    rewordings were measured and the minimum novelty was 1 new record, so any
+    ask-eval case claiming to exercise the floor here would be asserting
+    something else. The guard is covered where it is deterministic instead --
+    tests/unit/pipelines/test_ask_pipeline.py::
+    test_novelty_floor_forces_stop_despite_insufficient_verdict, against a
+    fixture smaller than k, where any two queries return the same records.
+
+# ---------------------------------------------------------------------------
+# Maximum-round cap
+# ---------------------------------------------------------------------------
+
+- id: ask-max-rounds-01
+  class: max-rounds
+  question: how many days do customers have to return an item
+  notes: >-
+    A judge that never declares sufficiency and always proposes a genuinely new
+    query. The cap is the pipeline's, not the judge's: the run must stop at
+    max_rounds=2 no matter how many follow-ups are offered.
+  max_rounds: 2
+  script:
+    sufficiency_judge:
+      - sufficient: false
+        missing_aspects: [restocking fees]
+        followup_queries: [restocking fee for returned desks]
+        rationale: Fees are not covered yet.
+      - sufficient: false
+        missing_aspects: [shipping costs on returns]
+        followup_queries: [who pays return shipping]
+        rationale: Shipping is still not covered.
+      - sufficient: false
+        missing_aspects: [warranty interaction]
+        followup_queries: [warranty coverage on returned items]
+        rationale: Warranty is still not covered.
+  expect:
+    rounds: 2
+    rounds_max: 2
+    extractive: true

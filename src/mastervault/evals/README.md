@@ -8,6 +8,7 @@ This folder measures retrieval quality against a hand-graded golden set and audi
 | --- | --- |
 | `harness.py` | Golden-set loading (`load_golden_queries`) and resolution (`resolve_golden_set`, `build_claim_index`), the four `RetrievalConfig` presets, per-query scoring against `hybrid_search` (`score_query`), config-level runs and aggregation (`run_config`, `run_all_configs`, `ConfigReport`), and `compare_to_baseline`. |
 | `metrics.py` | Pure ranking metrics `recall_at_k`, `ndcg_at_k`, `mrr` over an ordered id list and a relevant-id set; no knowledge of `Hit`, storage, or I/O. |
+| `ask_harness.py` | The END-TO-END ask evaluation, kept separate from `harness.py` so a retrieval number and a pipeline number never merge. Loads and structurally validates `golden/ask_cases.yaml`, builds a scripted keyless `MockLLM` per case, runs each case twice through `run_ask`, and grades mechanically (`grade`) — evidence collected, citation validity, abstention, the round/novelty guards, malformed-output fallback. `compare_ask_to_baseline` is the regression gate. No LLM-as-judge. |
 | `faithfulness.py` | Offline mechanical citation checker: `extract_citations` pulls `[<id>]` tokens, `check_citations` classifies each against a valid id pool, `CitationReport` reports valid/invalid ids plus a `precision` on citation occurrences. |
 | `__init__.py` | Public surface: re-exports the harness symbols, the config presets (`LEXICAL_ONLY`, `VECTOR_ONLY`, `HYBRID`, `HYBRID_RERANK`, `ALL_CONFIGS`), the metrics, and the faithfulness types. |
 

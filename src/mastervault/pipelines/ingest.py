@@ -27,9 +27,16 @@ from pathlib import Path
 from typing import Any
 
 from mastervault.config import Settings
-from mastervault.core.errors import EXIT_CODES, BudgetExceeded, ResumeConflict
+from mastervault.core.errors import (
+    EXIT_CODES,
+    BudgetExceeded,
+    ResumeConflict,
+    UnreadableDocument,
+)
 from mastervault.core.events import Clock, Event, EventName, utc_now
+from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.core.runctx import RunContext
+from mastervault.ingest.affects import existing_wiki_slugs, reconcile_affects
 from mastervault.ingest.concept_match import MatchResult, match_claim
 from mastervault.ingest.convert import discover_units, read_raw_text
 from mastervault.ingest.corpus_check import adjudicate
@@ -429,16 +436,31 @@ def run_ingest(
             summary={"error": str(exc)},
         )
 
+    plan: dict[str, Any]
     if resume_run_id is None:
         files = discover_units(path)
         existing_hashes = _existing_provenance_hashes(vault_dir)
-        units: list[dict[str, Any]] = []
+        planned_units: list[dict[str, Any]] = []
+        unreadable: list[dict[str, str]] = []
         for f in files:
-            raw = read_raw_text(f)
+            # One corrupt file in a directory must not cost the whole run its
+            # plan. It is recorded, reported, and excluded; every readable file
+            # still ingests.
+            try:
+                raw = read_raw_text(f)
+            except UnreadableDocument as exc:
+                unreadable.append({"src_path": str(f), "error": str(exc)})
+                ctx.emit(
+                    EventName.UNIT_SKIPPED,
+                    stage="plan",
+                    unit=_rel_unit_id(path, f),
+                    payload={"reason": "unreadable", "src_path": str(f), "error": str(exc)},
+                )
+                continue
             sha = content_hash(raw)
             if sha in existing_hashes:
                 continue
-            units.append(
+            planned_units.append(
                 {
                     "unit_id": _rel_unit_id(path, f),
                     "src_path": str(f),
@@ -454,16 +476,18 @@ def run_ingest(
                 "auto_approve": auto_approve,
                 "fail_fast": fail_fast,
             },
-            "units": units,
+            "unreadable": unreadable,
+            "units": planned_units,
         }
         ctx.freeze_plan(plan)
     else:
         plan = ctx.plan or {}
-        domain = Domain(plan.get("args", {}).get("domain", domain.value))
-        auto_approve = plan.get("args", {}).get("auto_approve", auto_approve)
-        fail_fast = plan.get("args", {}).get("fail_fast", fail_fast)
+        args: dict[str, Any] = plan.get("args") or {}
+        domain = Domain(args.get("domain", domain.value))
+        auto_approve = args.get("auto_approve", auto_approve)
+        fail_fast = args.get("fail_fast", fail_fast)
 
-    units: list[dict[str, Any]] = plan.get("units", [])
+    units: list[dict[str, Any]] = plan.get("units") or []
 
     if dry_run:
         summary = {
@@ -488,7 +512,17 @@ def run_ingest(
                 reason = f"unit {u['unit_id']}: source file missing: {src}"
                 ctx.write_summary({"error": reason})
                 return IngestOutcome(EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason})
-            current_sha = content_hash(read_raw_text(src))
+            try:
+                current_sha = content_hash(read_raw_text(src))
+            except UnreadableDocument as exc:
+                # A source that became unreadable since the freeze is the same
+                # class of problem as one that vanished: the plan can no longer
+                # be trusted, so resume refuses rather than crashing.
+                reason = f"unit {u['unit_id']}: source file is no longer readable: {exc}"
+                ctx.write_summary({"error": reason})
+                return IngestOutcome(
+                    EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+                )
             if current_sha != u["sha"]:
                 reason = (
                     f"unit {u['unit_id']}: source file changed since the plan was frozen "
@@ -510,7 +544,11 @@ def run_ingest(
         src = Path(u["src_path"])
         try:
             raw_text = read_raw_text(src)
-        except OSError as exc:
+        except (OSError, UnreadableDocument) as exc:
+            # read_raw_text funnels parser and codec failures into
+            # UnreadableDocument, which is NOT an OSError; a source that was
+            # readable at plan time and is not now (deleted, unmounted,
+            # truncated) must still fail this unit rather than the whole run.
             ctx.emit(EventName.UNIT_FAILED, stage="extract", unit=unit_id, payload={"reason": str(exc)})
             any_hard_fail = True
             if fail_fast:
@@ -577,19 +615,35 @@ def run_ingest(
     )
 
     # -- CONCEPT MATCH + CORPUS CHECK + ROUTE, over every completed unit --------
-    counters = {"linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0}
+    counters = {
+        "linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0,
+        "affects_dropped": 0,
+    }
     new_concept_tally: dict[str, list[tuple[str, str]]] = {}
     review_counter = [0]
 
-    written: dict[str, str] = {
-        unit_id: ev.payload.get("note")
-        for unit_id, ev in ctx.completed_units.items()
-        if ev.event == EventName.UNIT_COMPLETED and ev.payload.get("note")
-    }
+    # Replayed from the event log, so `note` is whatever JSON was written --
+    # only a non-empty string names a note we can reopen.
+    written: dict[str, str] = {}
+    for unit_id, ev in ctx.completed_units.items():
+        if ev.event != EventName.UNIT_COMPLETED:
+            continue
+        note = ev.payload.get("note")
+        if isinstance(note, str) and note:
+            written[unit_id] = note
     written.update(newly_completed)
 
     for unit_id, note_rel in written.items():
-        note_path = vault_dir / note_rel
+        # note_rel is replayed from events.jsonl, so it is untrusted: a tampered
+        # run directory could otherwise steer these writes anywhere on disk.
+        try:
+            note_path = resolve_within(vault_dir, note_rel)
+        except PathBoundaryError as exc:
+            ctx.emit(
+                EventName.UNIT_SKIPPED, stage="route", unit=unit_id,
+                payload={"reason": "unsafe-note-path", "note": note_rel, "error": str(exc)},
+            )
+            continue
         if not note_path.is_file():
             continue
         try:
@@ -634,6 +688,41 @@ def run_ingest(
         except BudgetExceeded:
             budget_exhausted = True
 
+    # -- RECONCILE `affects:` ---------------------------------------------------
+    # Strictly after _draft_new_concepts, and re-reading the vault, because that
+    # step CREATES wiki notes: a claim routed as "new" is tallied under its own
+    # affects label, and the stub it produces is named with exactly that slug.
+    # Reconciling before the draft would delete the claim->concept edge for the
+    # very concept the claim just caused to exist -- and since reconcile only
+    # ever drops and ingest dedupes by content hash, a re-run could not repair
+    # it. `affects:` is the extractor's guess at which concepts a document
+    # touches; only here is it knowable which of those actually exist.
+    known_wiki_slugs = existing_wiki_slugs(vault_dir)
+    for unit_id, note_rel in written.items():
+        try:
+            note_path = resolve_within(vault_dir, note_rel)
+        except PathBoundaryError:
+            continue  # already reported when the route loop skipped it
+        if not note_path.is_file():
+            continue
+        repair = reconcile_affects(note_path.read_text(encoding="utf-8"), known_wiki_slugs)
+        if not repair.dropped:
+            continue
+        counters["affects_dropped"] += len(repair.dropped)
+        ctx.emit(
+            EventName.AUTO_APPLIED,
+            stage="route",
+            unit=unit_id,
+            payload={
+                "target": note_rel,
+                "kind": "affects-prune",
+                "dropped": [
+                    {"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped
+                ],
+            },
+        )
+        note_path.write_text(repair.text, encoding="utf-8")
+
     exit_code = (
         EXIT_CODES["budget-exhausted"] if budget_exhausted
         else EXIT_CODES["completed-with-failures"] if any_hard_fail
@@ -648,6 +737,8 @@ def run_ingest(
         "tier2_enqueued": counters["tier2"],
         "tier3_enqueued": counters["new_concepts"] + counters["tier3"],
         "new_concepts_drafted": counters["new_concepts"],
+        "affects_dropped": counters["affects_dropped"],
+        "unreadable_inputs": len(plan.get("unreadable") or []),
         "docs_upserted": sync_report.docs_upserted,
         "records_embedded": sync_report.records_embedded,
         "cost_usd": round(ctx.ledger.spent, 6),

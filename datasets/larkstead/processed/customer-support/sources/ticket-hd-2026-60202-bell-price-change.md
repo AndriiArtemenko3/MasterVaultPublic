@@ -12,8 +12,7 @@ key_claims:
 - id: ticket-hd-2026-60202-bell-price-change-01
   statement: The price of the 48 inch Birch desk is now 579 instead of 549.
   confidence: high
-  affects:
-  - price-change
+  affects: []
 - id: ticket-hd-2026-60202-bell-price-change-02
   statement: Marcus Bell ordered the desk on December 27, 2025.
   confidence: high

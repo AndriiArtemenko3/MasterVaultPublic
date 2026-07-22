@@ -4,7 +4,8 @@ psycopg3 sync, one connection per backend instance. The connection runs in
 autocommit mode; every write path opens an explicit transaction block, so a
 failure mid-upsert never leaves a half-replaced document behind.
 
-Schema comes from migrations/pg/*.sql with {{DIM}} substituted at init time.
+Schema comes from storage/migrations/pg/*.sql (package data, so a wheel and a
+source checkout behave alike) with {{DIM}} substituted at init time.
 The meta table pins (embedding_model, dimensions, schema_version); a re-init
 with a different dim or model refuses instead of corrupting the index.
 """
@@ -30,17 +31,36 @@ from mastervault.storage.base import (
     ClaimRow,
     DocumentRow,
     EmbeddingRow,
+    HydratedChunkRow,
+    HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
+    ensure_indexable_vector,
     overfetch_limit,
 )
 
-_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations" / "pg"
+# Package-relative, like the prompt files: an installed wheel and an editable
+# checkout must resolve the schema identically. Resolving it from the repo root
+# meant `mvault init` against Postgres worked from a clone and failed from a
+# wheel with "no migrations found".
+_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "pg"
 
 _CONFIDENCE_ORDER_SQL = "CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
 
+_INDEX_TABLES = (
+    "meta",
+    "documents",
+    "claims",
+    "claim_affects",
+    "wiki_aliases",
+    "chunks",
+    "embeddings",
+)
+
 
 class PostgresBackend:
+    name = "postgres"
+
     def __init__(
         self,
         url: str,
@@ -63,9 +83,16 @@ class PostgresBackend:
             register_vector(self.conn)
             self._vector_registered = True
 
+    def _scalar(self, sql: str) -> Any:
+        """First column of the first row of a query that returns exactly one row."""
+        row = self.conn.execute(sql).fetchone()
+        if row is None:  # pragma: no cover — the callers below always yield a row
+            raise StorageError(f"expected exactly one row from: {sql}")
+        return row[0]
+
     def _read_meta(self) -> dict[str, Any] | None:
         """meta rows as a dict, or None when the meta table does not exist yet."""
-        if self.conn.execute("SELECT to_regclass('meta')").fetchone()[0] is None:
+        if self._scalar("SELECT to_regclass('meta')") is None:
             return None
         rows = self.conn.execute("SELECT key, value FROM meta").fetchall()
         return dict(rows)
@@ -139,6 +166,21 @@ class PostgresBackend:
             cur.execute("DELETE FROM claims WHERE doc_id = %s", (doc.doc_id,))
             cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc.doc_id,))
             cur.execute("DELETE FROM wiki_aliases WHERE doc_id = %s", (doc.doc_id,))
+            # Embeddings cascade on doc_id, so a document that *shrinks* would
+            # otherwise strand its removed claims'/chunks' vectors: the doc_id
+            # still exists, nothing deletes them, needs_embedding() keeps
+            # calling them fresh, and they occupy k-NN slots forever while
+            # hydrating to nothing. Only claim:/chunk: records are dropped -- a
+            # wiki record's vector belongs to the document itself.
+            cur.execute(
+                "DELETE FROM embeddings WHERE doc_id = %s"
+                " AND record_type IN ('claim', 'chunk')"
+                " AND NOT (record_id = ANY(%s))",
+                (
+                    doc.doc_id,
+                    [f"claim:{c.claim_id}" for c in claims] + [ch.chunk_id for ch in chunks],
+                ),
+            )
             if claims:
                 cur.executemany(
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
@@ -200,6 +242,10 @@ class PostgresBackend:
     def upsert_embeddings(self, rows: list[EmbeddingRow]) -> None:
         if not rows:
             return
+        # Validate the whole batch before writing any of it, so a bad row later
+        # in the batch cannot depend on transaction rollback to stay invisible.
+        for r in rows:
+            ensure_indexable_vector(r.vector)
         self._maybe_register_vector()
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.executemany(
@@ -231,6 +277,7 @@ class PostgresBackend:
         record_types: list[str] | None = None,
         domain: str | None = None,
     ) -> list[tuple[str, float]]:
+        ensure_indexable_vector(vector)
         self._maybe_register_vector()
         vec = np.asarray(vector, dtype=np.float32)
         n_fetch = overfetch_limit(k, record_types, domain)
@@ -317,7 +364,7 @@ class PostgresBackend:
         }
         return [by_id[d] for d in doc_ids if d in by_id]
 
-    def get_claims(self, claim_ids: list[str]) -> list[ClaimRow]:
+    def get_claims(self, claim_ids: list[str]) -> list[HydratedClaimRow]:
         if not claim_ids:
             return []
         rows = self.conn.execute(
@@ -333,7 +380,7 @@ class PostgresBackend:
             (claim_ids,),
         ).fetchall()
         by_id = {
-            r[0]: ClaimRow(
+            r[0]: HydratedClaimRow(
                 claim_id=r[0], doc_id=r[1], ordinal=r[2], statement=r[3], confidence=r[4],
                 content_hash=r[5], affects=list(r[8]), rel_path=r[6], domain=r[7],
             )
@@ -341,7 +388,7 @@ class PostgresBackend:
         }
         return [by_id[c] for c in claim_ids if c in by_id]
 
-    def get_chunks(self, chunk_ids: list[str]) -> list[ChunkRow]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[HydratedChunkRow]:
         if not chunk_ids:
             return []
         rows = self.conn.execute(
@@ -352,7 +399,7 @@ class PostgresBackend:
             (chunk_ids,),
         ).fetchall()
         by_id = {
-            r[0]: ChunkRow(
+            r[0]: HydratedChunkRow(
                 chunk_id=r[0], doc_id=r[1], ordinal=r[2], text=r[3], content_hash=r[4],
                 rel_path=r[5], domain=r[6],
             )
@@ -369,7 +416,7 @@ class PostgresBackend:
             # content tables would raise UndefinedTable. Report it cleanly.
             return {"backend": "postgres", "initialized": False}
         counts = {
-            table: self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            table: self._scalar(f"SELECT count(*) FROM {table}")
             for table in ("documents", "claims", "claim_affects", "wiki_aliases",
                           "chunks", "embeddings")
         }
@@ -387,6 +434,12 @@ class PostgresBackend:
             self.conn.execute(
                 "TRUNCATE documents, claims, claim_affects, wiki_aliases, chunks,"
                 " embeddings CASCADE"
+            )
+
+    def drop_schema(self) -> None:
+        with self.conn.transaction():
+            self.conn.execute(
+                f"DROP TABLE IF EXISTS {', '.join(_INDEX_TABLES)} CASCADE"
             )
 
     def close(self) -> None:

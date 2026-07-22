@@ -49,7 +49,7 @@ body:
     attributes:
       label: Environment
       description: OS, Python version, and `mvault version`.
-      placeholder: "macOS 14, Python 3.12, mastervault 0.1.0"
+      placeholder: "macOS 14, Python 3.12, mastervault 0.2.0"
     validations:
       required: true
   - type: textarea

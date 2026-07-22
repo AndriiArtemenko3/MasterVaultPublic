@@ -42,6 +42,7 @@ from mastervault.core.errors import BudgetExceeded
 from mastervault.core.events import Clock, EventName
 from mastervault.core.runctx import RunContext
 from mastervault.models import Confidence, Hit
+from mastervault.prompts.untrusted import fence, neutralise
 from mastervault.providers.embedding import EmbeddingProvider
 from mastervault.providers.llm import LLMProvider, StructuredOutputError
 from mastervault.retrieval.channels import vector_channel
@@ -103,8 +104,15 @@ def _dedupe_followups(followups: list[str], prior_queries: list[str]) -> list[st
 
 
 def _evidence_cards(hits: Iterable[Hit]) -> str:
-    lines = [f"[{h.record_id}] {' '.join(h.text.split())}" for h in hits]
-    return "\n".join(lines) if lines else "(no evidence gathered yet)"
+    """Render evidence for a prompt, fenced as untrusted corpus text.
+
+    Card text is document content, so it is delimited rather than dropped into
+    the instructions. The record id is ours and stays outside the payload; the
+    text is neutralised so a document cannot close the fence and keep writing.
+    """
+    lines = [f"[{h.record_id}] {neutralise(' '.join(h.text.split()))}" for h in hits]
+    body = "\n".join(lines) if lines else "(no evidence gathered yet)"
+    return fence(body, "EVIDENCE")
 
 
 def _mmr_pick(question: str, hits: list[Hit], n: int, lambda_: float) -> list[Hit]:
@@ -117,28 +125,100 @@ def _mmr_pick(question: str, hits: list[Hit], n: int, lambda_: float) -> list[Hi
     return [by_id[rid] for rid, _score in picks if rid in by_id]
 
 
-def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, set[str], list[str]]:
-    """Strip any `[<id>]` token not in the evidence pool. Returns (clean, valid_ids, warnings)."""
+#: Fixed-point bound for the citation sweeps below.
+_CITATION_SCAN_PASSES = 8
+_ANY_BRACKET_RE = re.compile(r"[\[\]]")
+
+
+def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, list[str], list[str]]:
+    """Strip any `[<id>]` token not in the evidence pool.
+
+    Returns (clean, valid_ids, warnings). `valid_ids` is ordered by first
+    appearance in the answer and de-duplicated -- deliberately a list, not a
+    set: it becomes the rendered `sources` list, and set iteration order varies
+    with PYTHONHASHSEED, which would make the citation order of an otherwise
+    identical answer differ between processes.
+    """
     warnings: list[str] = []
-    valid_ids: set[str] = set()
+    valid_ids: list[str] = []
+    seen: set[str] = set()
 
     def _sub(m: re.Match[str]) -> str:
         token = m.group(1)
         if token in evidence_ids:
-            valid_ids.add(token)
+            if token not in seen:
+                seen.add(token)
+                valid_ids.append(token)
             return m.group(0)
         warnings.append(f"stripped citation not in evidence pool: [{token}]")
         return ""
 
-    cleaned = _CITATION_RE.sub(_sub, text)
-    return cleaned, valid_ids, warnings
+    # Same fixed-point sweep as _strip_forged_citations: one pass would let
+    # "[cl[claim:real]aim:forged]" collapse into an unvalidated "[claim:forged]".
+    cleaned = text
+    for _ in range(_CITATION_SCAN_PASSES):
+        swept = _CITATION_RE.sub(_sub, cleaned)
+        if swept == cleaned:
+            return cleaned, valid_ids, warnings
+        cleaned = swept
+    warnings.append("removed all bracket tokens: citation text kept reassembling under stripping")
+    return _ANY_BRACKET_RE.sub("", cleaned), valid_ids, warnings
 
 
-def _extractive_answer(hits: list[Hit]) -> str:
+#: Every record-id namespace the index issues. Claim/chunk/wiki records come
+#: from the embedding layer; `sync.indexer` additionally mints document-level
+#: ids as "<note-type>:<rel-path>", and `retrieval.search` surfaces those
+#: verbatim as a hit's record_id -- so source/decision/strategy/wiki are all
+#: citation-shaped too. Anything outside this set is ordinary prose ("[sic]").
+_RECORD_NAMESPACES = ("claim", "chunk", "wiki", "source", "decision", "strategy")
+_FORGED_CITATION_RE = re.compile(
+    r"\[((?:" + "|".join(_RECORD_NAMESPACES) + r"):[^\[\]]+)\]"
+)
+
+
+def _strip_forged_citations(text: str, evidence_ids: set[str]) -> tuple[str, list[str]]:
+    """Remove record-shaped citations a document quoted at itself.
+
+    The synthesis path is citation-gated, but the extractive path quotes
+    document text verbatim -- so a document containing "[claim:made-up-01]"
+    would have that token rendered into the answer as if it were a citation the
+    pipeline issued. Anything citation-shaped that is not in the evidence pool
+    is stripped here, so both answer paths obey the same rule: every citation
+    in an answer names a record that was really retrieved.
+    """
+    warnings: list[str] = []
+
+    def _sub(m: re.Match[str]) -> str:
+        token = m.group(1)
+        if token in evidence_ids:
+            return m.group(0)
+        warnings.append(f"stripped forged citation embedded in document text: [{token}]")
+        return ""
+
+    # Re-scan until stable. A single pass is not enough: re.sub never re-reads
+    # its own output, so "[cl[claim:real]aim:forged]" strips the inner token and
+    # leaves the residue "[claim:forged]" -- a fake citation assembled out of the
+    # deletion. Iterating to a fixed point closes that.
+    cleaned = text
+    for _ in range(_CITATION_SCAN_PASSES):
+        swept = _FORGED_CITATION_RE.sub(_sub, cleaned)
+        if swept == cleaned:
+            return cleaned, warnings
+        cleaned = swept
+    # Pathological input that keeps reassembling: drop every bracket rather than
+    # emit something citation-shaped that was never checked.
+    warnings.append("removed all bracket tokens: citation text kept reassembling under stripping")
+    return _ANY_BRACKET_RE.sub("", cleaned), warnings
+
+
+def _extractive_answer(hits: list[Hit], evidence_ids: set[str]) -> tuple[str, list[str]]:
     lines = ["Extractive answer (no generative synthesis):", ""]
+    warnings: list[str] = []
     for h in hits:
-        lines.append(f"- {' '.join(h.text.split())} [{h.record_id}]")
-    return "\n".join(lines)
+        cleaned, stripped = _strip_forged_citations(" ".join(h.text.split()), evidence_ids)
+        warnings.extend(stripped)
+        lines.append(f"- {cleaned.strip()} [{h.record_id}]")
+    return "\n".join(lines), warnings
 
 
 def _render_sources(hits: list[Hit]) -> list[dict[str, str]]:
@@ -273,28 +353,31 @@ def run_ask(
             emit=emit,
         )
     except (BudgetExceeded, StructuredOutputError):
-        extractive = True
         synth_result = None
 
-    if not extractive:
-        if not synth_result.ok or synth_result.parsed is None:
+    # Every way synthesis can fail to produce a usable grounded answer -- it
+    # raised, it came back not-ok, it parsed to nothing, or the citation gate
+    # stripped every id -- funnels into the same extractive fallback.
+    parsed = synth_result.parsed if synth_result is not None and synth_result.ok else None
+    if parsed is None:
+        extractive = True
+    else:
+        cleaned, valid_ids, strip_warnings = _apply_citation_gate(
+            parsed.answer_markdown, set(evidence_by_id)
+        )
+        warnings.extend(strip_warnings)
+        if not valid_ids:
             extractive = True
         else:
-            cleaned, valid_ids, strip_warnings = _apply_citation_gate(
-                synth_result.parsed.answer_markdown, set(evidence_by_id)
-            )
-            warnings.extend(strip_warnings)
-            if not valid_ids:
-                extractive = True
-            else:
-                answer_markdown = cleaned
-                confidence = synth_result.parsed.confidence.value
-                gaps = list(synth_result.parsed.gaps)
-                cited_hits = [evidence_by_id[i] for i in valid_ids if i in evidence_by_id]
+            answer_markdown = cleaned
+            confidence = parsed.confidence.value
+            gaps = list(parsed.gaps)
+            cited_hits = [evidence_by_id[i] for i in valid_ids if i in evidence_by_id]
 
     if extractive:
         top5 = _mmr_pick(question, all_hits, EXTRACTIVE_CARDS_N, settings.retrieval.mmr_lambda)
-        answer_markdown = _extractive_answer(top5)
+        answer_markdown, forged_warnings = _extractive_answer(top5, set(evidence_by_id))
+        warnings.extend(forged_warnings)
         confidence = Confidence.LOW.value if top5 else None
         cited_hits = top5
 

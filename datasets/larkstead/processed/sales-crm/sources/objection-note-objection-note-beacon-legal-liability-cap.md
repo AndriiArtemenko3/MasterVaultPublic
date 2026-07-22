@@ -29,8 +29,7 @@ key_claims:
 - id: objection-note-objection-note-beacon-legal-liability-cap-05
   statement: Marcus cited the two-year Vireo goodwill extension, effective 2026-01-20, as precedent.
   confidence: high
-  affects:
-  - goodwill-extension
+  affects: []
 - id: objection-note-objection-note-beacon-legal-liability-cap-06
   statement: The MSA template was drafted by Colefield & Tran in 2024-06.
   confidence: high

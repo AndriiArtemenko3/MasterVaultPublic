@@ -24,8 +24,7 @@ key_claims:
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-04
   statement: 14 duplicate test orders were created across 3 throttled sandbox runs between 2025-10-06 and 2025-10-17.
   confidence: high
-  affects:
-  - duplicate-orders
+  affects: []
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-05
   statement: There are 210 total test orders pushed during the same window.
   confidence: high
@@ -37,8 +36,7 @@ key_claims:
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-07
   statement: The two non-throttled control runs produced zero duplicates.
   confidence: high
-  affects:
-  - duplicate-orders
+  affects: []
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-08
   statement: The first duplicate was caught in run one, with 4 duplicates out of 60 test orders.
   confidence: high
@@ -58,8 +56,7 @@ key_claims:
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-12
   statement: An idempotency key on the webhook payload is requested, keyed to Shopstack's own order ID.
   confidence: high
-  affects:
-  - webhook
+  affects: []
 - id: bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691-13
   statement: The idempotency key will ensure retried delivery gets recognized as the same order.
   confidence: high

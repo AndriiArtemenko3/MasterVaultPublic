@@ -36,13 +36,11 @@ key_claims:
 - id: call-transcript-call-beacon-legal-msa-scoping-2026-01-06
   statement: Larkstead's contract terms should not change without written consent if they are acquired or sold.
   confidence: high
-  affects:
-  - contract-terms
+  affects: []
 - id: call-transcript-call-beacon-legal-msa-scoping-2026-01-07
   statement: Most of the current MSA templates already include a consent requirement on assignment.
   confidence: high
-  affects:
-  - assignment-clause
+  affects: []
 - id: call-transcript-call-beacon-legal-msa-scoping-2026-01-08
   statement: Marcus's firm pays vendors net forty-five as a rule, while the draft has net thirty.
   confidence: high
@@ -51,8 +49,7 @@ key_claims:
 - id: call-transcript-call-beacon-legal-msa-scoping-2026-01-09
   statement: The typical delivery timeline is three to four weeks from signed order to delivery for eighteen seats assuming standard list pricing.
   confidence: high
-  affects:
-  - delivery-timing
+  affects: []
 provenance: datasets/larkstead/raw/sales-crm/call-transcript/call-beacon-legal-msa-scoping-2026-01.md
 provenance_hash: 536e80ff858605b8
 ---

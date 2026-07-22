@@ -41,18 +41,15 @@ key_claims:
 - id: call-transcript-call-transcript-petrel-discovery-2025-06-07
   statement: Each seat ships as its own order, resulting in fifteen separate order numbers.
   confidence: high
-  affects:
-  - shipping-logistics
+  affects: []
 - id: call-transcript-call-transcript-petrel-discovery-2025-06-08
   statement: Shipping costs are separate from the price of eight ninety-nine and vary by state.
   confidence: high
-  affects:
-  - shipping-costs
+  affects: []
 - id: call-transcript-call-transcript-petrel-discovery-2025-06-09
   statement: Sales tax of six and a half percent applies in Washington, but not in Oregon.
   confidence: high
-  affects:
-  - tax-information
+  affects: []
 - id: call-transcript-call-transcript-petrel-discovery-2025-06-10
   statement: Sanjay has thirteen addresses for new hires and is still interviewing for two roles.
   confidence: high

@@ -35,8 +35,8 @@ from rich.table import Table
 from mastervault.config import Settings, load_settings
 from mastervault.providers import get_embedding_provider
 from mastervault.storage import (
+    FileBackedBackend,
     SchemaMismatchError,
-    SqliteBackend,
     StorageBackend,
     StorageError,
     get_backend,
@@ -87,7 +87,14 @@ def load_cmd(
     """Copy the shipped Larkstead dataset into the workspace and import its
     precomputed embeddings sidecar. No embedding computation happens here."""
     if not DATASET_DIR.is_dir():
-        typer.echo(f"error: dataset not found at {DATASET_DIR}", err=True)
+        typer.echo(
+            f"error: demo dataset not found at {DATASET_DIR}.\n"
+            "The Larkstead demo ships with the repository, not with the installed\n"
+            "package: clone https://github.com/AndriiArtemenko3/MasterVaultPublic and\n"
+            "run `mvault demo load` from the checkout, or point --workspace at a vault\n"
+            "you populate with `mvault ingest` / `mvault sync` instead.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     settings = load_settings()
@@ -355,14 +362,13 @@ def delete_cmd(
     except StorageError:
         backend = None
     if backend is not None:
-        if isinstance(backend, SqliteBackend):
+        # A file-backed index lives inside the workspace and goes with the
+        # rmtree below; a server-backed one has to give its schema back first.
+        if isinstance(backend, FileBackedBackend):
             backend.close()
         else:
             try:
-                backend.conn.execute(
-                    "DROP TABLE IF EXISTS meta, documents, claims, claim_affects,"
-                    " wiki_aliases, chunks, embeddings CASCADE"
-                )
+                backend.drop_schema()
             finally:
                 backend.close()
 

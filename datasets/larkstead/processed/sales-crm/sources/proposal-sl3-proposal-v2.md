@@ -48,13 +48,11 @@ key_claims:
 - id: proposal-sl3-proposal-v2-09
   statement: The subtotal after discount is 36,345.20.
   confidence: high
-  affects:
-  - pricing-summary
+  affects: []
 - id: proposal-sl3-proposal-v2-10
   statement: The quote is valid for 30 days from 2025-11-11.
   confidence: high
-  affects:
-  - quote-terms
+  affects: []
 provenance: datasets/larkstead/raw/sales-crm/proposal/sl3-proposal-v2.md
 provenance_hash: 8f84ca8ed6704c44
 ---

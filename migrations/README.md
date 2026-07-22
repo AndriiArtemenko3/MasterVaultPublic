@@ -1,6 +1,8 @@
 # migrations — Postgres schema DDL
 
-This folder holds the SQL schema for the Postgres/pgvector backend. It is the on-disk source of truth for the logical model that both storage backends implement: documents, extracted claims, wiki aliases, chunks, and embeddings. The SQLite backend does not read these files; it builds the same logical schema in code (`src/mastervault/storage/sqlite.py`), so this DDL exists specifically for the Postgres path.
+> **Moved in 0.2.0.** The SQL now lives at `src/mastervault/storage/migrations/pg/` so it ships inside the wheel as package data. Resolving it from the repo root meant `mvault init` against Postgres worked from a clone and failed from an installed wheel with "no migrations found". This page still documents the schema; the paths below are relative to that package directory.
+
+This folder documents the SQL schema for the Postgres/pgvector backend. It is the on-disk source of truth for the logical model that both storage backends implement: documents, extracted claims, wiki aliases, chunks, and embeddings. The SQLite backend does not read these files; it builds the same logical schema in code (`src/mastervault/storage/sqlite.py`), so this DDL exists specifically for the Postgres path.
 
 ## Files
 
@@ -10,7 +12,7 @@ This folder holds the SQL schema for the Postgres/pgvector backend. It is the on
 
 ## How it fits
 
-`mvault init` drives `PostgresBackend.init_schema` (`src/mastervault/storage/postgres.py:73`), which globs `migrations/pg/*.sql` in sorted order, substitutes `{{DIM}}`, and runs each file inside one transaction before pinning `embedding_model`, `dimensions`, and `schema_version` into the `meta` table. Ingestion then writes rows here, and retrieval reads them: the GIN `search_tsv` indexes back the lexical channel and the HNSW index backs the vector channel that [../src/mastervault/storage](../src/mastervault/storage) exposes to the fusion layer. A re-init with a different dim or model is rejected against the pinned `meta` values rather than silently rebuilding the index.
+`mvault init` drives `PostgresBackend.init_schema` (`src/mastervault/storage/postgres.py:73`), which globs `src/mastervault/storage/migrations/pg/*.sql` in sorted order, substitutes `{{DIM}}`, and runs each file inside one transaction before pinning `embedding_model`, `dimensions`, and `schema_version` into the `meta` table. Ingestion then writes rows here, and retrieval reads them: the GIN `search_tsv` indexes back the lexical channel and the HNSW index backs the vector channel that [../src/mastervault/storage](../src/mastervault/storage) exposes to the fusion layer. A re-init with a different dim or model is rejected against the pinned `meta` values rather than silently rebuilding the index.
 
 ## Key concepts / entry points
 

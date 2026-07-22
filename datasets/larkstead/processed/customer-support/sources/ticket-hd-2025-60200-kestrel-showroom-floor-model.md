@@ -22,8 +22,7 @@ key_claims:
 - id: ticket-hd-2025-60200-kestrel-showroom-floor-model-03
   statement: Tom Aldridge is involved in discussing options and timing for office accounts.
   confidence: high
-  affects:
-  - b2b-lead
+  affects: []
 - id: ticket-hd-2025-60200-kestrel-showroom-floor-model-04
   statement: Grace Liu visited the Portland showroom last week.
   confidence: high

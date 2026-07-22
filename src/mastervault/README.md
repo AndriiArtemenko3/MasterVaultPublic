@@ -6,7 +6,7 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 
 | File | Responsibility |
 |------|----------------|
-| `__init__.py` | Package marker; pins `__version__ = "0.1.0"` and states the file-canonical / derived-index contract. |
+| `__init__.py` | Package marker; pins `__version__ = "0.2.0"` and states the file-canonical / derived-index contract. |
 | `config.py` | `Settings` (pydantic-settings) plus `load_settings()`. Merges `mastervault.toml`, `MV_*` env vars, and `.env`; secrets (`DATABASE_URL`, API keys) come from the environment only. Holds nested config blocks for storage, embedding, llm, reranker, retrieval, ingestion, ask, budgets, and paths. |
 | `models.py` | The shared data model: `Claim`, the note frontmatter views (`SourceNote`, `WikiEntry`, `DecisionNote`, `StrategyNote`), the embeddable `Record`, retrieval `Hit`/`ChannelRank`, `ReviewItem`, closed-set enums, and `content_hash()`. Pydantic-only so storage, retrieval, and pipelines can all import it. |
 | [cli/](./cli) | Typer command surface for `mvault`: `ask`, `ingest`, `lint`, `review`, `runs`, `evals`, `demo`, `query`, `admin`. Subcommand modules register on the root `app`. |

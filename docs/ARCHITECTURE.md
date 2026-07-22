@@ -142,7 +142,8 @@ double-queues the same proposal.
 
 Both backends implement the same `StorageBackend` protocol
 (`src/mastervault/storage/base.py`) over the same logical schema
-(`migrations/pg/001_init.sql` for Postgres; the SQLite backend mirrors it by
+(`src/mastervault/storage/migrations/pg/001_init.sql` for Postgres; the SQLite
+backend mirrors it by
 hand, using `sqlite-vec`'s `vec0` virtual table for vectors and FTS5 for
 lexical search in place of pgvector's HNSW index and Postgres's generated
 `tsvector` columns). `storage.backend = "auto"` (the default) picks Postgres
@@ -186,7 +187,7 @@ with a `mock` implementation that needs no network and no key
 | Seam | Options | Keyless default |
 |---|---|---|
 | Embedding | `local` (fastembed `BAAI/bge-small-en-v1.5`, 384d), `openai` (`text-embedding-3-small`, 1536d), `mock` | `local` — ships in core dependencies, not an extra |
-| LLM | `anthropic`, `openai` (honors `llm.base_url` for compatible gateways), `mock` | none; `mastervault.toml` defaults to `anthropic` and needs `ANTHROPIC_API_KEY`, or set `MV_LLM__PROVIDER=mock` |
+| LLM | `anthropic`, `openai` (honors `llm.base_url` for compatible gateways), `mock` | none; `mastervault.toml` defaults to `mock`, which is keyless and deterministic (extractive answers). Set `MV_LLM__PROVIDER=anthropic` with `ANTHROPIC_API_KEY` (or `openai` with `OPENAI_API_KEY`) for generated synthesis |
 | Reranker | `cohere` (`rerank-v3.5`), `null` (passthrough), `mock`, `local-bge` (deliberately unimplemented: raises with an install hint rather than silently downloading a model) | `auto`, which resolves to `cohere` if `COHERE_API_KEY` is set, else `null` |
 
 Every provider is resolved once per process from `Settings`

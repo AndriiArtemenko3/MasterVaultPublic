@@ -53,7 +53,6 @@ key_claims:
   statement: Agents quote this policy document as the current rule until the help-center shipping FAQ is revised.
   confidence: high
   affects:
-  - faq-update
   - shipping-policy
 - id: policy-sl5-shipping-policy-2026-01-10
   statement: The threshold rises from 75.00 to 99.00, effective 2026-01-15.

@@ -22,7 +22,8 @@ needed downstream in fuse/hydrate.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -49,6 +50,8 @@ GRAPH_SEED_VECTOR_TOP = 10
 _DOC_BODY_EXCERPT_CHARS = 600
 
 CHANNELS = ("lexical_claims", "lexical_docs", "vector", "graph")
+
+T = TypeVar("T")
 
 
 class SearchResult(BaseModel):
@@ -93,24 +96,24 @@ def _hydrate(fused_ids: list[str], backend: StorageBackend) -> dict[str, Hit]:
     doc_ids = [i for i in fused_ids if not i.startswith(("claim:", "chunk:"))]
 
     hits: dict[str, Hit] = {}
-    for row in backend.get_claims(claim_ids):
-        hits[f"claim:{row.claim_id}"] = Hit(
-            record_id=f"claim:{row.claim_id}",
+    for claim in backend.get_claims(claim_ids):
+        hits[f"claim:{claim.claim_id}"] = Hit(
+            record_id=f"claim:{claim.claim_id}",
             record_type=RecordType.CLAIM,
-            doc_id=row.doc_id,
-            domain=Domain(row.domain),
-            text=row.statement,
-            rel_path=row.rel_path,
-            confidence=Confidence(row.confidence),
+            doc_id=claim.doc_id,
+            domain=Domain(claim.domain),
+            text=claim.statement,
+            rel_path=claim.rel_path,
+            confidence=Confidence(claim.confidence),
         )
-    for row in backend.get_chunks(chunk_ids):
-        hits[row.chunk_id] = Hit(
-            record_id=row.chunk_id,
+    for chunk in backend.get_chunks(chunk_ids):
+        hits[chunk.chunk_id] = Hit(
+            record_id=chunk.chunk_id,
             record_type=RecordType.CHUNK,
-            doc_id=row.doc_id,
-            domain=Domain(row.domain),
-            text=row.text,
-            rel_path=row.rel_path,
+            doc_id=chunk.doc_id,
+            domain=Domain(chunk.domain),
+            text=chunk.text,
+            rel_path=chunk.rel_path,
         )
     for doc_id in doc_ids:
         hit = _doc_hit(doc_id, backend)
@@ -146,7 +149,7 @@ def hybrid_search(
     if unknown:
         raise ValueError(f"unknown channel(s) {sorted(unknown)}; choose from {CHANNELS}")
 
-    def timed(name: str, fn):
+    def timed(name: str, fn: Callable[[], T]) -> T:
         start = time.perf_counter()
         out = fn()
         timings[name] = round(time.perf_counter() - start, 6)

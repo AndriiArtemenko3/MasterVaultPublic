@@ -12,8 +12,7 @@ key_claims:
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-01
   statement: Larkstead prohibits harassment, discrimination, and retaliation based on any protected characteristic in Larkstead-related chat, email, or off-site events.
   confidence: high
-  affects:
-  - anti-harassment-policy
+  affects: []
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-02
   statement: An employee reports harassment directly to Mara Voss or Ana Petrova.
   confidence: high
@@ -27,28 +26,23 @@ key_claims:
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-04
   statement: If the complaint involves Mara or Ana, the employee can contact Colefield & Tran LLP directly.
   confidence: high
-  affects:
-  - conflict-of-interest-path
+  affects: []
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-05
   statement: Whoever receives the report acknowledges it within 2 business days.
   confidence: high
-  affects:
-  - response-timeline
+  affects: []
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-06
   statement: A fact-finding review normally closes within 15 business days after receiving the report.
   confidence: high
-  affects:
-  - response-timeline
+  affects: []
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-07
   statement: Larkstead employees do not face negative consequences for reporting harassment in good faith.
   confidence: high
-  affects:
-  - non-retaliation
+  affects: []
 - id: hr-policy-hr-policy-anti-harassment-complaint-path-08
   statement: Details of a complaint are shared only with individuals necessary for investigation.
   confidence: high
-  affects:
-  - confidentiality
+  affects: []
 provenance: datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-anti-harassment-complaint-path.md
 provenance_hash: 2796db26b7e542c2
 ---

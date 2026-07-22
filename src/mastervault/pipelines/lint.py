@@ -29,6 +29,7 @@ from mastervault.contracts.contradiction import ContradictionJudgeContract, Cont
 from mastervault.core.budget import BudgetLedger
 from mastervault.core.errors import BudgetExceeded
 from mastervault.core.events import Clock, EventName, utc_now
+from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.core.runctx import RunContext
 from mastervault.models import (
     ChangeType,
@@ -131,10 +132,24 @@ def _orphan_wikis(claims: list[_ClaimRef], wikis: dict[str, _WikiRef]) -> list[s
 def _mark_drifted_review_items(review_queue: ReviewQueue, vault_dir: Path, tick: Clock) -> int:
     marked = 0
     for path, item in review_queue.list_items(status=ReviewStatus.PENDING):
-        target = vault_dir / item.target
+        # `target:` is producer-written and untrusted; confine it exactly as
+        # `review.apply` does, and never read a file outside the vault.
+        try:
+            target = resolve_within(vault_dir, item.target)
+        except PathBoundaryError:
+            review_queue.mark_conflict(path, f"unsafe target path: {item.target!r}")
+            marked += 1
+            continue
         if not target.is_file():
             continue
-        current = content_hash(target.read_text(encoding="utf-8"))
+        try:
+            current = content_hash(target.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            # A binary or unreadable target cannot be drift-checked; that is a
+            # conflict for a human, not a crash for the whole lint run.
+            review_queue.mark_conflict(path, f"target is not readable text: {item.target}")
+            marked += 1
+            continue
         if current != item.base_hash:
             review_queue.mark_conflict(
                 path, f"target changed since proposal (lint scan {tick().isoformat()})"

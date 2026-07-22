@@ -14,7 +14,6 @@ key_claims:
   confidence: high
   affects:
   - missing-part
-  - sparrow-cable-kit
 - id: ticket-ticket-derek-holt-sparrow-clips-02
   statement: Derek Holt reported the missing adhesive clips on 2024-11-18.
   confidence: high

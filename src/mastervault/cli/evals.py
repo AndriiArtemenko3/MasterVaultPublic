@@ -19,10 +19,16 @@ from mastervault.config import load_settings
 from mastervault.evals import (
     ALL_CONFIGS,
     NEGATIVE_CLASS,
+    AskEvalError,
     available_configs,
+    compare_ask_to_baseline,
     compare_to_baseline,
+    load_ask_cases,
     load_golden_queries,
+    missing_case_classes,
+    resolve_ask_cases,
     resolve_golden_set,
+    run_ask_suite,
     run_config,
     write_resolved_yaml,
 )
@@ -30,7 +36,7 @@ from mastervault.providers import get_embedding_provider, get_reranker
 from mastervault.providers.reranker import RerankerUnavailable
 from mastervault.storage import get_backend
 
-eval_app = typer.Typer(help="Retrieval eval harness.")
+eval_app = typer.Typer(help="Retrieval and end-to-end ask eval harnesses.")
 _console = Console()
 
 # src/mastervault/cli/evals.py -> parents[3] is the repo root.
@@ -38,6 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "datasets" / "larkstead" / "golden"
 QUERIES_PATH = GOLDEN_DIR / "queries.yaml"
 RESOLVED_PATH = GOLDEN_DIR / "resolved.yaml"
+ASK_CASES_PATH = GOLDEN_DIR / "ask_cases.yaml"
 PROCESSED_DIR = REPO_ROOT / "datasets" / "larkstead" / "processed"
 
 _CONFIG_NAMES = [c.name for c in ALL_CONFIGS]
@@ -190,3 +197,146 @@ def eval_cmd(
                 typer.echo(f"  - {line}")
             raise typer.Exit(code=1)
         typer.echo("\nno regressions beyond tolerance")
+
+
+# ---------------------------------------------------------------------------
+# `mvault ask-eval` -- end-to-end ask pipeline evaluation
+# ---------------------------------------------------------------------------
+
+
+def _require_loaded_index(settings) -> None:
+    """Both eval commands need a populated index; fail with the fix, not a stack."""
+    backend = get_backend(settings)
+    try:
+        stats = backend.stats()
+    finally:
+        backend.close()
+    if (stats.get("counts") or {}).get("embeddings", 0) <= 0:
+        typer.echo(
+            "error: the index has zero embeddings; run `mvault init` then "
+            "`mvault demo load` before evaluating",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+
+@eval_app.command("ask-eval")
+def ask_eval_cmd(
+    cases: str | None = typer.Option(
+        None, "--cases", help=f"Ask-eval case file (default: {ASK_CASES_PATH})."
+    ),
+    compare: str | None = typer.Option(
+        None, "--compare", help="Path to an ask baseline.json to diff this run against."
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of rich tables."),
+) -> None:
+    """Run the frozen end-to-end `ask` evaluation.
+
+    Deterministic and keyless: every case drives the real ask pipeline with a
+    scripted MockLLM and is graded mechanically -- evidence collected, citations
+    resolvable, abstention, the round and novelty guards, and the malformed-output
+    fallback. Kept separate from `mvault eval`, which grades retrieval ranking
+    only. Exits 1 if any case fails, or (with --compare) if a case or check that
+    the baseline recorded as passing now fails.
+    """
+    cases_path = Path(cases) if cases is not None else ASK_CASES_PATH
+    if not cases_path.is_file():
+        typer.echo(f"error: ask-eval case file not found at {cases_path}", err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        ask_cases = load_ask_cases(cases_path)
+    except AskEvalError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not ask_cases:
+        typer.echo(f"error: no cases in {cases_path}", err=True)
+        raise typer.Exit(code=1)
+
+    # Same contract as `mvault eval`: a case naming a document or claim the
+    # corpus no longer has is a build error, not a retrieval regression.
+    resolve_errors = resolve_ask_cases(ask_cases, PROCESSED_DIR)
+    if resolve_errors:
+        typer.echo(
+            f"error: {len(resolve_errors)} ask-eval reference(s) failed to resolve against"
+            " the live corpus:",
+            err=True,
+        )
+        for line in resolve_errors[:20]:
+            typer.echo(f"  - {line}", err=True)
+        raise typer.Exit(code=1)
+
+    settings = load_settings()
+    _require_loaded_index(settings)
+
+    backend = get_backend(settings)
+    embedder = get_embedding_provider(settings)
+    try:
+        report = run_ask_suite(ask_cases, settings, backend, embedder)
+    finally:
+        backend.close()
+
+    uncovered = missing_case_classes(ask_cases)
+    cmp_result = None
+    if compare is not None:
+        compare_path = Path(compare)
+        if not compare_path.is_file():
+            typer.echo(f"error: ask baseline not found: {compare_path}", err=True)
+            raise typer.Exit(code=1)
+        cmp_result = compare_ask_to_baseline(
+            report, json.loads(compare_path.read_text(encoding="utf-8"))
+        )
+
+    if json_out:
+        payload = report.to_dict()
+        payload["uncovered_classes"] = uncovered
+        if cmp_result is not None:
+            payload["compare"] = cmp_result
+        typer.echo(json.dumps(payload, indent=2))
+    else:
+        _print_ask_report(report, uncovered, cmp_result, compare)
+
+    failed = not report.passed
+    regressed = bool(cmp_result and cmp_result["regressed"])
+    if failed or regressed:
+        raise typer.Exit(code=1)
+
+
+def _print_ask_report(report, uncovered: list[str], cmp_result, compare: str | None) -> None:
+    overall = report.overall()
+    table = Table(title="ask eval (end-to-end, deterministic, keyless)")
+    table.add_column("class")
+    table.add_column("cases", justify="right")
+    table.add_column("passed", justify="right")
+    for cls, m in report.per_class().items():
+        table.add_row(cls, str(m["n"]), str(m["passed"]))
+    table.add_row(
+        "[bold]overall[/bold]",
+        f"[bold]{overall['cases']}[/bold]",
+        f"[bold]{overall['cases_passed']}[/bold]",
+    )
+    _console.print(table)
+    typer.echo(f"  checks: {overall['checks_passed']}/{overall['checks']} passed")
+
+    for result in report.results:
+        for check in result.failures():
+            typer.echo(f"  FAIL {result.id} [{check.name}]: {check.detail}")
+
+    if uncovered:
+        typer.echo(f"  note: case classes with no coverage: {', '.join(uncovered)}")
+
+    for lim in report.limitations():
+        typer.echo(f"\n  known limitation ({lim['id']}): {' '.join(lim['limitation'].split())}")
+
+    if cmp_result is not None:
+        typer.echo(f"\ncompare vs {compare}:")
+        for key in ("fixed", "new_cases", "dropped_cases"):
+            if cmp_result[key]:
+                typer.echo(f"  {key}: {', '.join(cmp_result[key])}")
+        if cmp_result["regressed"]:
+            typer.echo("\nREGRESSED vs baseline:")
+            for line in cmp_result["regressed"]:
+                typer.echo(f"  - {line}")
+        else:
+            typer.echo("  no regressions vs baseline")

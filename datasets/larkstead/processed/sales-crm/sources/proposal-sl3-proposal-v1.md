@@ -24,13 +24,11 @@ key_claims:
 - id: proposal-sl3-proposal-v1-04
   statement: 'The scope includes 40 seats: 28 front-office and admin stations, 12 clinician charting stations.'
   confidence: high
-  affects:
-  - seating-capacity
+  affects: []
 - id: proposal-sl3-proposal-v1-05
   statement: The configuration matches the sixty-inch desk, graphite black chair, single arm, and cable-kit build.
   confidence: high
-  affects:
-  - furniture-configuration
+  affects: []
 - id: proposal-sl3-proposal-v1-06
   statement: The total net cost is 40,868.00 plus freight.
   confidence: high

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from mastervault.contracts.claims import ClaimCandidate, ClaimExtractionContract
 from mastervault.core.budget import BudgetLedger
 from mastervault.models import Claim, SourceType
+from mastervault.prompts.untrusted import fence
 from mastervault.providers.llm import LLMProvider
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -96,7 +97,7 @@ def extract_claims(
             "title": title,
             "source_type": source_type.value,
             "domain": domain,
-            "body": body,
+            "body": fence(body, "DOCUMENT"),
         },
         {"max_claims": max_claims},
         ledger=ledger,

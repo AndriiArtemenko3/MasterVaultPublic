@@ -16,8 +16,7 @@ key_claims:
 - id: ticket-hd-2026-60206-whitfield-spare-adapter-02
   statement: The total cost for one Vireo power adapter and shipping is 27.95.
   confidence: high
-  affects:
-  - order-assist
+  affects: []
 - id: ticket-hd-2026-60206-whitfield-spare-adapter-03
   statement: The price for one Vireo power adapter is 22.00.
   confidence: high

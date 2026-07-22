@@ -49,9 +49,13 @@ def _load_summary(run_dir: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
+    # summary.json is ours, but a truncated or hand-edited file can still parse
+    # to a non-object; treat that as "no summary" rather than handing a
+    # list/str to callers that index it.
+    return loaded if isinstance(loaded, dict) else None
 
 
 def _status_of(summary: dict[str, Any] | None) -> str:
