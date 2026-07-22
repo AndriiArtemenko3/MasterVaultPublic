@@ -14,6 +14,7 @@ The ingest stages that take one raw document from bytes on disk to atomic claims
 | `wiki_draft.py` | Dispatch shim over `WikiDraftContract`. `draft_extend` writes a one-paragraph body addition for an 'extends' relation; `draft_new_entry` writes a full new-concept entry with aliases. |
 | `linker.py` | Idempotent `[[slug]]` insertion at the first natural-language mention of an `alias`. Skips fenced code, headings, and text already inside a link; a no-op if the slug is already linked anywhere. |
 | `validate.py` | The claim-schema gate for `key_claims:` frontmatter. Splits findings into mechanical autofixes (renumber ids, kebab-case `affects`, collapse whitespace) and hard-fails (bad length, bad confidence, dupes, over-budget). Also a standalone CLI: `python -m mastervault.ingest.validate <paths> [--fix]`. |
+| `affects.py` | Reconciles a note's `affects:` slugs against the wiki entries that actually exist. `existing_wiki_slugs` reads the vault tree by the same rule lint validates with; `reconcile_affects` drops entries with no wiki note and never remaps a near-miss, rewriting through `surgical_replace_field` so untouched claims stay byte-identical. Runs at the end of the ingest route phase. |
 
 ## How it fits
 
