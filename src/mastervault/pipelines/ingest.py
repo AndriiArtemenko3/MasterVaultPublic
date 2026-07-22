@@ -27,7 +27,12 @@ from pathlib import Path
 from typing import Any
 
 from mastervault.config import Settings
-from mastervault.core.errors import EXIT_CODES, BudgetExceeded, ResumeConflict
+from mastervault.core.errors import (
+    EXIT_CODES,
+    BudgetExceeded,
+    ResumeConflict,
+    UnreadableDocument,
+)
 from mastervault.core.events import Clock, Event, EventName, utc_now
 from mastervault.core.runctx import RunContext
 from mastervault.ingest.affects import existing_wiki_slugs, reconcile_affects
@@ -435,8 +440,22 @@ def run_ingest(
         files = discover_units(path)
         existing_hashes = _existing_provenance_hashes(vault_dir)
         planned_units: list[dict[str, Any]] = []
+        unreadable: list[dict[str, str]] = []
         for f in files:
-            raw = read_raw_text(f)
+            # One corrupt file in a directory must not cost the whole run its
+            # plan. It is recorded, reported, and excluded; every readable file
+            # still ingests.
+            try:
+                raw = read_raw_text(f)
+            except UnreadableDocument as exc:
+                unreadable.append({"src_path": str(f), "error": str(exc)})
+                ctx.emit(
+                    EventName.UNIT_SKIPPED,
+                    stage="plan",
+                    unit=_rel_unit_id(path, f),
+                    payload={"reason": "unreadable", "src_path": str(f), "error": str(exc)},
+                )
+                continue
             sha = content_hash(raw)
             if sha in existing_hashes:
                 continue
@@ -456,6 +475,7 @@ def run_ingest(
                 "auto_approve": auto_approve,
                 "fail_fast": fail_fast,
             },
+            "unreadable": unreadable,
             "units": planned_units,
         }
         ctx.freeze_plan(plan)
@@ -685,6 +705,7 @@ def run_ingest(
         "tier3_enqueued": counters["new_concepts"] + counters["tier3"],
         "new_concepts_drafted": counters["new_concepts"],
         "affects_dropped": counters["affects_dropped"],
+        "unreadable_inputs": len(plan.get("unreadable") or []),
         "docs_upserted": sync_report.docs_upserted,
         "records_embedded": sync_report.records_embedded,
         "cost_usd": round(ctx.ledger.spent, 6),

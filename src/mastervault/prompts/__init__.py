@@ -8,5 +8,6 @@ and editable checkouts behave identically.
 """
 
 from mastervault.prompts.registry import PromptSpec, load
+from mastervault.prompts.untrusted import fence, neutralise
 
-__all__ = ["PromptSpec", "load"]
+__all__ = ["PromptSpec", "fence", "load", "neutralise"]

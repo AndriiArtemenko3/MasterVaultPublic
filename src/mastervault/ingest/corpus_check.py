@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from mastervault.contracts.corpus_check import CorpusCheckContract
 from mastervault.core.budget import BudgetLedger
+from mastervault.prompts.untrusted import fence
 from mastervault.providers.llm import LLMProvider
 
 
@@ -39,7 +40,11 @@ def adjudicate(
     contract = CorpusCheckContract()
     result = contract.dispatch(
         llm,
-        {"claim_statement": claim_statement, "wiki_slug": wiki_slug, "wiki_text": wiki_text},
+        {
+            "claim_statement": fence(claim_statement, "CLAIM"),
+            "wiki_slug": wiki_slug,
+            "wiki_text": fence(wiki_text, "WIKI ENTRY"),
+        },
         ledger=ledger,
         emit=emit,
     )

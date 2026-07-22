@@ -44,6 +44,15 @@ class PatchError(MasterVaultError):
     """A unified diff could not be applied cleanly (hunk mismatch)."""
 
 
+class UnreadableDocument(MasterVaultError):
+    """An input file could not be turned into text.
+
+    Raised instead of letting a parser's own exception escape, so a corrupt PDF
+    or a binary file mislabelled `.txt` fails with a bounded, actionable
+    message naming the file and what was wrong with it.
+    """
+
+
 # Outcome name -> process exit code. CLI entrypoints exit through this table.
 EXIT_CODES: dict[str, int] = {
     "ok": 0,

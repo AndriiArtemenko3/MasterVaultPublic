@@ -42,6 +42,7 @@ from mastervault.core.errors import BudgetExceeded
 from mastervault.core.events import Clock, EventName
 from mastervault.core.runctx import RunContext
 from mastervault.models import Confidence, Hit
+from mastervault.prompts.untrusted import fence, neutralise
 from mastervault.providers.embedding import EmbeddingProvider
 from mastervault.providers.llm import LLMProvider, StructuredOutputError
 from mastervault.retrieval.channels import vector_channel
@@ -103,8 +104,15 @@ def _dedupe_followups(followups: list[str], prior_queries: list[str]) -> list[st
 
 
 def _evidence_cards(hits: Iterable[Hit]) -> str:
-    lines = [f"[{h.record_id}] {' '.join(h.text.split())}" for h in hits]
-    return "\n".join(lines) if lines else "(no evidence gathered yet)"
+    """Render evidence for a prompt, fenced as untrusted corpus text.
+
+    Card text is document content, so it is delimited rather than dropped into
+    the instructions. The record id is ours and stays outside the payload; the
+    text is neutralised so a document cannot close the fence and keep writing.
+    """
+    lines = [f"[{h.record_id}] {neutralise(' '.join(h.text.split()))}" for h in hits]
+    body = "\n".join(lines) if lines else "(no evidence gathered yet)"
+    return fence(body, "EVIDENCE")
 
 
 def _mmr_pick(question: str, hits: list[Hit], n: int, lambda_: float) -> list[Hit]:
@@ -134,11 +142,42 @@ def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, set[st
     return cleaned, valid_ids, warnings
 
 
-def _extractive_answer(hits: list[Hit]) -> str:
+#: A citation token that names a record: the closed set of record-id namespaces
+#: the index actually issues. Used to spot citation-shaped tokens *inside*
+#: quoted document text, without touching ordinary prose brackets like "[sic]".
+_FORGED_CITATION_RE = re.compile(r"\[((?:claim|chunk|wiki):[^\[\]]+)\]")
+
+
+def _strip_forged_citations(text: str, evidence_ids: set[str]) -> tuple[str, list[str]]:
+    """Remove record-shaped citations a document quoted at itself.
+
+    The synthesis path is citation-gated, but the extractive path quotes
+    document text verbatim -- so a document containing "[claim:made-up-01]"
+    would have that token rendered into the answer as if it were a citation the
+    pipeline issued. Anything citation-shaped that is not in the evidence pool
+    is stripped here, so both answer paths obey the same rule: every citation
+    in an answer names a record that was really retrieved.
+    """
+    warnings: list[str] = []
+
+    def _sub(m: re.Match[str]) -> str:
+        token = m.group(1)
+        if token in evidence_ids:
+            return m.group(0)
+        warnings.append(f"stripped forged citation embedded in document text: [{token}]")
+        return ""
+
+    return _FORGED_CITATION_RE.sub(_sub, text), warnings
+
+
+def _extractive_answer(hits: list[Hit], evidence_ids: set[str]) -> tuple[str, list[str]]:
     lines = ["Extractive answer (no generative synthesis):", ""]
+    warnings: list[str] = []
     for h in hits:
-        lines.append(f"- {' '.join(h.text.split())} [{h.record_id}]")
-    return "\n".join(lines)
+        cleaned, stripped = _strip_forged_citations(" ".join(h.text.split()), evidence_ids)
+        warnings.extend(stripped)
+        lines.append(f"- {cleaned.strip()} [{h.record_id}]")
+    return "\n".join(lines), warnings
 
 
 def _render_sources(hits: list[Hit]) -> list[dict[str, str]]:
@@ -296,7 +335,8 @@ def run_ask(
 
     if extractive:
         top5 = _mmr_pick(question, all_hits, EXTRACTIVE_CARDS_N, settings.retrieval.mmr_lambda)
-        answer_markdown = _extractive_answer(top5)
+        answer_markdown, forged_warnings = _extractive_answer(top5, set(evidence_by_id))
+        warnings.extend(forged_warnings)
         confidence = Confidence.LOW.value if top5 else None
         cited_hits = top5
 

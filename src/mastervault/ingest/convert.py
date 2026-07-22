@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mastervault.core.errors import UnreadableDocument
+
 SUPPORTED_SUFFIXES: tuple[str, ...] = (".md", ".txt", ".pdf")
 
 
@@ -32,12 +34,40 @@ def discover_units(root: Path | str) -> list[Path]:
 
 
 def read_raw_text(path: Path | str) -> str:
-    """Extract plain text from one ingestible file."""
+    """Extract plain text from one ingestible file.
+
+    Every failure mode is funnelled into UnreadableDocument so a corrupt PDF or
+    a binary file with a `.txt` suffix produces one actionable line naming the
+    file, instead of a pypdf or codec traceback from three layers down.
+    """
     path = Path(path)
     if path.suffix.lower() == ".pdf":
-        from pypdf import PdfReader
+        return _read_pdf(path)
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise UnreadableDocument(
+            f"{path.name}: not valid UTF-8 text (byte 0x{exc.object[exc.start]:02x} at offset "
+            f"{exc.start}). It is most likely a binary file with a text suffix; convert it "
+            "to UTF-8 text or PDF before ingesting."
+        ) from exc
+    except OSError as exc:
+        raise UnreadableDocument(f"{path.name}: cannot be read ({exc.strerror or exc}).") from exc
 
+
+def _read_pdf(path: Path) -> str:
+    # pypdf raises its own hierarchy plus assorted stdlib errors on malformed
+    # input; none of them is a contract this package wants to re-export.
+    from pypdf import PdfReader
+
+    try:
         reader = PdfReader(str(path))
         pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n\n".join(pages).strip()
-    return path.read_text(encoding="utf-8")
+    except UnreadableDocument:
+        raise
+    except Exception as exc:
+        raise UnreadableDocument(
+            f"{path.name}: not a readable PDF ({type(exc).__name__}: {exc}). "
+            "Re-export it, or convert it to .md/.txt before ingesting."
+        ) from exc
+    return "\n\n".join(pages).strip()

@@ -24,6 +24,7 @@ from pathlib import Path
 
 from mastervault.core.errors import PatchError, UsageError
 from mastervault.core.events import Clock
+from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.models import content_hash
 from mastervault.review.queue import LoadedReview, ReviewQueue
 from mastervault.vaultfs.frontmatter import (
@@ -187,7 +188,17 @@ def apply(
 
     loaded: LoadedReview = queue.load(item_path)
     item = loaded.item
-    target = vault_root / item.target
+
+    # `target:` arrives from a queue file written by an LLM-driven producer, so
+    # it is untrusted input: an absolute path or a `..` walk would otherwise
+    # make this write anywhere the process can reach. Treated like any other
+    # unapplyable item -- marked conflict, nothing written.
+    try:
+        target = resolve_within(vault_root, item.target)
+    except PathBoundaryError as exc:
+        reason = f"unsafe target path: {exc}"
+        queue.mark_conflict(item_path, reason)
+        return ConflictResult(target=Path(vault_root), reason=reason)
 
     if not target.is_file():
         reason = f"target file missing: {item.target}"
