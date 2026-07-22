@@ -9,9 +9,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The measured floor. SQLite-only runs at 85% and the postgres job at 87%
+  # (0.2.0 baseline); 84 leaves one point of slack without letting real
+  # coverage loss through. Raise it when the measured number rises -- never
+  # lower it to make a red build green.
+  COVERAGE_FLOOR: "84"
+
 jobs:
   test:
-    name: lint + tests
+    name: lint + types + tests (sqlite)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,17 +29,39 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      - name: Verify the lockfile is current
+        run: uv lock --check
+
       - name: Install (with dev + rerank extras)
         run: uv sync --all-extras
 
       - name: Lint (ruff)
         run: uv run ruff check src tests
 
-      - name: Type check (mypy)
+      - name: Type check (mypy, blocking)
         run: uv run mypy src
 
-      - name: Tests (sqlite backend; postgres cases skip here and run in the postgres job)
-        run: uv run pytest -q
+      # Split so a failure names its tier in the CI log instead of hiding in one
+      # 500-test run. --cov-append accumulates across the tiers; the floor is
+      # asserted once at the end, over the union.
+      - name: Unit tests
+        run: uv run pytest -q tests/unit --cov --cov-report= --junitxml=junit-unit.xml
+
+      - name: Integration tests (sqlite backend)
+        run: uv run pytest -q tests/integration --cov --cov-append --cov-report= --junitxml=junit-integration.xml
+
+      - name: Coverage report + regression floor
+        run: |
+          uv run coverage report
+          uv run coverage report --fail-under="${COVERAGE_FLOOR}"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-sqlite
+          path: junit-*.xml
+          if-no-files-found: ignore
 
   postgres:
     name: storage contract (postgres + pgvector)
@@ -59,8 +88,9 @@ jobs:
       # schema per test inside it (tests/conftest.py), so nothing here depends on
       # -- or can reach -- a developer's database.
       DATABASE_URL: postgresql://mastervault:mastervault@localhost:5432/mastervault
-      # Turns "postgres unreachable -> skip" into a hard failure, so this job
-      # cannot pass green while silently testing nothing.
+      # Turns "postgres unreachable -> skip" into a hard failure, and fails the
+      # session if any postgres-backed test skipped anyway. Without this the job
+      # would pass green while testing nothing.
       MV_REQUIRE_POSTGRES: "1"
 
     steps:
@@ -76,10 +106,18 @@ jobs:
         run: uv sync --all-extras
 
       - name: Backend contract tests (both backends, parametrized)
-        run: uv run pytest -q tests/integration/test_storage_backends.py
+        run: uv run pytest -q tests/integration/test_storage_backends.py --junitxml=junit-backend.xml
 
       - name: Full suite against postgres
-        run: uv run pytest -q
+        run: uv run pytest -q --junitxml=junit-postgres.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-postgres
+          path: junit-*.xml
+          if-no-files-found: ignore
 
   eval:
     name: retrieval + ask eval regression gates
@@ -109,6 +147,9 @@ jobs:
           uv run mvault init
           uv run mvault demo load
 
+      - name: Pristine demo mechanical lint
+        run: uv run mvault lint --mechanical-only
+
       # Two gates, deliberately reported separately: `eval` grades retrieval
       # ranking, `ask-eval` grades the whole ask pipeline end to end. A single
       # merged number would move for either reason and mean neither.
@@ -117,3 +158,27 @@ jobs:
 
       - name: End-to-end ask eval regression gate vs frozen baseline
         run: uv run mvault ask-eval --compare datasets/larkstead/golden/ask_baseline.json
+
+  package:
+    name: build + clean-install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # Builds the sdist and wheel, scans both for workspaces/caches/secrets/
+      # test output, installs the wheel into a clean venv, and runs a CLI smoke
+      # flow (init -> sync -> search -> ask -> lint) from the installed artifact.
+      - name: Build, scan and smoke-test the distributions
+        run: ./scripts/check-package.sh
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*

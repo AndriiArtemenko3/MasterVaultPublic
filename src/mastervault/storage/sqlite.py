@@ -1,6 +1,6 @@
 """SQLite backend: sqlite-vec (vec0) for vectors, FTS5 for lexical search.
 
-Mirrors the logical schema of migrations/pg/001_init.sql. Three extras that
+Mirrors the logical schema of storage/migrations/pg/001_init.sql. Three extras
 Postgres gets for free are handled by hand here:
 
 - FTS5 virtual tables (claims_fts, documents_fts) are rebuilt for the touched

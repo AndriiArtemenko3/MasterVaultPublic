@@ -87,7 +87,14 @@ def load_cmd(
     """Copy the shipped Larkstead dataset into the workspace and import its
     precomputed embeddings sidecar. No embedding computation happens here."""
     if not DATASET_DIR.is_dir():
-        typer.echo(f"error: dataset not found at {DATASET_DIR}", err=True)
+        typer.echo(
+            f"error: demo dataset not found at {DATASET_DIR}.\n"
+            "The Larkstead demo ships with the repository, not with the installed\n"
+            "package: clone https://github.com/AndriiArtemenko3/MasterVaultPublic and\n"
+            "run `mvault demo load` from the checkout, or point --workspace at a vault\n"
+            "you populate with `mvault ingest` / `mvault sync` instead.",
+            err=True,
+        )
         raise typer.Exit(code=1)
 
     settings = load_settings()

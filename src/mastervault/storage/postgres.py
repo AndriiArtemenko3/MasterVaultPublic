@@ -4,7 +4,8 @@ psycopg3 sync, one connection per backend instance. The connection runs in
 autocommit mode; every write path opens an explicit transaction block, so a
 failure mid-upsert never leaves a half-replaced document behind.
 
-Schema comes from migrations/pg/*.sql with {{DIM}} substituted at init time.
+Schema comes from storage/migrations/pg/*.sql (package data, so a wheel and a
+source checkout behave alike) with {{DIM}} substituted at init time.
 The meta table pins (embedding_model, dimensions, schema_version); a re-init
 with a different dim or model refuses instead of corrupting the index.
 """
@@ -38,7 +39,11 @@ from mastervault.storage.base import (
     overfetch_limit,
 )
 
-_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parents[3] / "migrations" / "pg"
+# Package-relative, like the prompt files: an installed wheel and an editable
+# checkout must resolve the schema identically. Resolving it from the repo root
+# meant `mvault init` against Postgres worked from a clone and failed from a
+# wheel with "no migrations found".
+_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "pg"
 
 _CONFIDENCE_ORDER_SQL = "CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
 

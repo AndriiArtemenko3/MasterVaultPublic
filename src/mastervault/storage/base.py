@@ -1,7 +1,8 @@
 """Storage layer contract: shared row dataclasses + the StorageBackend Protocol.
 
 Both backends (Postgres+pgvector, SQLite+sqlite-vec+FTS5) implement the same
-logical schema (see migrations/pg/001_init.sql) and the same Protocol below.
+logical schema (see storage/migrations/pg/001_init.sql) and the same Protocol
+below.
 Row dataclasses are plain transport types — validation happens upstream in
 mastervault.models; this module stays dependency-light (stdlib only).
 """

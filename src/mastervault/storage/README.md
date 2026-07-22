@@ -8,7 +8,7 @@ This folder holds the index: documents, claims, chunks, wiki aliases, and embedd
 |------|----------------|
 | `base.py` | The `StorageBackend` Protocol, the transport dataclasses (`DocumentRow`, `ClaimRow`, `ChunkRow`, `AliasRow`, `EmbeddingRow`), the `StorageError`/`SchemaMismatchError` hierarchy, meta-key constants, and `overfetch_limit()`. Stdlib-only, no DB driver imports. |
 | `sqlite.py` | `SqliteBackend`: sqlite-vec `vec0` for vectors, FTS5 virtual tables for lexical search. Creates its schema inline (`_SCHEMA_SQL`), normalizes vectors before insert, and converts vec0 L2 distance to cosine via `l2_to_cosine`. |
-| `postgres.py` | `PostgresBackend`: psycopg3 sync + pgvector for vectors, `tsvector` columns for lexical search. Loads schema from `migrations/pg/*.sql` with `{{DIM}}` substituted at init, runs every write inside an explicit transaction. |
+| `postgres.py` | `PostgresBackend`: psycopg3 sync + pgvector for vectors, `tsvector` columns for lexical search. Loads schema from `migrations/pg/*.sql` (shipped as package data under `storage/migrations/`) with `{{DIM}}` substituted at init, runs every write inside an explicit transaction. |
 | `__init__.py` | `get_backend(settings)` resolution (`postgres` / `sqlite` / `auto`) plus public re-exports of the rows, Protocol, and error types. |
 
 ## How it fits

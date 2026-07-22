@@ -5,7 +5,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![Keyless demo](https://img.shields.io/badge/demo-keyless%20%2F%20%240.00-brightgreen.svg)](#quickstart)
 
-> Status: `0.1.0`, alpha. A single-user CLI you run locally. The default path
+> Status: `0.2.0`, alpha. A single-user CLI you run locally. The default path
 > (SQLite + local embeddings + a mock LLM) runs with no API keys and no
 > network after first install.
 
