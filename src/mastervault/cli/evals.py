@@ -26,6 +26,7 @@ from mastervault.evals import (
     load_ask_cases,
     load_golden_queries,
     missing_case_classes,
+    resolve_ask_cases,
     resolve_golden_set,
     run_ask_suite,
     run_config,
@@ -251,6 +252,19 @@ def ask_eval_cmd(
 
     if not ask_cases:
         typer.echo(f"error: no cases in {cases_path}", err=True)
+        raise typer.Exit(code=1)
+
+    # Same contract as `mvault eval`: a case naming a document or claim the
+    # corpus no longer has is a build error, not a retrieval regression.
+    resolve_errors = resolve_ask_cases(ask_cases, PROCESSED_DIR)
+    if resolve_errors:
+        typer.echo(
+            f"error: {len(resolve_errors)} ask-eval reference(s) failed to resolve against"
+            " the live corpus:",
+            err=True,
+        )
+        for line in resolve_errors[:20]:
+            typer.echo(f"  - {line}", err=True)
         raise typer.Exit(code=1)
 
     settings = load_settings()

@@ -34,6 +34,7 @@ from mastervault.core.errors import (
     UnreadableDocument,
 )
 from mastervault.core.events import Clock, Event, EventName, utc_now
+from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.core.runctx import RunContext
 from mastervault.ingest.affects import existing_wiki_slugs, reconcile_affects
 from mastervault.ingest.concept_match import MatchResult, match_claim
@@ -511,7 +512,17 @@ def run_ingest(
                 reason = f"unit {u['unit_id']}: source file missing: {src}"
                 ctx.write_summary({"error": reason})
                 return IngestOutcome(EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason})
-            current_sha = content_hash(read_raw_text(src))
+            try:
+                current_sha = content_hash(read_raw_text(src))
+            except UnreadableDocument as exc:
+                # A source that became unreadable since the freeze is the same
+                # class of problem as one that vanished: the plan can no longer
+                # be trusted, so resume refuses rather than crashing.
+                reason = f"unit {u['unit_id']}: source file is no longer readable: {exc}"
+                ctx.write_summary({"error": reason})
+                return IngestOutcome(
+                    EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+                )
             if current_sha != u["sha"]:
                 reason = (
                     f"unit {u['unit_id']}: source file changed since the plan was frozen "
@@ -533,7 +544,11 @@ def run_ingest(
         src = Path(u["src_path"])
         try:
             raw_text = read_raw_text(src)
-        except OSError as exc:
+        except (OSError, UnreadableDocument) as exc:
+            # read_raw_text funnels parser and codec failures into
+            # UnreadableDocument, which is NOT an OSError; a source that was
+            # readable at plan time and is not now (deleted, unmounted,
+            # truncated) must still fail this unit rather than the whole run.
             ctx.emit(EventName.UNIT_FAILED, stage="extract", unit=unit_id, payload={"reason": str(exc)})
             any_hard_fail = True
             if fail_fast:
@@ -604,9 +619,6 @@ def run_ingest(
         "linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0,
         "affects_dropped": 0,
     }
-    # Wiki notes are never written by ingest, so the set is stable for the whole
-    # route phase. Read once, off the same vault tree `mvault lint` validates.
-    known_wiki_slugs = existing_wiki_slugs(vault_dir)
     new_concept_tally: dict[str, list[tuple[str, str]]] = {}
     review_counter = [0]
 
@@ -622,7 +634,16 @@ def run_ingest(
     written.update(newly_completed)
 
     for unit_id, note_rel in written.items():
-        note_path = vault_dir / note_rel
+        # note_rel is replayed from events.jsonl, so it is untrusted: a tampered
+        # run directory could otherwise steer these writes anywhere on disk.
+        try:
+            note_path = resolve_within(vault_dir, note_rel)
+        except PathBoundaryError as exc:
+            ctx.emit(
+                EventName.UNIT_SKIPPED, stage="route", unit=unit_id,
+                payload={"reason": "unsafe-note-path", "note": note_rel, "error": str(exc)},
+            )
+            continue
         if not note_path.is_file():
             continue
         try:
@@ -655,30 +676,7 @@ def run_ingest(
                 budget_exhausted = True
                 route_budget_dead = True
 
-        # `affects:` came from the extractor's guesses at the concepts this
-        # document touches; only now, with the whole vault on disk, is it
-        # knowable which of those concepts exist. Slugs that resolve to no wiki
-        # note are dropped so the note cannot ship a broken reference -- the
-        # concept behind a dropped slug is not lost, it is already tallied
-        # toward a new-concept proposal in the review queue.
-        repair = reconcile_affects(
-            join_frontmatter(yaml_str, current_body), known_wiki_slugs
-        )
-        if repair.dropped:
-            counters["affects_dropped"] += len(repair.dropped)
-            ctx.emit(
-                EventName.AUTO_APPLIED,
-                stage="route",
-                unit=unit_id,
-                payload={
-                    "target": source_rel_path,
-                    "kind": "affects-prune",
-                    "dropped": [
-                        {"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped
-                    ],
-                },
-            )
-        note_path.write_text(repair.text, encoding="utf-8")
+        note_path.write_text(join_frontmatter(yaml_str, current_body), encoding="utf-8")
 
     if not budget_exhausted:
         try:
@@ -689,6 +687,41 @@ def run_ingest(
             )
         except BudgetExceeded:
             budget_exhausted = True
+
+    # -- RECONCILE `affects:` ---------------------------------------------------
+    # Strictly after _draft_new_concepts, and re-reading the vault, because that
+    # step CREATES wiki notes: a claim routed as "new" is tallied under its own
+    # affects label, and the stub it produces is named with exactly that slug.
+    # Reconciling before the draft would delete the claim->concept edge for the
+    # very concept the claim just caused to exist -- and since reconcile only
+    # ever drops and ingest dedupes by content hash, a re-run could not repair
+    # it. `affects:` is the extractor's guess at which concepts a document
+    # touches; only here is it knowable which of those actually exist.
+    known_wiki_slugs = existing_wiki_slugs(vault_dir)
+    for unit_id, note_rel in written.items():
+        try:
+            note_path = resolve_within(vault_dir, note_rel)
+        except PathBoundaryError:
+            continue  # already reported when the route loop skipped it
+        if not note_path.is_file():
+            continue
+        repair = reconcile_affects(note_path.read_text(encoding="utf-8"), known_wiki_slugs)
+        if not repair.dropped:
+            continue
+        counters["affects_dropped"] += len(repair.dropped)
+        ctx.emit(
+            EventName.AUTO_APPLIED,
+            stage="route",
+            unit=unit_id,
+            payload={
+                "target": note_rel,
+                "kind": "affects-prune",
+                "dropped": [
+                    {"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped
+                ],
+            },
+        )
+        note_path.write_text(repair.text, encoding="utf-8")
 
     exit_code = (
         EXIT_CODES["budget-exhausted"] if budget_exhausted

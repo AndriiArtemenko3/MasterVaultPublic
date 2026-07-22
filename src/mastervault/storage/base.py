@@ -4,15 +4,20 @@ Both backends (Postgres+pgvector, SQLite+sqlite-vec+FTS5) implement the same
 logical schema (see storage/migrations/pg/001_init.sql) and the same Protocol
 below.
 Row dataclasses are plain transport types — validation happens upstream in
-mastervault.models; this module stays dependency-light (stdlib only).
+mastervault.models. The only non-stdlib import is numpy, for the shared vector
+guard: that check has to run in the same float32 precision the vector indexes
+use, or the two backends disagree about which vectors are indexable.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
 
 
 class StorageError(RuntimeError):
@@ -120,18 +125,44 @@ META_KEY_DIM = "dimensions"
 META_KEY_SCHEMA = "schema_version"
 
 
-def ensure_indexable_vector(vector: Sequence[float]) -> None:
-    """Reject vectors that cosine similarity is undefined for.
+def normalized_vector(vector: Sequence[float]) -> np.ndarray:
+    """float32 unit vector, or StorageError if the input is not indexable.
 
-    Both backends index by cosine, which needs a direction: the zero vector has
-    none. SQLite would divide by a zero norm; Postgres is worse, because
-    `<=>` yields NaN and the HNSW cosine index silently drops the row — the
-    record stays recorded as embedded in `needs_embedding`, so it is never
-    re-embedded and never retrievable again. Refusing it in one place keeps the
-    two backends on the same contract: loud failure, not silent data loss.
+    Both backends index by cosine, which needs a direction. Three inputs have
+    none, and all three must be refused identically or the backends diverge:
+
+    - the zero vector;
+    - a vector whose float32 sum-of-squares underflows to zero (every component
+      around 1e-23 or smaller). This is the dangerous one. Testing `any(vector)`
+      is not enough: such a vector is non-zero in Python but zero-norm in
+      float32, so SQLite rejects it while pgvector accepts it, clamps
+      `dot / 0 = inf` to a similarity of 1.0, and turns the row into the top hit
+      for *every* query. That is silent corpus-wide corruption, and the demo
+      sidecar is a route for it;
+    - NaN or infinity, which propagate through every distance computation.
+
+    Refusing all three in one place is what keeps the contract identical: loud
+    failure, never silent data loss. Uses numpy (already a hard dependency of
+    both backends) precisely because the check has to be done in the same
+    precision the index uses.
     """
-    if not any(vector):
-        raise StorageError("cannot index or query a zero vector")
+    arr = np.asarray(vector, dtype=np.float32)
+    if arr.ndim != 1 or arr.size == 0:
+        raise StorageError(f"expected a 1-D non-empty vector, got shape {arr.shape}")
+    if not bool(np.all(np.isfinite(arr))):
+        raise StorageError("cannot index or query a vector containing NaN or infinity")
+    norm = float(np.linalg.norm(arr))
+    if not math.isfinite(norm) or norm == 0.0:
+        raise StorageError(
+            "cannot index or query a zero vector (its float32 norm is zero, so it has"
+            " no direction for cosine similarity)"
+        )
+    return arr / norm
+
+
+def ensure_indexable_vector(vector: Sequence[float]) -> None:
+    """Raise StorageError unless `vector` can be cosine-indexed. See normalized_vector."""
+    normalized_vector(vector)
 
 
 def overfetch_limit(k: int, record_types: list[str] | None, domain: str | None) -> int:

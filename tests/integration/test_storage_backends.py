@@ -601,3 +601,94 @@ def test_reupserting_an_embedding_replaces_it_rather_than_duplicating(backend, m
     assert backend.needs_embedding(
         [("claim:zebra-note-01", content_hash("an edited statement"))], model_version
     ) == []
+
+
+# ---------------------------------------------------------------------------
+# Vector hygiene, part 2: defects found in the 0.2.0 data-integrity audit
+# ---------------------------------------------------------------------------
+
+
+def test_a_vector_whose_float32_norm_underflows_is_refused(backend, model_version):
+    """`any(vector)` was not enough, and the gap was backend-asymmetric.
+
+    A vector of tiny components is non-zero in Python but zero-norm in float32.
+    SQLite rejected it; Postgres accepted it, clamped `dot / 0` to a similarity
+    of 1.0, and the row became the top hit for EVERY query.
+    """
+    doc, _, _ = seed_zebra_doc(backend)
+    tiny = [1e-25] * DIM
+    assert any(tiny), "the fixture must be non-zero in Python, or it tests nothing"
+
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.upsert_embeddings([
+            emb_row("claim:zebra-note-01", tiny, doc_id=doc.doc_id, model=model_version),
+        ])
+    with pytest.raises(StorageError, match="zero vector"):
+        backend.knn(tiny, k=3)
+
+
+@pytest.mark.parametrize("bad", ["nan", "inf"])
+def test_a_vector_containing_nan_or_infinity_is_refused(backend, model_version, bad: str):
+    doc, _, _ = seed_zebra_doc(backend)
+    vector = basis(0)
+    vector[1] = float(bad)
+    with pytest.raises(StorageError, match="NaN or infinity"):
+        backend.upsert_embeddings([
+            emb_row("claim:zebra-note-01", vector, doc_id=doc.doc_id, model=model_version),
+        ])
+    with pytest.raises(StorageError, match="NaN or infinity"):
+        backend.knn(vector, k=3)
+
+
+def test_shrinking_a_document_removes_its_dropped_records_vectors(backend, model_version):
+    """A document that loses a claim or chunk must lose their vectors too.
+
+    Embeddings cascade on doc_id, which still exists after an edit, so the
+    stranded vectors used to survive forever: needs_embedding() called them
+    fresh, and they kept occupying k-NN slots while hydrating to nothing --
+    silent recall decay on every edit, unrepairable by a later sync.
+    """
+    doc, claims, chunks = seed_zebra_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
+        emb_row(chunks[0].chunk_id, basis(2), record_type="chunk", doc_id=doc.doc_id,
+                model=model_version),
+    ])
+    assert backend.stats()["counts"]["embeddings"] == 3
+
+    # Re-upsert the document with only the first claim and no chunks.
+    backend.upsert_document(doc, [claims[0]], [], [])
+
+    assert backend.stats()["counts"]["embeddings"] == 1
+    assert [rid for rid, _ in backend.knn(basis(1), k=5)] == ["claim:zebra-note-01"]
+    assert [rid for rid, _ in backend.knn(basis(2), k=5)] == ["claim:zebra-note-01"]
+    # ...and the survivor is untouched.
+    survivor = backend.knn(basis(0), k=5)
+    assert [rid for rid, _ in survivor] == ["claim:zebra-note-01"]
+    assert survivor[0][1] == pytest.approx(1.0, abs=1e-3)
+
+
+def test_shrinking_a_wiki_document_keeps_its_own_wiki_vector(backend, model_version):
+    """The cleanup must target claim:/chunk: records, not the document's own."""
+    wiki = seed_wiki_doc(backend)
+    backend.upsert_embeddings([
+        emb_row("wiki:operations:migration-corridor", basis(0), record_type="wiki",
+                doc_id=wiki.doc_id, model=model_version),
+    ])
+    backend.upsert_document(wiki, [], [], [])
+    assert [rid for rid, _ in backend.knn(basis(0), k=3)] == [
+        "wiki:operations:migration-corridor"
+    ]
+
+
+def test_knn_breaks_distance_ties_by_record_id(backend, model_version):
+    """Equal-similarity rows must come back in the same order on both backends."""
+    doc, _, _ = seed_zebra_doc(backend)
+    identical = basis(0)
+    backend.upsert_embeddings([
+        emb_row("claim:zebra-note-02", identical, doc_id=doc.doc_id, model=model_version),
+        emb_row("claim:zebra-note-01", identical, doc_id=doc.doc_id, model=model_version),
+    ])
+    hits = backend.knn(identical, k=2)
+    assert [rid for rid, _ in hits] == ["claim:zebra-note-01", "claim:zebra-note-02"]

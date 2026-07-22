@@ -3,8 +3,11 @@ hard-fail continuation, and dedupe-on-reingest."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mastervault.contracts.claims import ClaimCandidate, ClaimExtractionOut
-from mastervault.core.errors import EXIT_CODES
+from mastervault.contracts.wiki_draft import WikiDraftOut
+from mastervault.core.errors import EXIT_CODES, UnreadableDocument
 from mastervault.models import Domain
 from mastervault.pipelines.ingest import run_ingest
 
@@ -112,3 +115,110 @@ def test_dedupe_skips_already_ingested_content(settings, backend, embedder, llm,
     assert second.exit_code == EXIT_CODES["ok"]
     assert second.summary["units_total"] == 0
     assert len(llm.calls) == calls_after_first  # no new extraction dispatch for the deduped file
+
+
+# ---------------------------------------------------------------------------
+# Regressions found in the 0.2.0 architecture + security audits
+# ---------------------------------------------------------------------------
+
+
+def test_a_new_concepts_slug_survives_the_affects_reconcile(
+    settings, backend, embedder, llm, write_raw
+):
+    """Reconciling `affects:` must happen AFTER new wiki concepts are drafted.
+
+    A claim routed as "new" is tallied under its own affects label, and
+    `_draft_new_concepts` then creates a wiki stub named with exactly that
+    slug. Reconciling first deleted the claim->concept edge for the concept the
+    claim had just caused to exist -- and since reconcile only ever drops and
+    ingest dedupes by content hash, no re-run could repair it.
+    """
+    from mastervault.vaultfs.frontmatter import parse_frontmatter
+
+    raw_dir = write_raw(
+        "widget.txt", "Widget recycling is handled by the regional depot every quarter."
+    ).parent
+    # `_draft_new_concepts` only drafts a concept seen by at least two claims.
+    llm.push(
+        "claim_extraction",
+        ClaimExtractionOut(
+            claims=[
+                ClaimCandidate(
+                    statement="Widget recycling is handled by the regional depot quarterly.",
+                    confidence="high",
+                    affects_candidates=["widget-recycling"],
+                ),
+                ClaimCandidate(
+                    statement="Widget recycling collections are logged by the depot supervisor.",
+                    confidence="high",
+                    affects_candidates=["widget-recycling"],
+                ),
+            ]
+        ),
+    )
+    llm.push(
+        "wiki_draft",
+        WikiDraftOut(
+            body_markdown=(
+                "## Definition\n\n**Operating:** Widget recycling runs quarterly.\n\n"
+                "## Main Insights\n\n- The depot handles it.\n\n"
+                "## Why It Compounds\n\nFewer ad-hoc collections.\n\n"
+                "## Cross-Refs\n\n- none\n"
+            ),
+            aliases=["widget recycling"],
+        ),
+    )
+
+    outcome = run_ingest(raw_dir, Domain.OPERATIONS, settings, backend, embedder, llm)
+    assert outcome.exit_code == EXIT_CODES["ok"]
+
+    vault_dir = settings.paths.vault_dir
+    wiki_stub = vault_dir / "operations" / "wiki" / "widget-recycling.md"
+    assert wiki_stub.is_file(), "the new-concept stub should have been drafted"
+
+    note = vault_dir / "operations" / "sources" / "widget.md"
+    data, _ = parse_frontmatter(note.read_text(encoding="utf-8"))
+    affects = data["key_claims"][0]["affects"]
+    assert affects == ["widget-recycling"], (
+        "the claim must keep the edge to the concept it created; "
+        f"got {affects!r} and affects_dropped={outcome.summary['affects_dropped']}"
+    )
+    assert outcome.summary["affects_dropped"] == 0
+
+
+def test_a_file_that_becomes_unreadable_fails_its_unit_not_the_run(
+    settings, backend, embedder, llm, write_raw
+):
+    """read_raw_text raises UnreadableDocument, which is NOT an OSError.
+
+    The execute loop guarded only `except OSError`, so a source that stopped
+    being readable between the plan freeze and the extract pass escaped
+    run_ingest entirely: traceback, no unit.failed event, no summary.
+    """
+    good = write_raw("good.txt", "A perfectly readable document about depots.")
+    raw_dir = good.parent
+    bad = raw_dir / "bad.txt"
+    bad.write_text("readable at plan time", encoding="utf-8")
+
+    llm.push("claim_extraction", _good_claims(1))
+
+    original = run_ingest.__globals__["read_raw_text"]
+    calls = {"n": 0}
+
+    def flaky(path):
+        # Readable during the plan pass; corrupt by the time the unit runs.
+        calls["n"] += 1
+        if calls["n"] > 2 and Path(path).name == "bad.txt":
+            raise UnreadableDocument("bad.txt: not valid UTF-8 text")
+        return original(path)
+
+    run_ingest.__globals__["read_raw_text"] = flaky
+    try:
+        outcome = run_ingest(raw_dir, Domain.OPERATIONS, settings, backend, embedder, llm)
+    finally:
+        run_ingest.__globals__["read_raw_text"] = original
+
+    # The bad unit failed; the good one still landed.
+    assert outcome.exit_code == EXIT_CODES["completed-with-failures"]
+    notes = sorted(p.name for p in (settings.paths.vault_dir / "operations" / "sources").glob("*.md"))
+    assert notes == ["good.md"]

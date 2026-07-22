@@ -36,8 +36,8 @@ from mastervault.storage.base import (
     HydratedChunkRow,
     HydratedClaimRow,
     SchemaMismatchError,
-    StorageError,
     ensure_indexable_vector,
+    normalized_vector,
     overfetch_limit,
 )
 
@@ -134,13 +134,8 @@ def l2_to_cosine(distance: float) -> float:
 
 
 def _normalize(vector: Sequence[float]) -> np.ndarray:
-    ensure_indexable_vector(vector)
-    arr = np.asarray(vector, dtype=np.float32)
-    norm = float(np.linalg.norm(arr))
-    if norm == 0.0:
-        # Not all-zero yet still zero-norm: every component underflowed float32.
-        raise StorageError("cannot index or query a zero vector")
-    return arr / norm
+    """Shared guard + unit-normalization; see storage.base.normalized_vector."""
+    return normalized_vector(vector)
 
 
 def _now() -> str:
@@ -265,6 +260,7 @@ class SqliteBackend:
             self.conn.execute("DELETE FROM claims WHERE doc_id = ?", (doc.doc_id,))
             self.conn.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.doc_id,))
             self.conn.execute("DELETE FROM wiki_aliases WHERE doc_id = ?", (doc.doc_id,))
+            self._drop_orphan_record_vectors(doc, claims, chunks)
             if claims:
                 self.conn.executemany(
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
@@ -306,6 +302,35 @@ class SqliteBackend:
                 "INSERT INTO documents_fts (doc_id, title, body) VALUES (?, ?, ?)",
                 (doc.doc_id, doc.title, doc.body),
             )
+
+    def _drop_orphan_record_vectors(
+        self, doc: DocumentRow, claims: list[ClaimRow], chunks: list[ChunkRow]
+    ) -> None:
+        """Remove embeddings for claims/chunks this document no longer has.
+
+        Embeddings cascade on doc_id, so a document that *shrinks* -- an edit
+        that removes a claim or shortens the body -- leaves its old claim/chunk
+        vectors behind: the doc_id still exists, nothing deletes them, and
+        needs_embedding() keeps reporting them fresh. They then occupy k-NN
+        slots forever and hydrate to nothing, so recall decays silently with
+        every edit. Only claim:/chunk: records are considered; a wiki record's
+        vector belongs to the document itself, not to a row deleted here.
+        """
+        keep = {f"claim:{c.claim_id}" for c in claims} | {ch.chunk_id for ch in chunks}
+        stale = [
+            r["record_id"]
+            for r in self.conn.execute(
+                "SELECT record_id FROM embeddings WHERE doc_id = ?"
+                " AND record_type IN ('claim', 'chunk')",
+                (doc.doc_id,),
+            )
+            if r["record_id"] not in keep
+        ]
+        if not stale:
+            return
+        ph = _placeholders(len(stale))
+        self.conn.execute(f"DELETE FROM vec_records WHERE record_id IN ({ph})", stale)
+        self.conn.execute(f"DELETE FROM embeddings WHERE record_id IN ({ph})", stale)
 
     def _delete_claims_fts(self, claim_ids: list[str]) -> None:
         if claim_ids:
@@ -422,6 +447,13 @@ class SqliteBackend:
             " ORDER BY v.distance",
             (blob, n_fetch),
         ).fetchall()
+        # vec0 rejects a secondary ORDER BY on a KNN query, so the record_id
+        # tie-break is applied here instead: equal-distance rows then come back
+        # in the same order as Postgres, which sorts on (distance, record_id) in
+        # SQL. NOTE: this orders the rows vec0 returned; which tied rows make
+        # the k cut is still the index's choice, so a corpus with more tied
+        # vectors than k can still select a different SET on each backend.
+        rows = sorted(rows, key=lambda r: (float(r["distance"]), r["record_id"]))
         hits: list[tuple[str, float]] = []
         for row in rows:
             if record_types is not None and row["record_type"] not in record_types:

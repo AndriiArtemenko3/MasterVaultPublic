@@ -168,6 +168,15 @@
     extractive: true
     confidence: low
     rounds: 1
+    # The discriminating part: whatever it returns, it must not put the thing
+    # the corpus does not contain into the answer. A fabricated synthesis would
+    # name the scheme; the deterministic extractive path quotes real records and
+    # therefore cannot.
+    answer_excludes:
+      - stock option
+      - equity compensation
+      - vesting
+      - share grant
   known_limitation: >-
     `ask` does not abstain on an unanswerable question: it returns a
     low-confidence extractive answer built from the nearest (irrelevant)

@@ -124,7 +124,12 @@ exclude_also = [
     "if TYPE_CHECKING:",
     "raise AssertionError",
     "@(abc\\.)?abstractmethod",
-    "\\.\\.\\.",  # Protocol method bodies
+    # Protocol/stub bodies ONLY: a bare `...` on its own line. An unanchored
+    # "\\.\\.\\." also matches a `typer.Option(...)` default inside a multi-line
+    # signature, and coverage maps an excluded line back to the statement it
+    # belongs to -- which silently removed 254 statements, whole CLI command
+    # bodies included, from the denominator the CI floor is measured against.
+    "^\\s*\\.\\.\\.\\s*$",
 ]
 
 [tool.ruff]

@@ -20,6 +20,7 @@ from .ask_harness import (
     compare_ask_to_baseline,
     load_ask_cases,
     missing_case_classes,
+    resolve_ask_cases,
     run_ask_case,
     run_ask_suite,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "mrr",
     "ndcg_at_k",
     "recall_at_k",
+    "resolve_ask_cases",
     "resolve_golden_set",
     "run_all_configs",
     "run_ask_case",

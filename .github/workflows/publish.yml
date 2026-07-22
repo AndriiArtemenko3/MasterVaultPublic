@@ -1,6 +1,6 @@
 name: Publish to PyPI
 
-# Runs only when a version tag is pushed, e.g. `git tag v0.1.0 && git push --tags`.
+# Runs only when a version tag is pushed, e.g. `git tag v0.2.0 && git push --tags`.
 # Inert until then. Uses PyPI Trusted Publishing (OIDC): configure a trusted
 # publisher for this repo at https://pypi.org/manage/project/mastervault/settings/publishing/
 # (no API token needed once that is set up).

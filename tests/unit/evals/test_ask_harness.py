@@ -108,10 +108,25 @@ class TestScriptedLlm:
 
 
 class TestUniversalChecks:
-    def test_citation_outside_the_evidence_pool_fails(self):
-        obs = {**BASE_OBS, "sources": [{"record_id": "claim:ghost", "rel_path": "x.md"}]}
+    def test_a_citation_in_the_answer_text_outside_the_pool_fails(self):
+        """The check must read the ANSWER, not the derived `sources` list.
+
+        `sources` is built from the evidence pool by construction, so grading it
+        against that pool can never fail -- it would report green with the
+        citation gate removed. What a reader sees is the bracketed tokens in
+        answer_markdown.
+        """
+        obs = {**BASE_OBS, "answer_markdown": "Refunds take 90 days [claim:ghost]."}
         checks = named(grade(case(), obs, obs))
         assert checks["citations_within_evidence"] is False
+
+    def test_ordinary_prose_brackets_are_not_treated_as_citations(self):
+        obs = {**BASE_OBS, "answer_markdown": "The policy [sic] applies to [2026] orders."}
+        assert named(grade(case(), obs, obs))["citations_within_evidence"] is True
+
+    def test_a_source_outside_the_evidence_pool_fails(self):
+        obs = {**BASE_OBS, "sources": [{"record_id": "claim:ghost", "rel_path": "x.md"}]}
+        assert named(grade(case(), obs, obs))["sources_within_evidence"] is False
 
     def test_citations_within_evidence_passes_for_a_real_citation(self):
         assert named(grade(case(), BASE_OBS, BASE_OBS))["citations_within_evidence"] is True
@@ -120,9 +135,10 @@ class TestUniversalChecks:
         drifted = {**BASE_OBS, "answer_markdown": "something else"}
         assert named(grade(case(), BASE_OBS, drifted))["deterministic"] is False
 
-    def test_both_universal_checks_run_even_with_no_expectations(self):
+    def test_the_universal_checks_run_even_with_no_expectations(self):
         assert set(named(grade(case(), BASE_OBS, BASE_OBS))) == {
             "citations_within_evidence",
+            "sources_within_evidence",
             "deterministic",
         }
 

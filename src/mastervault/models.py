@@ -12,6 +12,7 @@ import hashlib
 import re
 from datetime import date, datetime
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
@@ -233,3 +234,26 @@ class ReviewItem(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     resolved: datetime | None = None
     outcome: str | None = None
+
+    @field_validator("id", "target")
+    @classmethod
+    def _no_path_traversal(cls, value: str) -> str:
+        """`id` names a queue file and `target` names a vault file.
+
+        Both are written by LLM-driven producers, so both are untrusted path
+        components. The write paths confine them again at the filesystem
+        boundary (mastervault.core.paths.resolve_within); refusing them here as
+        well means a malformed item cannot even be constructed in-process.
+        """
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        normalized = stripped.replace("\\", "/")
+        if normalized.startswith("/") or ".." in PurePosixPath(normalized).parts:
+            raise ValueError(
+                "unsafe path: must be workspace-relative without '..' segments,"
+                f" got {value!r}"
+            )
+        if "\x00" in value:
+            raise ValueError("must not contain a NUL byte")
+        return value

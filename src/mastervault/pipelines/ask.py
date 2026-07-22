@@ -125,27 +125,55 @@ def _mmr_pick(question: str, hits: list[Hit], n: int, lambda_: float) -> list[Hi
     return [by_id[rid] for rid, _score in picks if rid in by_id]
 
 
-def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, set[str], list[str]]:
-    """Strip any `[<id>]` token not in the evidence pool. Returns (clean, valid_ids, warnings)."""
+#: Fixed-point bound for the citation sweeps below.
+_CITATION_SCAN_PASSES = 8
+_ANY_BRACKET_RE = re.compile(r"[\[\]]")
+
+
+def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, list[str], list[str]]:
+    """Strip any `[<id>]` token not in the evidence pool.
+
+    Returns (clean, valid_ids, warnings). `valid_ids` is ordered by first
+    appearance in the answer and de-duplicated -- deliberately a list, not a
+    set: it becomes the rendered `sources` list, and set iteration order varies
+    with PYTHONHASHSEED, which would make the citation order of an otherwise
+    identical answer differ between processes.
+    """
     warnings: list[str] = []
-    valid_ids: set[str] = set()
+    valid_ids: list[str] = []
+    seen: set[str] = set()
 
     def _sub(m: re.Match[str]) -> str:
         token = m.group(1)
         if token in evidence_ids:
-            valid_ids.add(token)
+            if token not in seen:
+                seen.add(token)
+                valid_ids.append(token)
             return m.group(0)
         warnings.append(f"stripped citation not in evidence pool: [{token}]")
         return ""
 
-    cleaned = _CITATION_RE.sub(_sub, text)
-    return cleaned, valid_ids, warnings
+    # Same fixed-point sweep as _strip_forged_citations: one pass would let
+    # "[cl[claim:real]aim:forged]" collapse into an unvalidated "[claim:forged]".
+    cleaned = text
+    for _ in range(_CITATION_SCAN_PASSES):
+        swept = _CITATION_RE.sub(_sub, cleaned)
+        if swept == cleaned:
+            return cleaned, valid_ids, warnings
+        cleaned = swept
+    warnings.append("removed all bracket tokens: citation text kept reassembling under stripping")
+    return _ANY_BRACKET_RE.sub("", cleaned), valid_ids, warnings
 
 
-#: A citation token that names a record: the closed set of record-id namespaces
-#: the index actually issues. Used to spot citation-shaped tokens *inside*
-#: quoted document text, without touching ordinary prose brackets like "[sic]".
-_FORGED_CITATION_RE = re.compile(r"\[((?:claim|chunk|wiki):[^\[\]]+)\]")
+#: Every record-id namespace the index issues. Claim/chunk/wiki records come
+#: from the embedding layer; `sync.indexer` additionally mints document-level
+#: ids as "<note-type>:<rel-path>", and `retrieval.search` surfaces those
+#: verbatim as a hit's record_id -- so source/decision/strategy/wiki are all
+#: citation-shaped too. Anything outside this set is ordinary prose ("[sic]").
+_RECORD_NAMESPACES = ("claim", "chunk", "wiki", "source", "decision", "strategy")
+_FORGED_CITATION_RE = re.compile(
+    r"\[((?:" + "|".join(_RECORD_NAMESPACES) + r"):[^\[\]]+)\]"
+)
 
 
 def _strip_forged_citations(text: str, evidence_ids: set[str]) -> tuple[str, list[str]]:
@@ -167,7 +195,20 @@ def _strip_forged_citations(text: str, evidence_ids: set[str]) -> tuple[str, lis
         warnings.append(f"stripped forged citation embedded in document text: [{token}]")
         return ""
 
-    return _FORGED_CITATION_RE.sub(_sub, text), warnings
+    # Re-scan until stable. A single pass is not enough: re.sub never re-reads
+    # its own output, so "[cl[claim:real]aim:forged]" strips the inner token and
+    # leaves the residue "[claim:forged]" -- a fake citation assembled out of the
+    # deletion. Iterating to a fixed point closes that.
+    cleaned = text
+    for _ in range(_CITATION_SCAN_PASSES):
+        swept = _FORGED_CITATION_RE.sub(_sub, cleaned)
+        if swept == cleaned:
+            return cleaned, warnings
+        cleaned = swept
+    # Pathological input that keeps reassembling: drop every bracket rather than
+    # emit something citation-shaped that was never checked.
+    warnings.append("removed all bracket tokens: citation text kept reassembling under stripping")
+    return _ANY_BRACKET_RE.sub("", cleaned), warnings
 
 
 def _extractive_answer(hits: list[Hit], evidence_ids: set[str]) -> tuple[str, list[str]]:

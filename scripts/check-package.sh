@@ -38,8 +38,11 @@ unzip -Z1 "$WHEEL" > "$WORK/wheel.txt"
 cat "$WORK/sdist.txt" "$WORK/wheel.txt" > "$WORK/all.txt"
 
 # Anything matching these has no business in a distribution.
-FORBIDDEN='(^|/)(\.env|\.coverage|coverage\.xml|htmlcov|\.pytest_cache|\.ruff_cache|\.mypy_cache|__pycache__|vault_workspace|_build|node_modules|\.venv)(/|$)|\.(key|pem|pyc|so\.log)$|BUILD_LOG\.md|MORNING_REPORT\.md'
-if grep -nEi "$FORBIDDEN" "$WORK/all.txt"; then
+FORBIDDEN='(^|/)(\.env|\.env\..*|\.coverage|\.coverage\..*|coverage\.xml|htmlcov|\.pytest_cache|\.ruff_cache|\.mypy_cache|__pycache__|vault_workspace|_build|node_modules|\.venv)(/|$)|\.(key|pem|pyc|pyo|so|log)$|junit-.*\.xml$|BUILD_LOG\.md|MORNING_REPORT\.md'
+# `.env.example` is a documented, secret-free template and is meant to ship;
+# every other .env variant is not.
+ALLOWED='(^|/)\.env\.example$'
+if grep -Ei "$FORBIDDEN" "$WORK/all.txt" | grep -Ev "$ALLOWED" | grep -E '.'; then
   fail "distribution contains a workspace, cache, secret, or test artifact (listed above)"
 fi
 printf '  no workspaces, caches, secrets or test output\n'
@@ -50,9 +53,15 @@ if grep -nE 'datasets/larkstead/(raw|bible)/' "$WORK/all.txt"; then
 fi
 printf '  no corpus-generation inputs (raw/, bible/)\n'
 
-# The wheel is source-only: no dataset, no repo-root data.
-if grep -nE '^mastervault/\.\.|^(datasets|tests|docs)/' "$WORK/wheel.txt"; then
-  fail "wheel contains repository data outside the package"
+# The wheel is source-only. Assert on what every entry MUST look like rather
+# than on shapes a zip cannot contain -- with packages=["src/mastervault"] every
+# path is rooted at mastervault/ or the dist-info, so a leaked dataset would
+# arrive as `mastervault/datasets/...` and a `^datasets/` pattern would miss it.
+if grep -vE '^(mastervault/|mastervault-[^/]*\.dist-info/)' "$WORK/wheel.txt"; then
+  fail "wheel contains entries outside the package (listed above)"
+fi
+if grep -nE '^mastervault/(datasets|tests|docs|scripts)/' "$WORK/wheel.txt"; then
+  fail "wheel contains repository data vendored into the package"
 fi
 printf '  wheel is package-only\n'
 
@@ -104,8 +113,14 @@ unset DATABASE_URL
 # reports failure for a command that actually succeeded. Capture, then assert.
 "$MV" --help > "$WORK/help.out" || fail "mvault --help"
 "$MV" version > "$WORK/version.out" || fail "mvault version"
-grep -q 'mastervault ' "$WORK/version.out" || fail "mvault version printed no version"
-printf '  --help and version OK\n'
+# Assert the ACTUAL version, read from pyproject.toml -- `grep 'mastervault '`
+# passes on any version, including a stale one, which is exactly the mistake a
+# release gate exists to catch.
+EXPECTED_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/pyproject.toml" | head -1)"
+[ -n "$EXPECTED_VERSION" ] || fail "could not read the version out of pyproject.toml"
+grep -qx "mastervault $EXPECTED_VERSION" "$WORK/version.out" \
+  || fail "installed wheel reports $(cat "$WORK/version.out"), pyproject says $EXPECTED_VERSION"
+printf '  --help and version OK (%s)\n' "$EXPECTED_VERSION"
 
 "$MV" init > /dev/null || fail "mvault init"
 printf '  init OK\n'

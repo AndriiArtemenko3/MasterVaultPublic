@@ -34,13 +34,23 @@ point: treat anything under "not enforced" as an open risk, not a residual one.
 Each of these has a regression test under `tests/unit/security/` or
 `tests/integration/test_storage_backends.py`.
 
-- **Workspace confinement for review application.** A review item's `target:`
-  is written by an LLM-driven producer, so it is untrusted. `mvault review
-  apply` resolves it through `mastervault.core.paths.resolve_within`, which
-  rejects absolute paths, `..` segments, NUL bytes, and symlinks that leave the
-  vault. A rejected target is marked `conflict` and nothing is written. (Fixed
-  in 0.2.0: 0.1.x joined the path directly and could be made to overwrite any
-  file the process could reach.)
+- **Workspace confinement for paths taken from untrusted data.** A review
+  item's `target:` and `id:`, and a note path replayed from a run's event log,
+  are all written by LLM-driven producers. Each is resolved through
+  `mastervault.core.paths.resolve_within`, which rejects absolute paths, `..`
+  segments, NUL bytes, and symlinks that leave the root; `ReviewItem` also
+  refuses those shapes at construction, so a malformed item cannot be built
+  in-process, and a planted queue file fails as a `conflict` rather than a
+  traceback. The write itself uses `O_NOFOLLOW`, so a symlink swapped in
+  between the check and the write cannot redirect it. Call sites covered:
+  `review.apply`, `review.queue.enqueue`, `pipelines.ingest` (resume) and
+  `pipelines.lint`. (0.1.x joined these paths directly and could be made to
+  overwrite any file the process could reach.)
+
+  **Not covered:** a *hard link* planted inside the vault. `resolve_within` and
+  `O_NOFOLLOW` are both symlink-aware and neither sees a hard link, so a hard
+  link from a vault path to a file outside it will be written through. Anyone
+  able to create one already has write access to your vault directory.
 - **Stale-proposal blocking.** An item whose target changed since the proposal
   fails its `base_hash` check and is marked `conflict` rather than applied.
 - **Bounded input failures.** A corrupt PDF or a binary file with a `.txt`
@@ -49,22 +59,33 @@ Each of these has a regression test under `tests/unit/security/` or
   recorded and skipped so one bad file cannot cost a directory its whole run.
 - **Ingestion stays inside the vault.** Written note paths are built from a
   slugified unit id and the domain enum, so no input filename can direct a
-  write elsewhere. Directory discovery does not descend into symlinked
-  directories.
-- **Secrets stay out of run artifacts.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-  `COHERE_API_KEY` and `DATABASE_URL` are read only from the environment or a
-  local `.env`, never from `mastervault.toml`, and never enter a run's
-  `plan.json`, `events.jsonl`, `summary.json`, or an error message. Backend
-  errors name the variable, never its value.
+  write elsewhere. Discovery skips symlinks entirely — both symlinked
+  directories and symlinked *files*, the latter because `Path.is_file()`
+  follows links and would otherwise read (and send to your LLM provider) the
+  contents of whatever the link points at.
+- **Secrets stay out of run artifacts and error messages.** `ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`, `COHERE_API_KEY` and `DATABASE_URL` are read only from the
+  environment or a local `.env`, never from `mastervault.toml`, and never enter
+  a run's `plan.json`, `events.jsonl` or `summary.json`. Database connection
+  failures are converted to a `StorageError` that names the variable and not its
+  value — psycopg echoes the whole connection string back on a malformed DSN,
+  which put the password on the terminal in 0.1.x.
 - **Citations resolve.** Every citation in an answer names a record that was
   actually retrieved. The generative path strips unknown ids with a warning; the
   extractive path strips record-shaped tokens a *document* embedded in its own
-  text, so quoted content cannot forge a citation either.
+  text, so quoted content cannot forge a citation either. Both sweeps run to a
+  fixed point rather than once, because a single `re.sub` pass never re-reads
+  its own output: `[cl[claim:bogus]aim:forged]` would otherwise collapse into an
+  unvalidated `[claim:forged]`. The check covers every namespace the index
+  issues, document-level `source:`/`decision:`/`strategy:` ids included.
 - **Index consistency under failure.** Document upserts and embedding writes are
   transactional on both backends: a failure mid-write leaves the previous
   document, its claims, chunks, lexical index and vectors intact rather than
-  half-replaced. Both backends refuse the zero vector, which Postgres would
-  otherwise store as a permanently unretrievable row.
+  half-replaced. A document that shrinks also drops the vectors of the claims
+  and chunks it lost, instead of stranding them in the ANN index forever. Both
+  backends refuse any vector cosine cannot rank — zero, float32-underflowing,
+  NaN or infinite — in the same place, because Postgres would otherwise clamp
+  such a row to a similarity of 1.0 and make it the top hit for every query.
 - **Interrupted ingestion is resumable and idempotent.** Runs replay from a
   frozen plan plus an event log; completed units are not redone, and a drifted
   source aborts the resume instead of mixing versions.
@@ -84,6 +105,17 @@ Each of these has a regression test under `tests/unit/security/` or
 - **Ingesting third-party files sends their text to your configured LLM
   provider.** Review what you ingest. `llm.provider=mock` (the default) runs the
   whole pipeline with no network call.
+- **The two backends are not bit-identical.** They implement the same contract
+  and pass the same parity suite, but three differences are known and
+  unresolved: SQLite's FTS5 index has no stemmer and its tokenizer drops
+  non-ASCII characters, so lexical recall is narrower than Postgres's
+  `to_tsvector('english', …)`; SQLite has a hard 32,766 bind-parameter ceiling
+  that caps single-batch operations Postgres handles with `= ANY`; and driver
+  exceptions are not wrapped, so a caller catching `StorageError` will not catch
+  an integrity or schema error from either driver. Which *tied* vectors make a
+  k-NN cut can also differ, since sqlite-vec does not accept a tie-break inside
+  the index scan.
+
 - **No authentication or multi-user model.** Anyone who can run the CLI has full
   access to the workspace and the index. This is a single-operator local tool.
 - **`ask` does not abstain.** On a question the corpus cannot answer it returns

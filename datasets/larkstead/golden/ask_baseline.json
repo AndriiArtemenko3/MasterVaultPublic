@@ -2,8 +2,8 @@
   "overall": {
     "cases": 14,
     "cases_passed": 14,
-    "checks": 82,
-    "checks_passed": 82
+    "checks": 97,
+    "checks_passed": 97
   },
   "per_class": {
     "direct-factual": {
@@ -81,6 +81,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -139,6 +144,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -192,6 +202,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -231,6 +246,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -278,6 +298,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -312,6 +337,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -354,12 +384,22 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
         },
         {
           "name": "confidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "answer_excludes",
           "passed": true,
           "detail": ""
         },
@@ -388,6 +428,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -440,6 +485,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -469,6 +519,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -507,6 +562,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -559,6 +619,11 @@
           "detail": ""
         },
         {
+          "name": "sources_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
           "name": "deterministic",
           "passed": true,
           "detail": ""
@@ -588,6 +653,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },
@@ -631,6 +701,11 @@
       "checks": [
         {
           "name": "citations_within_evidence",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "name": "sources_within_evidence",
           "passed": true,
           "detail": ""
         },

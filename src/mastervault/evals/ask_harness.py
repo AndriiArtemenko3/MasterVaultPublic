@@ -27,6 +27,7 @@ or not, because they are the pipeline's core safety properties:
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -142,6 +143,38 @@ def missing_case_classes(cases: Sequence[AskCase]) -> list[str]:
     return [cls for cls in ASK_CASE_CLASSES if cls not in covered]
 
 
+#: expect keys that name a document path in the corpus.
+_DOC_KEYS = ("evidence_docs", "cited_docs", "conflicting_docs")
+
+
+def resolve_ask_cases(cases: Sequence[AskCase], processed_dir: Path | str) -> list[str]:
+    """Verify every corpus reference in `cases` against the live corpus.
+
+    The retrieval harness treats an unresolvable golden id as a build error
+    (`resolve_golden_set`); without the same step here, a case that names a
+    document or claim the corpus no longer has fails as
+    "evidence_docs: never retrieved", which is indistinguishable from a genuine
+    retrieval regression. Returns the list of errors; empty means clean.
+    """
+    from .harness import build_claim_index  # local import: avoids a cycle at module load
+
+    processed_dir = Path(processed_dir)
+    claim_index = build_claim_index(processed_dir)
+    errors: list[str] = []
+    for case in cases:
+        for key in _DOC_KEYS:
+            for rel in case.expect.get(key) or []:
+                if not (processed_dir / rel).is_file():
+                    errors.append(f"{case.id}: {key} path does not exist in the corpus: {rel}")
+        for record_id in case.expect.get("evidence_claims") or []:
+            claim_id = str(record_id).removeprefix("claim:")
+            if claim_id not in claim_index:
+                errors.append(
+                    f"{case.id}: evidence_claims id not found in any source note: {record_id}"
+                )
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Scripted, keyless LLM
 # ---------------------------------------------------------------------------
@@ -178,6 +211,23 @@ def build_scripted_llm(settings: Settings, script: dict[str, list[Any]]) -> Mock
 # ---------------------------------------------------------------------------
 # Observation + mechanical checks
 # ---------------------------------------------------------------------------
+
+
+#: Same shape the ask pipeline's own citation gate recognises.
+_EMITTED_CITATION_RE = re.compile(r"\[([^\[\]]+)\]")
+
+#: The record-id namespaces the index issues. A bracketed token outside these
+#: is ordinary prose ("[sic]"), not a citation.
+_RECORD_NAMESPACES = ("claim:", "chunk:", "wiki:")
+
+
+def _emitted_citations(answer_markdown: str) -> list[str]:
+    """Record-shaped citations a reader would see in the rendered answer."""
+    return [
+        token
+        for token in _EMITTED_CITATION_RE.findall(answer_markdown)
+        if token.startswith(_RECORD_NAMESPACES)
+    ]
 
 
 def _domain_of(rel_path: str) -> str:
@@ -230,12 +280,25 @@ def grade(case: AskCase, obs: dict[str, Any], repeat: dict[str, Any]) -> list[Ch
 
     # --- universal safety invariants ---------------------------------------
 
-    stray = sorted(cited_ids - evidence_ids)
+    # Read the citations out of the ANSWER TEXT, not out of `sources`. `sources`
+    # is derived from the evidence pool by construction, so comparing it against
+    # that same pool can never fail -- it would report a green invariant with the
+    # citation gate ripped out. What a reader actually sees is the bracketed
+    # tokens in answer_markdown, and those are what must resolve.
+    emitted = _emitted_citations(obs["answer_markdown"])
+    stray = sorted(set(emitted) - evidence_ids)
     checks.append(
         _check(
             "citations_within_evidence",
             not stray,
-            f"cited record ids absent from the evidence pool: {stray}",
+            f"answer cites record ids that were never retrieved: {stray}",
+        )
+    )
+    checks.append(
+        _check(
+            "sources_within_evidence",
+            not (cited_ids - evidence_ids),
+            f"listed sources absent from the evidence pool: {sorted(cited_ids - evidence_ids)}",
         )
     )
     checks.append(
@@ -320,6 +383,13 @@ def grade(case: AskCase, obs: dict[str, Any], repeat: dict[str, Any]) -> list[Ch
     if (want := expect.get("answer_contains")) is not None:
         missing = [s for s in want if s not in obs["answer_markdown"]]
         checks.append(_check("answer_contains", not missing, f"answer lacks: {missing}"))
+
+    if (want := expect.get("answer_excludes")) is not None:
+        lowered = obs["answer_markdown"].lower()
+        present = [s for s in want if s.lower() in lowered]
+        checks.append(
+            _check("answer_excludes", not present, f"answer asserts what it cannot support: {present}")
+        )
 
     if (want := expect.get("warnings_contain")) is not None:
         joined = " | ".join(obs["warnings"])
@@ -494,6 +564,12 @@ def compare_ask_to_baseline(current: AskSuiteReport, baseline: dict[str, Any]) -
     new: list[str] = []
     dropped = sorted(set(base_cases) - {r.id for r in current.results})
 
+    # Deleting a passing case, or deleting checks from one, weakens the gate
+    # exactly as much as breaking it. Both are regressions.
+    for case_id in dropped:
+        if base_cases[case_id].get("passed"):
+            regressed.append(f"{case_id}: was passing and has been removed from the suite")
+
     for result in current.results:
         base = base_cases.get(result.id)
         if base is None:
@@ -511,6 +587,13 @@ def compare_ask_to_baseline(current: AskSuiteReport, baseline: dict[str, Any]) -
                 entry = f"{result.id}.{check.name}: was passing, now fails ({check.detail})"
                 if entry not in regressed:
                     regressed.append(entry)
+        removed = sorted(
+            name
+            for name, passed in base_checks.items()
+            if passed and name not in {c.name for c in result.checks}
+        )
+        if removed:
+            regressed.append(f"{result.id}: passing check(s) removed from the case: {removed}")
 
     return {
         "regressed": regressed,

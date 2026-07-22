@@ -16,6 +16,8 @@ Safety order, per item:
 from __future__ import annotations
 
 import contextlib
+import errno
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +42,24 @@ _HUNK_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))?"
     r" \+(?P<new_start>\d+)(?:,(?P<new_count>\d+))? @@"
 )
+
+
+def _write_no_follow(path: Path, text: str) -> None:
+    """Write `path`, refusing to follow it if it is (or became) a symlink.
+
+    resolve_within() checks the path before the item is read, hashed and
+    patched; O_NOFOLLOW re-checks at the moment of the write, so a symlink
+    swapped in during that window cannot redirect it out of the vault.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags, 0o644)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            raise PathBoundaryError(f"target became a symlink before the write: {path}") from exc
+        raise
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
 
 
 @dataclass(frozen=True)
@@ -186,7 +206,13 @@ def apply(
         # pending/ and archive/ are siblings under <workspace>/review/.
         queue = ReviewQueue(item_path.parent, item_path.parent.parent / "archive", clock=clock)
 
-    loaded: LoadedReview = queue.load(item_path)
+    try:
+        loaded: LoadedReview = queue.load(item_path)
+    except UsageError as exc:
+        # Malformed or unsafe on disk (e.g. a planted `target:` the model
+        # refuses). Nothing is applied and nothing is rewritten -- the file is
+        # not trustworthy enough to stamp a status into.
+        return ConflictResult(target=Path(vault_root), reason=str(exc))
     item = loaded.item
 
     # `target:` arrives from a queue file written by an LLM-driven producer, so
@@ -230,7 +256,13 @@ def apply(
             new_text, "updated", f"updated: {tick().date().isoformat()}"
         )
 
-    target.write_text(new_text, encoding="utf-8")
+    try:
+        _write_no_follow(target, new_text)
+    except PathBoundaryError as exc:
+        # The confinement check happened before the hash/patch work above; if
+        # the target became a symlink in between, refuse rather than follow it.
+        queue.mark_conflict(item_path, str(exc))
+        return ConflictResult(target=target, reason=str(exc))
     archived_to = queue.archive(
         item_path,
         outcome="applied",

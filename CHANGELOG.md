@@ -33,12 +33,29 @@ evaluation, security boundaries, and the release path.
   must be a byte-for-byte no-op.
 - **Security regression tests** (`tests/unit/security/`) for every boundary
   audited below.
-- **Coverage measurement** with a regression floor in CI, and a package-build
-  job that builds the sdist and wheel, installs the wheel into a clean
-  environment, runs a CLI smoke flow from the installed artifact, and scans
-  both distributions for workspaces, caches, secrets and test output.
+- **Coverage measurement** (branch coverage over `src/mastervault`) with a
+  regression floor in CI: measured 83% sqlite-only / 85% against postgres, floor
+  set at 82%. No tests were added to move that number.
+- A package-build
+  job (`scripts/check-package.sh`) that builds the sdist and wheel, installs the
+  wheel into a clean environment, runs a CLI smoke flow from the installed
+  artifact, and scans both distributions for workspaces, caches, secrets and
+  test output.
 - `StorageBackend.drop_schema()` and `.name`, plus a `FileBackedBackend`
   capability protocol.
+- `CONTRIBUTING.md` gains a section on authoring ask-eval cases, and qualifies
+  how the retrieval eval's `abstention_rate` should be read.
+- A `README.md` in every source package, plus the `docs/`, `tests/`,
+  `migrations/`, and `datasets/` trees, so each folder documents its own role.
+- Documentation index and a rendered architecture diagram at the top of the
+  root README, plus an FAQ / troubleshooting section.
+- Packaging metadata for PyPI (`project.urls`, keywords, classifiers) and a
+  publish-on-tag workflow (`.github/workflows/publish.yml`).
+- Community health files: `CONTRIBUTING.md` (existing), `CODE_OF_CONDUCT.md`,
+  `SECURITY.md`, issue and pull-request templates.
+- `scripts/record-demo.sh` to capture an asciinema cast of the 5-minute tour.
+
+  <!-- the four bullets above landed after the 0.1.0 release and were sitting unreleased; they ship as part of 0.2.0. -->
 
 ### Fixed
 - **The shipped demo failed its own validator.** `mvault lint
@@ -81,6 +98,11 @@ evaluation, security boundaries, and the release path.
   Anthropic boundary.
 - `docs/ARCHITECTURE.md` said the default LLM provider was `anthropic`; the
   configuration has defaulted to the keyless `mock` provider since 0.1.x.
+- `mvault status` on an uninitialized index now prints a short "run `mvault
+  init`" hint instead of a raw traceback.
+- Removed dead reranker plumbing from the `ask` pipeline: the reranker was
+  threaded through but never engaged there. `search --rerank` and `mvault eval`
+  still exercise it.
 
 ### Changed
 - **mypy is blocking in CI** and runs with `check_untyped_defs`,
@@ -96,6 +118,12 @@ evaluation, security boundaries, and the release path.
   carries it. This is **not** a claim that prompt injection is solved --
   delimiting removes structural ambiguity, not model behaviour. See
   `SECURITY.md` for the enforced/not-enforced split.
+- Provenance wording in the README now says claims trace to their source note
+  (file-level), which matches the data model: a `[claim-id]` resolves to the
+  file it was extracted from, not a line offset.
+- `mvault ask` prints a one-line note when `llm.provider=mock`, so a keyless
+  run makes clear its answer is the deterministic extractive fallback and that
+  an API key enables generated synthesis.
 
 ### Known limitations
 - **`ask` does not abstain** on a question the corpus cannot answer; it returns
@@ -111,35 +139,6 @@ evaluation, security boundaries, and the release path.
   load` from an installed package reports where to get it rather than working.
 - `hybrid+rerank` is still unevaluated without a Cohere key.
 
-
-### Added
-- Continuous integration (`.github/workflows/ci.yml`): ruff lint, the full
-  pytest suite, and a retrieval-eval regression gate that runs `mvault eval
-  --compare` against the frozen baseline on every push and pull request.
-- A `README.md` in every source package, plus the `docs/`, `tests/`,
-  `migrations/`, and `datasets/` trees, so each folder documents its own role.
-- Documentation index and a rendered architecture diagram at the top of the
-  root README, plus an FAQ / troubleshooting section.
-- Packaging metadata for PyPI (`project.urls`, keywords, classifiers) and a
-  publish-on-tag workflow (`.github/workflows/publish.yml`).
-- Community health files: `CONTRIBUTING.md` (existing), `CODE_OF_CONDUCT.md`,
-  `SECURITY.md`, issue and pull-request templates.
-- `scripts/record-demo.sh` to capture an asciinema cast of the 5-minute tour.
-
-### Changed
-- Provenance wording in the README now says claims trace to their source note
-  (file-level), which matches the data model: a `[claim-id]` resolves to the
-  file it was extracted from, not a line offset.
-- `mvault ask` prints a one-line note when `llm.provider=mock`, so a keyless
-  run makes clear its answer is the deterministic extractive fallback and that
-  an API key enables generated synthesis.
-
-### Fixed
-- `mvault status` on an uninitialized index now prints a short "run `mvault
-  init`" hint instead of a raw traceback.
-- Removed dead reranker plumbing from the `ask` pipeline: the reranker was
-  threaded through but never engaged there. `search --rerank` and `mvault eval`
-  still exercise it.
 
 ## [0.1.0] - 2026-07-07
 

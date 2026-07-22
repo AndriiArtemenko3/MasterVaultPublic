@@ -10,11 +10,18 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The measured floor. SQLite-only runs at 85% and the postgres job at 87%
-  # (0.2.0 baseline); 84 leaves one point of slack without letting real
-  # coverage loss through. Raise it when the measured number rises -- never
-  # lower it to make a red build green.
-  COVERAGE_FLOOR: "84"
+  # The measured floor, over the honest denominator. SQLite-only runs at 83%
+  # and the postgres job at 85% (0.2.0 baseline, 5579 statements); 82 leaves one
+  # point of slack without letting real coverage loss through.
+  #
+  # These numbers replace an earlier 85/87 that were inflated: the coverage
+  # `exclude_also` pattern for Protocol stub bodies was unanchored, so it also
+  # matched `typer.Option(...)` defaults in multi-line signatures and coverage
+  # excluded the WHOLE function -- 254 statements, including most of the
+  # `mvault ask` / `ingest` / `review` command bodies, were missing from the
+  # denominator. Raise this when the measured number rises; never lower it to
+  # make a red build green.
+  COVERAGE_FLOOR: "82"
 
 jobs:
   test:

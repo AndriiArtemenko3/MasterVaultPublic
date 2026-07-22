@@ -28,8 +28,13 @@ def discover_units(root: Path | str) -> list[Path]:
         return [root] if root.suffix.lower() in SUPPORTED_SUFFIXES else []
     if not root.is_dir():
         return []
+    # `is_file()` follows symlinks, so a symlinked file inside the tree would
+    # otherwise be discovered and its target's contents read (and sent to the
+    # configured LLM provider). Ingest only what genuinely lives under `root`.
     return sorted(
-        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES
+        p
+        for p in root.rglob("*")
+        if not p.is_symlink() and p.is_file() and p.suffix.lower() in SUPPORTED_SUFFIXES
     )
 
 

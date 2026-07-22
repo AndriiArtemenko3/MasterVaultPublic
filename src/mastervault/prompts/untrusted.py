@@ -21,6 +21,8 @@ solved by this module -- see SECURITY.md for what is and is not enforced.
 
 from __future__ import annotations
 
+import re
+
 BEGIN_MARKER = "<<<BEGIN UNTRUSTED {label}>>>"
 END_MARKER = "<<<END UNTRUSTED {label}>>>"
 
@@ -29,8 +31,18 @@ END_MARKER = "<<<END UNTRUSTED {label}>>>"
 _NEUTRALISED = "<<!"
 
 
+_LABEL_SAFE_RE = re.compile(r"[^A-Z0-9 _-]")
+
+
 def _markers(label: str) -> tuple[str, str]:
-    upper = label.upper().strip() or "TEXT"
+    """Markers for `label`, reduced to characters that cannot forge a marker.
+
+    The label is normally a literal, but it is part of the delimiter, so a
+    caller that ever derived one from data could otherwise emit a second BEGIN
+    marker or a stray END. Restricting it keeps "opens and closes exactly once"
+    an invariant of the function rather than a property of its call sites.
+    """
+    upper = _LABEL_SAFE_RE.sub("", label.upper().strip()) or "TEXT"
     return BEGIN_MARKER.format(label=upper), END_MARKER.format(label=upper)
 
 

@@ -166,6 +166,21 @@ class PostgresBackend:
             cur.execute("DELETE FROM claims WHERE doc_id = %s", (doc.doc_id,))
             cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc.doc_id,))
             cur.execute("DELETE FROM wiki_aliases WHERE doc_id = %s", (doc.doc_id,))
+            # Embeddings cascade on doc_id, so a document that *shrinks* would
+            # otherwise strand its removed claims'/chunks' vectors: the doc_id
+            # still exists, nothing deletes them, needs_embedding() keeps
+            # calling them fresh, and they occupy k-NN slots forever while
+            # hydrating to nothing. Only claim:/chunk: records are dropped -- a
+            # wiki record's vector belongs to the document itself.
+            cur.execute(
+                "DELETE FROM embeddings WHERE doc_id = %s"
+                " AND record_type IN ('claim', 'chunk')"
+                " AND NOT (record_id = ANY(%s))",
+                (
+                    doc.doc_id,
+                    [f"claim:{c.claim_id}" for c in claims] + [ch.chunk_id for ch in chunks],
+                ),
+            )
             if claims:
                 cur.executemany(
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
@@ -268,7 +283,9 @@ class PostgresBackend:
         n_fetch = overfetch_limit(k, record_types, domain)
         rows = self.conn.execute(
             "SELECT record_id, record_type, domain, 1 - (embedding <=> %s) AS similarity"
-            " FROM embeddings ORDER BY embedding <=> %s LIMIT %s",
+            # record_id breaks distance ties, so equal-similarity rows come back
+            # in the same order on both backends instead of index order.
+            " FROM embeddings ORDER BY embedding <=> %s, record_id LIMIT %s",
             (vec, vec, n_fetch),
         ).fetchall()
         hits: list[tuple[str, float]] = []
