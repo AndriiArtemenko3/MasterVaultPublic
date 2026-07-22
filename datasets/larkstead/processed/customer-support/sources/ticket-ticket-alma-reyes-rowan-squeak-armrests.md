@@ -16,8 +16,7 @@ key_claims:
 - id: ticket-ticket-alma-reyes-rowan-squeak-armrests-02
   statement: The chair squeaks loudly when Alma leans back.
   confidence: high
-  affects:
-  - squeak
+  affects: []
 - id: ticket-ticket-alma-reyes-rowan-squeak-armrests-03
   statement: The armrest pads are cracking at the edges after four months.
   confidence: high

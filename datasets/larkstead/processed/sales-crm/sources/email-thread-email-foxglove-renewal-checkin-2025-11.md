@@ -20,8 +20,7 @@ key_claims:
 - id: email-thread-email-foxglove-renewal-checkin-2025-11-03
   statement: Mia's ops lead must trust the five-year math.
   confidence: high
-  affects:
-  - trust-operations
+  affects: []
 - id: email-thread-email-foxglove-renewal-checkin-2025-11-04
   statement: Mia's ops lead gets blamed if a desk breaks in year three.
   confidence: high

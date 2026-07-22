@@ -40,8 +40,7 @@ key_claims:
 - id: objection-note-objection-note-tidewater-freight-line-08
   statement: The freight number is bigger than expected for fourteen units going forty minutes down the road.
   confidence: high
-  affects:
-  - price
+  affects: []
 - id: objection-note-objection-note-tidewater-freight-line-09
   statement: Hal accepted the passthrough explanation.
   confidence: high

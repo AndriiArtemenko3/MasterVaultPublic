@@ -12,8 +12,7 @@ key_claims:
 - id: faq-sl2-faq-returns-01
   statement: Customers have 30 days from delivery to start a return.
   confidence: high
-  affects:
-  - returns-policy
+  affects: []
 - id: faq-sl2-faq-returns-02
   statement: Larkstead's returns are based on the delivery date ParcelPoint has on file.
   confidence: high
@@ -21,8 +20,7 @@ key_claims:
 - id: faq-sl2-faq-returns-03
   statement: 'To start a return, email support@larkstead.example with the #LS order number.'
   confidence: high
-  affects:
-  - returns-process
+  affects: []
 - id: faq-sl2-faq-returns-04
   statement: Packing the item securely is important even if the original box is not used.
   confidence: medium
@@ -45,8 +43,7 @@ key_claims:
 - id: faq-sl2-faq-returns-08
   statement: Refunds are processed within 5 business days after the warehouse checks the item in.
   confidence: high
-  affects:
-  - refund-timing
+  affects: []
 - id: faq-sl2-faq-returns-09
   statement: Refunds go back to the original payment method, and store credit is not offered at this time.
   confidence: high

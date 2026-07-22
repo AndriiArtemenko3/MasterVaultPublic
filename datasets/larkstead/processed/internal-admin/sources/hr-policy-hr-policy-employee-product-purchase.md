@@ -57,8 +57,7 @@ key_claims:
 - id: hr-policy-hr-policy-employee-product-purchase-10
   statement: The discount does not combine with other discounts or price adjustments offered to the public.
   confidence: high
-  affects:
-  - discount-combining
+  affects: []
 provenance: datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-employee-product-purchase.md
 provenance_hash: 80fd649f194e177d
 ---

@@ -50,8 +50,7 @@ key_claims:
 - id: policy-policy-price-match-v1-10
   statement: Tickets should be escalated to Priya Raman if a customer continues to push for a discount.
   confidence: medium
-  affects:
-  - escalation-policy
+  affects: []
 provenance: datasets/larkstead/raw/customer-support/policy/policy-price-match-v1.md
 provenance_hash: 8815a37b00fb7213
 ---

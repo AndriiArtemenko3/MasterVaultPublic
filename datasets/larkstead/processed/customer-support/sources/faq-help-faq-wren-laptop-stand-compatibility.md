@@ -17,8 +17,7 @@ key_claims:
 - id: faq-help-faq-wren-laptop-stand-compatibility-02
   statement: The deck of the Wren stand is 13 inches wide.
   confidence: high
-  affects:
-  - product-specifications
+  affects: []
 - id: faq-help-faq-wren-laptop-stand-compatibility-03
   statement: Laptops wider than about 15.5 inches will overhang the sides slightly of the Wren stand.
   confidence: high
@@ -27,8 +26,7 @@ key_claims:
 - id: faq-help-faq-wren-laptop-stand-compatibility-04
   statement: The weight limit of the Wren stand is 33 pounds.
   confidence: high
-  affects:
-  - weight-limit
+  affects: []
 - id: faq-help-faq-wren-laptop-stand-compatibility-05
   statement: The deck has a textured non-slip pad built into the surface of the Wren stand.
   confidence: high
@@ -42,18 +40,15 @@ key_claims:
 - id: faq-help-faq-wren-laptop-stand-compatibility-07
   statement: The non-slip pad can be cleaned with a slightly damp cloth with a drop of dish soap.
   confidence: high
-  affects:
-  - cleaning-instructions
+  affects: []
 - id: faq-help-faq-wren-laptop-stand-compatibility-08
   statement: The Wren stand folds flat for travel.
   confidence: high
-  affects:
-  - travel-compatibility
+  affects: []
 - id: faq-help-faq-wren-laptop-stand-compatibility-09
   statement: The Wren stand ships fully assembled and requires no tools to set up.
   confidence: high
-  affects:
-  - setup
+  affects: []
 provenance: datasets/larkstead/raw/customer-support/faq-help/faq-wren-laptop-stand-compatibility.md
 provenance_hash: fd21791adb4a340e
 ---

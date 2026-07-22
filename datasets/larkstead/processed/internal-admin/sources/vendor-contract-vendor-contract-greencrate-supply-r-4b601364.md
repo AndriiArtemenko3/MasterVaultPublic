@@ -32,13 +32,11 @@ key_claims:
 - id: vendor-contract-vendor-contract-greencrate-supply-r-4b601364-06
   statement: Vendor shall maintain a Recycled-Content Minimum of no less than 80% post-consumer recycled fiber content across every carton and mailer SKU.
   confidence: high
-  affects:
-  - recycled-content
+  affects: []
 - id: vendor-contract-vendor-contract-greencrate-supply-r-4b601364-07
   statement: Vendor shall provide Redesign Support at no additional charge for the duration of the Renewal Term.
   confidence: high
-  affects:
-  - redesign-support
+  affects: []
 - id: vendor-contract-vendor-contract-greencrate-supply-r-4b601364-08
   statement: Pricing for the Standard Carton continues unchanged from the Original Agreement at 2,150.00 per thousand units.
   confidence: high

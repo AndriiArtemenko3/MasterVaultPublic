@@ -28,33 +28,27 @@ key_claims:
 - id: hr-policy-hr-policy-performance-review-cycle-05
   statement: Every employee gets a formal review in January, covering the prior calendar year.
   confidence: high
-  affects:
-  - annual-review
+  affects: []
 - id: hr-policy-hr-policy-performance-review-cycle-06
   statement: The first review cycle under this policy runs in January 2026 and covers calendar 2025.
   confidence: high
-  affects:
-  - annual-review
+  affects: []
 - id: hr-policy-hr-policy-performance-review-cycle-07
   statement: The review is a 30 to 45 minute conversation with the employee's manager.
   confidence: high
-  affects:
-  - annual-review
+  affects: []
 - id: hr-policy-hr-policy-performance-review-cycle-08
   statement: A mid-year check-in happens in July, roughly six months off the January cycle.
   confidence: high
-  affects:
-  - mid-year-check-in
+  affects: []
 - id: hr-policy-hr-policy-performance-review-cycle-09
   statement: The mid-year check-in is a progress conversation, not a scored review.
   confidence: high
-  affects:
-  - mid-year-check-in
+  affects: []
 - id: hr-policy-hr-policy-performance-review-cycle-10
   statement: Documentation for the January conversation includes a short self-summary from the employee and a short summary from the manager.
   confidence: high
-  affects:
-  - documentation
+  affects: []
 provenance: datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-performance-review-cycle.md
 provenance_hash: 1d30117d570415e0
 ---

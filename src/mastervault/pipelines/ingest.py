@@ -30,6 +30,7 @@ from mastervault.config import Settings
 from mastervault.core.errors import EXIT_CODES, BudgetExceeded, ResumeConflict
 from mastervault.core.events import Clock, Event, EventName, utc_now
 from mastervault.core.runctx import RunContext
+from mastervault.ingest.affects import existing_wiki_slugs, reconcile_affects
 from mastervault.ingest.concept_match import MatchResult, match_claim
 from mastervault.ingest.convert import discover_units, read_raw_text
 from mastervault.ingest.corpus_check import adjudicate
@@ -579,7 +580,13 @@ def run_ingest(
     )
 
     # -- CONCEPT MATCH + CORPUS CHECK + ROUTE, over every completed unit --------
-    counters = {"linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0}
+    counters = {
+        "linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0,
+        "affects_dropped": 0,
+    }
+    # Wiki notes are never written by ingest, so the set is stable for the whole
+    # route phase. Read once, off the same vault tree `mvault lint` validates.
+    known_wiki_slugs = existing_wiki_slugs(vault_dir)
     new_concept_tally: dict[str, list[tuple[str, str]]] = {}
     review_counter = [0]
 
@@ -628,7 +635,30 @@ def run_ingest(
                 budget_exhausted = True
                 route_budget_dead = True
 
-        note_path.write_text(join_frontmatter(yaml_str, current_body), encoding="utf-8")
+        # `affects:` came from the extractor's guesses at the concepts this
+        # document touches; only now, with the whole vault on disk, is it
+        # knowable which of those concepts exist. Slugs that resolve to no wiki
+        # note are dropped so the note cannot ship a broken reference -- the
+        # concept behind a dropped slug is not lost, it is already tallied
+        # toward a new-concept proposal in the review queue.
+        repair = reconcile_affects(
+            join_frontmatter(yaml_str, current_body), known_wiki_slugs
+        )
+        if repair.dropped:
+            counters["affects_dropped"] += len(repair.dropped)
+            ctx.emit(
+                EventName.AUTO_APPLIED,
+                stage="route",
+                unit=unit_id,
+                payload={
+                    "target": source_rel_path,
+                    "kind": "affects-prune",
+                    "dropped": [
+                        {"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped
+                    ],
+                },
+            )
+        note_path.write_text(repair.text, encoding="utf-8")
 
     if not budget_exhausted:
         try:
@@ -654,6 +684,7 @@ def run_ingest(
         "tier2_enqueued": counters["tier2"],
         "tier3_enqueued": counters["new_concepts"] + counters["tier3"],
         "new_concepts_drafted": counters["new_concepts"],
+        "affects_dropped": counters["affects_dropped"],
         "docs_upserted": sync_report.docs_upserted,
         "records_embedded": sync_report.records_embedded,
         "cost_usd": round(ctx.ledger.spent, 6),

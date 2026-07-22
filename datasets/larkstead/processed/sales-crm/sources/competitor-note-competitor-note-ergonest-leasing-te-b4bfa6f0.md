@@ -26,7 +26,6 @@ key_claims:
   confidence: high
   affects:
   - leasing
-  - b2b-accounts
 - id: competitor-note-competitor-note-ergonest-leasing-te-b4bfa6f0-05
   statement: ErgoNest's pricing still maintains a 10-18% band on outright purchase.
   confidence: high
@@ -51,7 +50,6 @@ key_claims:
   confidence: medium
   affects:
   - leasing
-  - buyout
 - id: competitor-note-competitor-note-ergonest-leasing-te-b4bfa6f0-10
   statement: A leased chair that breaks is still ErgoNest's problem to escalate.
   confidence: high

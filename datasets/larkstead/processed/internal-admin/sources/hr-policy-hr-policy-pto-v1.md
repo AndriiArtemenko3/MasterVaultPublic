@@ -27,8 +27,7 @@ key_claims:
 - id: hr-policy-hr-policy-pto-v1-04
   statement: Larkstead observes 8 paid holidays.
   confidence: high
-  affects:
-  - fixed-holidays
+  affects: []
 - id: hr-policy-hr-policy-pto-v1-05
   statement: Unused PTO days can carry into the next calendar year up to 5 days.
   confidence: high

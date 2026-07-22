@@ -12,18 +12,15 @@ key_claims:
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-01
   statement: 'Helprise''s order-number-detect rule misreads #LS order numbers as phone numbers.'
   confidence: high
-  affects:
-  - helprise-tagging-rule
+  affects: []
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-02
   statement: Nine tickets mistagged since 2025-06-01, all reply-chain messages.
   confidence: high
-  affects:
-  - mistagged-tickets
+  affects: []
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-03
   statement: Roughly 340 support replies were routed in the same period, about 2.6 percent of reply-chain traffic.
   confidence: high
-  affects:
-  - support-traffic
+  affects: []
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-04
   statement: Celeste caught the pattern because she pulls the order number before anything else on every ticket.
   confidence: high
@@ -31,13 +28,11 @@ key_claims:
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-05
   statement: First-contact emails never reproduce the mistag.
   confidence: high
-  affects:
-  - first-contact-emails
+  affects: []
 - id: bug-qa-report-bug-qa-report-helprise-order-number-mistag-06
   statement: Misrouted tickets sit in the callback queue about half a day before anyone notices.
   confidence: high
-  affects:
-  - callback-queue
+  affects: []
 provenance: datasets/larkstead/raw/operations/bug-qa-report/bug-qa-report-helprise-order-number-mistag.md
 provenance_hash: 2e21095a0030ac44
 ---

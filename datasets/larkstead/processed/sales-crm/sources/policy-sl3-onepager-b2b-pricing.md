@@ -35,8 +35,7 @@ key_claims:
 - id: policy-sl3-onepager-b2b-pricing-06
   statement: Discounts over 15% require approval per the expense-policy thresholds.
   confidence: high
-  affects:
-  - expense-policy
+  affects: []
 - id: policy-sl3-onepager-b2b-pricing-07
   statement: Quotes are valid for 30 days from the proposal date.
   confidence: high

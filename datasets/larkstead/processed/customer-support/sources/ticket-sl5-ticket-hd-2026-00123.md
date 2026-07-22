@@ -28,13 +28,11 @@ key_claims:
 - id: ticket-sl5-ticket-hd-2026-00123-05
   statement: The bundle order shows zero on hand despite the desk, chair, and cable kit being in stock at reno.
   confidence: high
-  affects:
-  - inventory-management
+  affects: []
 - id: ticket-sl5-ticket-hd-2026-00123-06
   statement: The issue with the bundle order is a system problem due to a fulfillment switch.
   confidence: high
-  affects:
-  - fulfillment-issues
+  affects: []
 - id: ticket-sl5-ticket-hd-2026-00123-07
   statement: Operations is addressing the mapping problem affecting the bundle order.
   confidence: high

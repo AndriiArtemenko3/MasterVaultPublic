@@ -24,38 +24,31 @@ key_claims:
 - id: process-process-month-end-close-04
   statement: Every vendor invoice and Shopstack sales batch dated within the month must be posted by 5pm the first business day after month-end.
   confidence: high
-  affects:
-  - invoice-cutoff
+  affects: []
 - id: process-process-month-end-close-05
   statement: The accrual list includes open purchase orders with goods received but not yet billed, plus recurring charges.
   confidence: high
-  affects:
-  - accrual-list
+  affects: []
 - id: process-process-month-end-close-06
   statement: The bank statement cash balance must match the ledger cash balance to the cent.
   confidence: high
-  affects:
-  - reconciliation
+  affects: []
 - id: process-process-month-end-close-07
   statement: No postings are allowed without a dated adjusting entry once the month is locked.
   confidence: high
-  affects:
-  - lock
+  affects: []
 - id: process-process-month-end-close-08
   statement: A one-page summary is sent to Mara for approval during the sign-off stage.
   confidence: high
-  affects:
-  - sign-off
+  affects: []
 - id: process-process-month-end-close-09
   statement: Self-approval is allowed under 250.00, while manager approval is required for 250.00 to 999.99.
   confidence: high
-  affects:
-  - self-approve
+  affects: []
 - id: process-process-month-end-close-10
   statement: A bank-to-ledger gap over 0.01 gets traced the same day it turns up.
   confidence: high
-  affects:
-  - zero-variance-rule
+  affects: []
 provenance: datasets/larkstead/raw/operations/process/process-month-end-close.md
 provenance_hash: b72390d43bad5fd3
 ---

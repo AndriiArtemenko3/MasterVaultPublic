@@ -49,13 +49,11 @@ key_claims:
 - id: policy-sl2-policy-returns-v2-09
   statement: The restocking fee is waived on B2B orders of 10 or more units.
   confidence: high
-  affects:
-  - restocking-policy
+  affects: []
 - id: policy-sl2-policy-returns-v2-10
   statement: Defective items are refunded or replaced at no charge, and Larkstead covers return shipping.
   confidence: high
-  affects:
-  - defective-returns
+  affects: []
 provenance: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md
 provenance_hash: d9ee838873469234
 ---

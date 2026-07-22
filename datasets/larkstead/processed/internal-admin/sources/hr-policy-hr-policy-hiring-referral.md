@@ -52,13 +52,11 @@ key_claims:
 - id: hr-policy-hr-policy-hiring-referral-09
   statement: Two reference checks happen before an offer goes out, run by Ana or the hiring manager.
   confidence: high
-  affects:
-  - reference-checks
+  affects: []
 - id: hr-policy-hr-policy-hiring-referral-10
   statement: A starting salary or contractor rate is proposed by the hiring manager and signed off by Mara before anything is extended.
   confidence: high
-  affects:
-  - offer-approval
+  affects: []
 provenance: datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-hiring-referral.md
 provenance_hash: 4298442fe9affe58
 ---
