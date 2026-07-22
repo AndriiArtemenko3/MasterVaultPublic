@@ -31,7 +31,54 @@ jobs:
       - name: Type check (mypy)
         run: uv run mypy src
 
-      - name: Tests
+      - name: Tests (sqlite backend; postgres cases skip here and run in the postgres job)
+        run: uv run pytest -q
+
+  postgres:
+    name: storage contract (postgres + pgvector)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: mastervault
+          POSTGRES_PASSWORD: mastervault
+          POSTGRES_DB: mastervault
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mastervault -d mastervault"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # An ephemeral service container, created and destroyed with the job. The
+      # suite still carves out its own throwaway database per session and its own
+      # schema per test inside it (tests/conftest.py), so nothing here depends on
+      # -- or can reach -- a developer's database.
+      DATABASE_URL: postgresql://mastervault:mastervault@localhost:5432/mastervault
+      # Turns "postgres unreachable -> skip" into a hard failure, so this job
+      # cannot pass green while silently testing nothing.
+      MV_REQUIRE_POSTGRES: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install (with dev + rerank extras)
+        run: uv sync --all-extras
+
+      - name: Backend contract tests (both backends, parametrized)
+        run: uv run pytest -q tests/integration/test_storage_backends.py
+
+      - name: Full suite against postgres
         run: uv run pytest -q
 
   eval:

@@ -3,6 +3,13 @@
 Postgres isolation: one throwaway database per pytest session (unique name, so
 concurrent pytest processes never collide), plus one throwaway schema per test
 inside it. The real `mastervault` database is never touched by tests.
+
+Postgres coverage is opt-out locally and mandatory in CI. Without a reachable
+DATABASE_URL the postgres half of every parametrized test skips, which keeps a
+laptop run fast but would also let the dedicated CI backend job pass while
+testing nothing. Setting MV_REQUIRE_POSTGRES=1 turns that silence into a hard
+failure: an unreachable database errors out, and any postgres-parametrized test
+that still ends up skipped fails the session at the end.
 """
 
 from __future__ import annotations
@@ -17,6 +24,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 TEST_DIM = 8
 TEST_MODEL = "test-embed-v1"
+
+REQUIRE_POSTGRES_ENV = "MV_REQUIRE_POSTGRES"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def require_postgres() -> bool:
+    """True when postgres coverage is mandatory (the dedicated CI backend job)."""
+    return os.environ.get(REQUIRE_POSTGRES_ENV, "").strip().lower() in _TRUTHY
 
 
 def _load_repo_dotenv() -> None:
@@ -73,6 +88,12 @@ def pg_test_url():
     """URL of a dedicated test database, created for this session and dropped after."""
     admin_url = _reachable_pg_url()
     if admin_url is None:
+        if require_postgres():
+            pytest.fail(
+                f"{REQUIRE_POSTGRES_ENV} is set but DATABASE_URL is unset or Postgres is"
+                " unreachable — the backend job must actually exercise postgres",
+                pytrace=False,
+            )
         pytest.skip("DATABASE_URL unset or Postgres unreachable")
     import psycopg
     from psycopg.conninfo import make_conninfo
@@ -113,3 +134,44 @@ def backend(request, tmp_path):
         b.conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
     finally:
         b.close()
+
+
+# ---------------------------------------------------------------------------
+# "postgres must not silently skip" guard
+# ---------------------------------------------------------------------------
+
+_POSTGRES_SKIPS: list[str] = []
+
+
+def _is_postgres_item(item: pytest.Item) -> bool:
+    callspec = getattr(item, "callspec", None)
+    if callspec is not None and "postgres" in callspec.params.values():
+        return True
+    return "pg_test_url" in getattr(item, "fixturenames", ())
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]):
+    outcome = yield
+    report = outcome.get_result()
+    if report.skipped and _is_postgres_item(item):
+        _POSTGRES_SKIPS.append(report.nodeid)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run when postgres coverage was demanded but quietly skipped."""
+    if not require_postgres() or not _POSTGRES_SKIPS:
+        return
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:  # noqa: ARG001
+    if not require_postgres() or not _POSTGRES_SKIPS:
+        return
+    terminalreporter.section("postgres coverage", red=True)
+    terminalreporter.write_line(
+        f"{REQUIRE_POSTGRES_ENV} is set, but {len(_POSTGRES_SKIPS)} postgres-backed"
+        " test(s) skipped instead of running:"
+    )
+    for nodeid in _POSTGRES_SKIPS:
+        terminalreporter.write_line(f"  - {nodeid}")

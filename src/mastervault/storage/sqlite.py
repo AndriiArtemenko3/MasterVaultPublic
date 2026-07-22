@@ -37,6 +37,7 @@ from mastervault.storage.base import (
     HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
+    ensure_indexable_vector,
     overfetch_limit,
 )
 
@@ -133,9 +134,11 @@ def l2_to_cosine(distance: float) -> float:
 
 
 def _normalize(vector: Sequence[float]) -> np.ndarray:
+    ensure_indexable_vector(vector)
     arr = np.asarray(vector, dtype=np.float32)
     norm = float(np.linalg.norm(arr))
     if norm == 0.0:
+        # Not all-zero yet still zero-norm: every component underflowed float32.
         raise StorageError("cannot index or query a zero vector")
     return arr / norm
 
@@ -368,6 +371,10 @@ class SqliteBackend:
     def upsert_embeddings(self, rows: list[EmbeddingRow]) -> None:
         if not rows:
             return
+        # Validate the whole batch before writing any of it, so a bad row later
+        # in the batch cannot depend on transaction rollback to stay invisible.
+        for r in rows:
+            ensure_indexable_vector(r.vector)
         now = _now()
         with self.conn:
             for r in rows:

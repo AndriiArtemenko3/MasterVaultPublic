@@ -34,6 +34,7 @@ from mastervault.storage.base import (
     HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
+    ensure_indexable_vector,
     overfetch_limit,
 )
 
@@ -221,6 +222,10 @@ class PostgresBackend:
     def upsert_embeddings(self, rows: list[EmbeddingRow]) -> None:
         if not rows:
             return
+        # Validate the whole batch before writing any of it, so a bad row later
+        # in the batch cannot depend on transaction rollback to stay invisible.
+        for r in rows:
+            ensure_indexable_vector(r.vector)
         self._maybe_register_vector()
         with self.conn.transaction(), self.conn.cursor() as cur:
             cur.executemany(
@@ -252,6 +257,7 @@ class PostgresBackend:
         record_types: list[str] | None = None,
         domain: str | None = None,
     ) -> list[tuple[str, float]]:
+        ensure_indexable_vector(vector)
         self._maybe_register_vector()
         vec = np.asarray(vector, dtype=np.float32)
         n_fetch = overfetch_limit(k, record_types, domain)

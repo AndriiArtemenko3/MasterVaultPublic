@@ -119,6 +119,20 @@ META_KEY_DIM = "dimensions"
 META_KEY_SCHEMA = "schema_version"
 
 
+def ensure_indexable_vector(vector: Sequence[float]) -> None:
+    """Reject vectors that cosine similarity is undefined for.
+
+    Both backends index by cosine, which needs a direction: the zero vector has
+    none. SQLite would divide by a zero norm; Postgres is worse, because
+    `<=>` yields NaN and the HNSW cosine index silently drops the row — the
+    record stays recorded as embedded in `needs_embedding`, so it is never
+    re-embedded and never retrievable again. Refusing it in one place keeps the
+    two backends on the same contract: loud failure, not silent data loss.
+    """
+    if not any(vector):
+        raise StorageError("cannot index or query a zero vector")
+
+
 def overfetch_limit(k: int, record_types: list[str] | None, domain: str | None) -> int:
     """How many neighbours to pull from the ANN index before post-filtering.
 
