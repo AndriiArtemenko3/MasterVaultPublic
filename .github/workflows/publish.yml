@@ -41,9 +41,15 @@ jobs:
           python-version: "3.12"
       - name: Build sdist + wheel
         run: uv build
+      # Named `pypi-dist`, NOT `dist`: the `verify` job above runs ci.yml in
+      # this same workflow run, and its `package` job already uploads a `dist`
+      # artifact. Artifact names must be unique per run under upload-artifact
+      # v4, so reusing the name would fail the release with a conflict.
+      # Deliberately not `overwrite: true` -- clobbering the verified CI
+      # artifact would destroy the audit trail for what was actually checked.
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
+          name: pypi-dist
           path: dist/
 
   publish:
@@ -59,7 +65,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          name: pypi-dist
           path: dist/
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
