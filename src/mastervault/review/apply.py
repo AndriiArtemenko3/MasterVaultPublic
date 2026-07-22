@@ -45,11 +45,27 @@ _HUNK_RE = re.compile(
 
 
 def _write_no_follow(path: Path, text: str) -> None:
-    """Write `path`, refusing to follow it if it is (or became) a symlink.
+    """Write `path`, refusing to follow it if its FINAL component is a symlink.
 
-    resolve_within() checks the path before the item is read, hashed and
-    patched; O_NOFOLLOW re-checks at the moment of the write, so a symlink
-    swapped in during that window cannot redirect it out of the vault.
+    resolve_within() checked this path before the item was read, hashed and
+    patched. O_NOFOLLOW re-checks exactly one thing at the moment of the write:
+    that `path` itself is not a symlink. That closes the window in which the
+    final component is replaced by a link after the check.
+
+    It does not make the write race-proof, and it is not claimed to:
+
+    - a parent directory that passed resolution can still be swapped for a
+      symlink pointing outside the root before this open(), and O_NOFOLLOW
+      inspects only the last component, so that race is not defended against;
+    - hard links are invisible to every symlink-aware check, including this one.
+
+    Both require an attacker with concurrent write access to the vault
+    directory, which is outside this tool's threat model -- a single-operator
+    local CLI. See SECURITY.md for the enforced/not-enforced split.
+
+    Platform note: O_NOFOLLOW exists on Linux and macOS. Where the constant is
+    absent the flag degrades to 0 and only the earlier resolve_within() check
+    applies.
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -260,7 +276,9 @@ def apply(
         _write_no_follow(target, new_text)
     except PathBoundaryError as exc:
         # The confinement check happened before the hash/patch work above; if
-        # the target became a symlink in between, refuse rather than follow it.
+        # the target itself became a symlink in between, refuse rather than
+        # follow it. Parent-component swaps are not covered -- see
+        # _write_no_follow.
         queue.mark_conflict(item_path, str(exc))
         return ConflictResult(target=target, reason=str(exc))
     archived_to = queue.archive(

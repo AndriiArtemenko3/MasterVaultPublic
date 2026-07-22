@@ -37,20 +37,39 @@ Each of these has a regression test under `tests/unit/security/` or
 - **Workspace confinement for paths taken from untrusted data.** A review
   item's `target:` and `id:`, and a note path replayed from a run's event log,
   are all written by LLM-driven producers. Each is resolved through
-  `mastervault.core.paths.resolve_within`, which rejects absolute paths, `..`
-  segments, NUL bytes, and symlinks that leave the root; `ReviewItem` also
-  refuses those shapes at construction, so a malformed item cannot be built
-  in-process, and a planted queue file fails as a `conflict` rather than a
-  traceback. The write itself uses `O_NOFOLLOW`, so a symlink swapped in
-  between the check and the write cannot redirect it. Call sites covered:
-  `review.apply`, `review.queue.enqueue`, `pipelines.ingest` (resume) and
-  `pipelines.lint`. (0.1.x joined these paths directly and could be made to
-  overwrite any file the process could reach.)
+  `mastervault.core.paths.resolve_within`. Enforced, precisely:
 
-  **Not covered:** a *hard link* planted inside the vault. `resolve_within` and
-  `O_NOFOLLOW` are both symlink-aware and neither sees a hard link, so a hard
-  link from a vault path to a file outside it will be written through. Anyone
-  able to create one already has write access to your vault directory.
+  - a crafted path is rejected -- absolute, drive/UNC-anchored, containing any
+    `..` segment, or containing a NUL byte;
+  - a symlink that *already* points out of the root at resolution time cannot
+    redirect the write, because both sides are symlink-resolved and containment
+    is re-checked;
+  - the final target becoming a symlink between that check and the write is
+    rejected, because the write opens with `O_NOFOLLOW`;
+  - `ReviewItem` refuses the same shapes at construction, so a malformed item
+    cannot be built in-process, and a planted queue file fails as a `conflict`
+    rather than a traceback.
+
+  Call sites covered: `review.apply`, `review.queue.enqueue`, `pipelines.ingest`
+  (resume) and `pipelines.lint`. (0.1.x joined these paths directly and could be
+  made to overwrite any file the process could reach.)
+
+  **Outside the enforced boundary**, and deliberately so:
+
+  - **Parent-component races.** `O_NOFOLLOW` inspects only the last component.
+    A *parent directory* that passed resolution can still be replaced with an
+    outside-pointing symlink before the write, and that is not defended against.
+  - **Hard links.** No symlink-aware check sees one, so a hard link from a vault
+    path to a file outside it is written through.
+
+  Both require an attacker who already has concurrent write access to your vault
+  directory. This is a single-operator local CLI; at that point the vault is
+  theirs regardless, and building a portable filesystem sandbox to defend
+  against it would buy nothing real.
+
+  Platform note: `O_NOFOLLOW` is present on Linux and macOS. Where the constant
+  is unavailable the flag degrades to 0 and only the resolution-time check
+  applies, so the final-component race is not covered there either.
 - **Stale-proposal blocking.** An item whose target changed since the proposal
   fails its `base_hash` check and is marked `conflict` rather than applied.
 - **Bounded input failures.** A corrupt PDF or a binary file with a `.txt`

@@ -72,9 +72,12 @@ evaluation, security boundaries, and the release path.
   `target:` is produced by an LLM-driven pipeline but was joined to the vault
   root directly, so `../..` or an absolute path could overwrite any file the
   process could reach. Targets now resolve through
-  `mastervault.core.paths.resolve_within`, which also rejects symlinks that
-  leave the vault; a rejected target is marked `conflict` and nothing is
-  written.
+  `mastervault.core.paths.resolve_within`, which also rejects a symlink that
+  already points out of the vault at resolution time, and the write opens with
+  `O_NOFOLLOW` so the final component turning into a symlink afterwards is
+  refused too. A rejected target is marked `conflict` and nothing is written.
+  Parent-directory swap races and hard links stay outside the enforced boundary
+  -- both need concurrent local write access to the vault; see SECURITY.md.
 - **PostgreSQL was unusable from an installed wheel.** The schema SQL lived at
   the repo root and was not packaged, so `mvault init` against Postgres failed
   with "no migrations found". It now ships as package data at

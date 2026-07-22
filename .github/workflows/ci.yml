@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Callable so release automation can run this exact suite as a prerequisite
+  # rather than restating it. `.github/workflows/publish.yml` gates PyPI
+  # publication on this workflow succeeding for the tagged commit, which is
+  # what keeps the release gate and the pull-request gate from drifting apart.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}

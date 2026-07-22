@@ -8,7 +8,14 @@ a run's event log. `Path(root) / untrusted` is unsafe for all of them --
 `resolve_within` is the only sanctioned join for those paths. It refuses
 absolute inputs and `..` segments up front, then resolves symlinks on the
 result and re-checks containment, so neither a crafted string nor a symlink
-planted inside the root can land a write outside it.
+that already points out of the root can land a write outside it.
+
+It is a check at a point in time, not a race-proof one: it says the path was
+inside the root when it was resolved. A component swapped for an
+outside-pointing symlink after that, or a hard link (which no symlink-aware
+check can see), is outside what this function establishes. Callers that write
+should also open with O_NOFOLLOW -- see `review.apply._write_no_follow`, which
+documents exactly how far that goes.
 """
 
 from __future__ import annotations
@@ -33,11 +40,13 @@ def resolve_within(root: Path | str, relative: str | Path) -> Path:
 
     Rejected: absolute paths, drive/UNC-anchored paths, any `..` segment, and
     embedded NUL bytes. After joining, both sides are symlink-resolved and
-    containment is re-checked, which is what stops a symlink inside `root`
-    from redirecting a write outside it.
+    containment is re-checked, which is what stops a symlink that is already
+    inside `root` from redirecting a write outside it.
 
     The returned path is the resolved one, so callers write through the same
-    path that was checked rather than re-joining an unchecked string.
+    path that was checked rather than re-joining an unchecked string. That
+    still leaves the gap between this check and the caller's write: see the
+    module docstring.
     """
     raw = str(relative)
     if not raw or not raw.strip():
