@@ -680,15 +680,3 @@ def test_shrinking_a_wiki_document_keeps_its_own_wiki_vector(backend, model_vers
     assert [rid for rid, _ in backend.knn(basis(0), k=3)] == [
         "wiki:operations:migration-corridor"
     ]
-
-
-def test_knn_breaks_distance_ties_by_record_id(backend, model_version):
-    """Equal-similarity rows must come back in the same order on both backends."""
-    doc, _, _ = seed_zebra_doc(backend)
-    identical = basis(0)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-02", identical, doc_id=doc.doc_id, model=model_version),
-        emb_row("claim:zebra-note-01", identical, doc_id=doc.doc_id, model=model_version),
-    ])
-    hits = backend.knn(identical, k=2)
-    assert [rid for rid, _ in hits] == ["claim:zebra-note-01", "claim:zebra-note-02"]

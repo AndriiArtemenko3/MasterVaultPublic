@@ -283,9 +283,7 @@ class PostgresBackend:
         n_fetch = overfetch_limit(k, record_types, domain)
         rows = self.conn.execute(
             "SELECT record_id, record_type, domain, 1 - (embedding <=> %s) AS similarity"
-            # record_id breaks distance ties, so equal-similarity rows come back
-            # in the same order on both backends instead of index order.
-            " FROM embeddings ORDER BY embedding <=> %s, record_id LIMIT %s",
+            " FROM embeddings ORDER BY embedding <=> %s LIMIT %s",
             (vec, vec, n_fetch),
         ).fetchall()
         hits: list[tuple[str, float]] = []

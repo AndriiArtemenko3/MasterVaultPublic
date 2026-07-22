@@ -133,6 +133,13 @@ evaluation, security boundaries, and the release path.
   same score range (under RRF, 7 of 8 negatives and 11 of 12 paraphrases sit at
   the same modal value; under raw cosine, negatives score *higher* than the
   hardest real questions). No retrieval or answer-policy change was adopted.
+- Exactly-tied k-NN vectors come back in whichever order the index produces, so
+  their relative order can differ between SQLite and Postgres. A `record_id`
+  tie-break was implemented and then **deliberately reverted**: it moved overall
+  recall@5 from 0.591 to 0.580 by reshuffling tied groups, and a retrieval
+  change that regresses recall@5 is not adopted here even when its motivation is
+  determinism rather than ranking. The frozen baseline still reproduces exactly
+  (Δ+0.000 on every metric of every config).
 - The novelty-floor guard is not reachable against the demo corpus at `k=10`;
   it remains covered by a unit test against a fixture smaller than `k`.
 - The demo dataset ships with the repository, not the wheel, so `mvault demo

@@ -112,9 +112,11 @@ Each of these has a regression test under `tests/unit/security/` or
   `to_tsvector('english', …)`; SQLite has a hard 32,766 bind-parameter ceiling
   that caps single-batch operations Postgres handles with `= ANY`; and driver
   exceptions are not wrapped, so a caller catching `StorageError` will not catch
-  an integrity or schema error from either driver. Which *tied* vectors make a
-  k-NN cut can also differ, since sqlite-vec does not accept a tie-break inside
-  the index scan.
+  an integrity or schema error from either driver. Exactly-tied vectors are also
+  ordered by whichever index returns them first, so their relative order can
+  differ between backends: sqlite-vec rejects a tie-break inside its KNN scan,
+  and adding one only on the Postgres side would have made the two *more*
+  divergent, not less.
 
 - **No authentication or multi-user model.** Anyone who can run the CLI has full
   access to the workspace and the index. This is a single-operator local tool.

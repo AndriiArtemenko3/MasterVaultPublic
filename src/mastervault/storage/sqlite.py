@@ -447,13 +447,6 @@ class SqliteBackend:
             " ORDER BY v.distance",
             (blob, n_fetch),
         ).fetchall()
-        # vec0 rejects a secondary ORDER BY on a KNN query, so the record_id
-        # tie-break is applied here instead: equal-distance rows then come back
-        # in the same order as Postgres, which sorts on (distance, record_id) in
-        # SQL. NOTE: this orders the rows vec0 returned; which tied rows make
-        # the k cut is still the index's choice, so a corpus with more tied
-        # vectors than k can still select a different SET on each backend.
-        rows = sorted(rows, key=lambda r: (float(r["distance"]), r["record_id"]))
         hits: list[tuple[str, float]] = []
         for row in rows:
             if record_types is not None and row["record_type"] not in record_types:
