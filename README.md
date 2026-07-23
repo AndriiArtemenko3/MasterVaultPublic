@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/mastervault-mark-dark.svg">
+  <img src="docs/assets/brand/mastervault-mark.svg" alt="MasterVault logo: a hooded figure mark" width="180" height="180">
+</picture>
+
 # MasterVault
 
 [![CI](https://github.com/AndriiArtemenko3/MasterVaultPublic/actions/workflows/ci.yml/badge.svg)](https://github.com/AndriiArtemenko3/MasterVaultPublic/actions/workflows/ci.yml)
