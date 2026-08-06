@@ -44,10 +44,14 @@ from mastervault.core.events import Clock, Event, EventName, utc_now
 from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.core.runctx import RunContext
 from mastervault.document_intelligence import (
-    PypdfParser,
+    DocumentParser,
+    ParsedDocumentAny,
+    ParsedDocumentV2,
     load_parsed_document,
     load_pdf_source,
+    make_document_parser,
     parsed_document_sha256,
+    render_document_markdown,
     store_parsed_document,
     store_source_asset,
     validate_resolved_evidence,
@@ -208,6 +212,47 @@ def _estimate_plan_cost(units: list[dict[str, Any]], settings: Settings) -> floa
 
     model = resolve_model(settings, "small")
     return sum(price_cost(model, u["est_tokens"], EXTRACT_MAX_TOKENS) for u in units)
+
+
+def _document_identity(document: ParsedDocumentAny) -> dict[str, Any]:
+    return {
+        "parser": document.parser,
+        "parser_version": document.parser_version,
+        "parser_profile": document.parser_profile,
+        "document_schema_version": document.schema_version,
+        "normalization_profile": (
+            document.normalization.profile
+            if isinstance(document, ParsedDocumentV2)
+            else document.parser_profile
+        ),
+        "parser_core_version": (
+            document.parser_core_version if isinstance(document, ParsedDocumentV2) else None
+        ),
+        "model_identity": (
+            document.model_identity if isinstance(document, ParsedDocumentV2) else None
+        ),
+        "resource_limits": (
+            document.resource_limits.model_dump(mode="json")
+            if isinstance(document, ParsedDocumentV2)
+            else None
+        ),
+    }
+
+
+def _frozen_document_identity(unit: dict[str, Any]) -> dict[str, Any]:
+    """Read an M2 identity while defaulting a frozen M1 pypdf unit exactly."""
+    return {
+        "parser": unit.get("parser"),
+        "parser_version": unit.get("parser_version"),
+        "parser_profile": unit.get("parser_profile"),
+        "document_schema_version": unit.get("document_schema_version", 1),
+        "normalization_profile": unit.get(
+            "normalization_profile", unit.get("parser_profile", "page-text-v1")
+        ),
+        "parser_core_version": unit.get("parser_core_version"),
+        "model_identity": unit.get("model_identity"),
+        "resource_limits": unit.get("resource_limits"),
+    }
 
 
 def _pending_units(
@@ -591,6 +636,7 @@ def run_ingest(
     resume_run_id: str | None = None,
     auto_approve: bool = False,
     fail_fast: bool = False,
+    pdf_parser_name: str | None = None,
     review_queue: ReviewQueue | None = None,
     clock: Clock | None = None,
     announce: Callable[[str], None] | None = None,
@@ -602,7 +648,7 @@ def run_ingest(
     runs_dir = Path(settings.paths.runs_dir)
     review_queue = review_queue or ReviewQueue.from_settings(settings)
     cap = budget_usd if budget_usd is not None else settings.budgets.ingest
-    pdf_parser = PypdfParser()
+    selected_pdf_parser = pdf_parser_name or settings.document.pdf_parser
 
     try:
         if resume_run_id is not None:
@@ -617,8 +663,22 @@ def run_ingest(
             summary={"error": str(exc)},
         )
 
+    parse_cache: dict[str, tuple[Any, ParsedDocumentAny]] = {}
+    pdf_parser: DocumentParser | None = None
+
     plan: dict[str, Any]
     if resume_run_id is None:
+        try:
+            pdf_parser = make_document_parser(
+                selected_pdf_parser,
+                docling_artifacts_path=settings.document.docling_artifacts_path,
+            )
+        except (UnreadableDocument, ValueError) as exc:
+            summary: dict[str, Any] = {"error": str(exc)}
+            ctx.write_summary(summary)
+            return IngestOutcome(
+                EXIT_CODES["completed-with-failures"], ctx.run_id, ctx.run_dir, summary
+            )
         files = discover_units(path)
         existing_hashes = _existing_provenance_hashes(vault_dir)
         seen_asset_hashes = _existing_asset_hashes(vault_dir, settings.paths.workspace)
@@ -631,8 +691,14 @@ def run_ingest(
             try:
                 if f.suffix.lower() == ".pdf":
                     pdf_source = load_pdf_source(f)
+                    if pdf_parser is None:
+                        raise UnreadableDocument("PDF parser was not initialized")
                     parsed_document = pdf_parser.parse(pdf_source)
-                    raw = parsed_document.flattened_text()
+                    raw = (
+                        render_document_markdown(parsed_document)
+                        if isinstance(parsed_document, ParsedDocumentV2)
+                        else parsed_document.flattened_text()
+                    )
                 else:
                     pdf_source = None
                     parsed_document = None
@@ -657,14 +723,13 @@ def run_ingest(
                 if pdf_source.asset_sha256 in seen_asset_hashes:
                     continue
                 seen_asset_hashes.add(pdf_source.asset_sha256)
+                parse_cache[str(f)] = (pdf_source, parsed_document)
                 unit.update(
                     {
                         "source_kind": "pdf",
                         "asset_sha256": pdf_source.asset_sha256,
                         "parsed_document_sha256": parsed_document_sha256(parsed_document),
-                        "parser": parsed_document.parser,
-                        "parser_version": parsed_document.parser_version,
-                        "parser_profile": parsed_document.parser_profile,
+                        **_document_identity(parsed_document),
                     }
                 )
             elif sha in existing_hashes:
@@ -677,6 +742,7 @@ def run_ingest(
                 "budget": cap,
                 "auto_approve": auto_approve,
                 "fail_fast": fail_fast,
+                "pdf_parser": selected_pdf_parser,
             },
             "unreadable": unreadable,
             "units": planned_units,
@@ -688,6 +754,28 @@ def run_ingest(
         domain = Domain(args.get("domain", domain.value))
         auto_approve = args.get("auto_approve", auto_approve)
         fail_fast = args.get("fail_fast", fail_fast)
+        frozen_pdf_parser = args.get("pdf_parser", "pypdf")
+        if pdf_parser_name is not None and pdf_parser_name != frozen_pdf_parser:
+            reason = (
+                f"resume requested parser {pdf_parser_name!r}, but the frozen plan uses "
+                f"{frozen_pdf_parser!r}"
+            )
+            ctx.write_summary({"error": reason})
+            return IngestOutcome(
+                EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+            )
+        selected_pdf_parser = frozen_pdf_parser
+        try:
+            pdf_parser = make_document_parser(
+                selected_pdf_parser,
+                docling_artifacts_path=settings.document.docling_artifacts_path,
+            )
+        except (UnreadableDocument, ValueError) as exc:
+            reason = str(exc)
+            ctx.write_summary({"error": reason})
+            return IngestOutcome(
+                EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+            )
 
     units: list[dict[str, Any]] = plan.get("units") or []
 
@@ -724,8 +812,14 @@ def run_ingest(
             try:
                 if u.get("source_kind") == "pdf":
                     source = load_pdf_source(src)
+                    if pdf_parser is None:
+                        raise UnreadableDocument("PDF parser was not initialized")
                     document = pdf_parser.parse(source)
-                    current_sha = content_hash(document.flattened_text())
+                    current_sha = content_hash(
+                        render_document_markdown(document)
+                        if isinstance(document, ParsedDocumentV2)
+                        else document.flattened_text()
+                    )
                     if source.asset_sha256 != u.get("asset_sha256"):
                         reason = (
                             f"unit {u['unit_id']}: source PDF bytes changed since the plan "
@@ -752,6 +846,20 @@ def run_ingest(
                             ctx.run_dir,
                             {"error": reason},
                         )
+                    frozen_identity = _frozen_document_identity(u)
+                    if _document_identity(document) != frozen_identity:
+                        reason = (
+                            f"unit {u['unit_id']}: parser/model/profile identity changed "
+                            "since the plan was frozen; start a new ingest run"
+                        )
+                        ctx.write_summary({"error": reason})
+                        return IngestOutcome(
+                            EXIT_CODES["resume-conflict"],
+                            ctx.run_id,
+                            ctx.run_dir,
+                            {"error": reason},
+                        )
+                    parse_cache[str(src)] = (source, document)
                 else:
                     current_sha = content_hash(read_raw_text(src))
             except UnreadableDocument as exc:
@@ -789,18 +897,32 @@ def run_ingest(
         parsed_document = None
         try:
             if u.get("source_kind") == "pdf":
-                pdf_source = load_pdf_source(src)
+                cached = parse_cache.get(str(src))
+                if cached is None:
+                    pdf_source = load_pdf_source(src)
+                    if pdf_parser is None:
+                        raise UnreadableDocument("PDF parser was not initialized")
+                    parsed_document = pdf_parser.parse(pdf_source)
+                else:
+                    pdf_source, parsed_document = cached
                 if pdf_source.asset_sha256 != u.get("asset_sha256"):
                     raise DocumentIntegrityError(
                         "source PDF bytes changed after the plan was frozen "
                         f"(expected {u.get('asset_sha256')}, found {pdf_source.asset_sha256})"
                     )
-                parsed_document = pdf_parser.parse(pdf_source)
                 if parsed_document_sha256(parsed_document) != u.get("parsed_document_sha256"):
                     raise DocumentIntegrityError(
                         "parsed PDF output changed after the plan was frozen"
                     )
-                raw_text = parsed_document.flattened_text()
+                if _document_identity(parsed_document) != _frozen_document_identity(u):
+                    raise DocumentIntegrityError(
+                        "PDF parser/model/profile identity changed after the plan was frozen"
+                    )
+                raw_text = (
+                    render_document_markdown(parsed_document)
+                    if isinstance(parsed_document, ParsedDocumentV2)
+                    else parsed_document.flattened_text()
+                )
             else:
                 raw_text = read_raw_text(src)
         except (OSError, UnreadableDocument, DocumentIntegrityError) as exc:

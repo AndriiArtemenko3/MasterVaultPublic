@@ -100,6 +100,13 @@ snapshot observations. It does not run the shipped mock
 LLM as causal evidence: that provider lacks structured extraction for every raw
 document, so its generic failure would not explain why these 20 were omitted.
 
+The deterministic files under `datasets/larkstead/pdf/` are controlled
+clean-digital renditions of raw Larkstead content, not an additional semantic
+source. Their manifest pins bytes and page evidence. The two-page returns
+policy PDF is also the integration input used to exercise schema-v2 layout and
+one 6x2 table when a separately provisioned Docling environment is available.
+No OCR/scanned fixture or third-party model weight is committed to the dataset.
+
 ```bash
 uv run python datasets/larkstead/qa/validate_corpus_ledger.py
 uv run python datasets/larkstead/qa/mechanical_check.py --check

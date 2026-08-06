@@ -12,6 +12,8 @@ The pytest suite for MasterVault is split into fast, hermetic `unit/` tests that
 | `integration/test_search.py` | `hybrid_search` over a synced mini vault plus the `mvault search` CLI, both backends. |
 | `integration/test_ask.py` | End-to-end `mvault ask` through the real CLI (init → write vault → sync → ask) on the cold-mock extractive-fallback path. |
 | `integration/test_ingest_e2e.py` | Full ingest over `fixtures/raw_docs`: note write + validate, one `sync_vault`, tier-1 alias wikilink, tier-3 new-wiki-page queueing. Builds its own hermetic sqlite env, no shared `backend` fixture. |
+| `integration/test_pdf_ingest_e2e.py` | PDF dry-run/execute/resume boundary, immutable publication and evidence hydration; parser doubles prove the selected PDF is parsed once per invocation without optional packages. |
+| `integration/test_docling_offline_contract.py` | Opt-in installed-wheel real-adapter gate: certified artifact identity, network denial, two byte-identical schema-v2 parses, semantic parent hierarchy, exact table structure, and real 201-page rejection. It skips outside the dedicated optional workflow/local provisioned environment. |
 | `integration/test_demo_load.py` | Sidecar embedding import + `load_demo_dataset`/`load_embeddings`, plus one CLI run of `mvault demo load` over the shipped `datasets/larkstead` corpus. |
 | `integration/test_demo_lifecycle.py` | `mvault demo {status,reset,delete}` lifecycle against the shipped dataset, including hand-mutation then idempotent reset. |
 | `integration/test_eval.py` | `mvault eval` CLI over the real Larkstead demo dataset and golden query set; vector-channel tests skip when the local embedder can't load. |
@@ -28,6 +30,7 @@ The pytest suite for MasterVault is split into fast, hermetic `unit/` tests that
 | `unit/contracts/` | Structured-output contract registry and the claims contract. |
 | `unit/core/` | Budgets, event bus, and run context. |
 | `unit/datasets/` | Byte reproducibility, manifest hashes, page-count, and page-grounded evidence checks for the committed Larkstead PDF fixtures. |
+| `unit/document_intelligence/` | Frozen schema-v1 compatibility plus deterministic schema-v2 normalization/render/store, strict ownership/grid/span validation, persisted-evidence failure modes, immutable artifact/symlink checks, resource ceilings, and optional-import/no-download boundaries. |
 | `fixtures/mini_vault/` | A 10-document vault (3 wiki, 5 source, 1 decision, 1 strategy) across 4 domains, used by the sync/search integration tests. |
 | `fixtures/raw_docs/` | Four unprocessed source docs (`.md` + `.txt`) for the in-world "Driftwood Supply Co.", fed to the ingest end-to-end test. |
 

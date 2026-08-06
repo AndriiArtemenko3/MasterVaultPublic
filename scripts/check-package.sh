@@ -96,7 +96,9 @@ grep -q 'mastervault/prompts/grounded_synthesis/v1.md' "$WORK/wheel.txt" \
   || fail "wheel is missing the prompt files"
 grep -q 'mastervault/prompts/page_grounded_claim_extraction/v1.md' "$WORK/wheel.txt" \
   || fail "wheel is missing the page-grounded PDF extraction prompt"
-printf '  wheel ships the prompt files\n'
+grep -q 'mastervault/document_intelligence/docling_artifacts_manifest.json' "$WORK/wheel.txt" \
+  || fail "wheel is missing the immutable Docling artifact manifest"
+printf '  wheel ships the prompt files and Docling artifact manifest\n'
 
 # No absolute developer paths baked into the metadata.
 if unzip -p "$WHEEL" '*/METADATA' | grep -nE '/(Users|home)/[a-z]'; then
@@ -113,6 +115,17 @@ VIRTUAL_ENV="$VENV" uv pip install -q "$WHEEL"
 MV="$VENV/bin/mvault"
 [ -x "$MV" ] || fail "the wheel did not install an executable 'mvault'"
 printf '  installed into a clean venv\n'
+
+# The layout parser is a genuine opt-in. The core wheel must not drag its
+# runtime/model stack into an ordinary installation.
+"$VENV/bin/python" - <<'PY' || fail "core install contains optional PDF layout packages"
+import importlib.util
+
+for package in ("docling", "docling_core", "docling_ibm_models", "torch", "torchvision"):
+    if importlib.util.find_spec(package) is not None:
+        raise SystemExit(f"unexpected optional package in core install: {package}")
+PY
+printf '  core install contains no Docling, torch or torchvision packages\n'
 
 # ---------------------------------------------------------------------------
 step "CLI smoke flow from the installed artifact"
@@ -135,6 +148,7 @@ unset DATABASE_URL
 # reports failure for a command that actually succeeded. Capture, then assert.
 "$MV" --help > "$WORK/help.out" || fail "mvault --help"
 "$MV" evidence --help > "$WORK/evidence-help.out" || fail "mvault evidence --help"
+"$MV" document --help > "$WORK/document-help.out" || fail "mvault document --help"
 "$MV" version > "$WORK/version.out" || fail "mvault version"
 # Assert the ACTUAL version, read from pyproject.toml -- `grep 'mastervault '`
 # passes on any version, including a stale one, which is exactly the mistake a
@@ -144,6 +158,16 @@ EXPECTED_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/pyproject.to
 grep -qx "mastervault $EXPECTED_VERSION" "$WORK/version.out" \
   || fail "installed wheel reports $(cat "$WORK/version.out"), pyproject says $EXPECTED_VERSION"
 printf '  --help, evidence --help and version OK (%s)\n' "$EXPECTED_VERSION"
+
+if "$MV" document doctor --parser docling > "$WORK/docling-doctor.out" 2>&1; then
+  fail "core install unexpectedly reported Docling as available"
+fi
+grep -q "pdf-layout" "$WORK/docling-doctor.out" \
+  || fail "missing Docling extra did not produce an actionable install hint"
+if grep -qi 'traceback' "$WORK/docling-doctor.out"; then
+  fail "missing Docling extra raised a traceback"
+fi
+printf '  optional Docling selection fails cleanly and actionably\n'
 
 "$MV" init > /dev/null || fail "mvault init"
 printf '  init OK\n'
@@ -228,7 +252,7 @@ mkdir -p "$EXTRACTED"
 tar xzf "$REPO_ROOT/$SDIST" -C "$EXTRACTED" --strip-components=1
 (
   cd "$EXTRACTED"
-  UV_CACHE_DIR="$WORK/uv-cache" uv sync --all-extras -q
+  UV_CACHE_DIR="$WORK/uv-cache" uv sync --extra dev --extra rerank -q
   UV_CACHE_DIR="$WORK/uv-cache" uv run pytest -q \
     tests/integration/test_dataset_integrity.py \
     tests/unit/datasets/test_pdf_fixtures.py

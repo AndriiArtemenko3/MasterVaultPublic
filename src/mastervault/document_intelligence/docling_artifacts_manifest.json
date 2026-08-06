@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profile": "clean-digital-layout-table-v2",
+  "repositories": [
+    {
+      "repository": "docling-project/docling-layout-heron",
+      "revision": "8f39ad3c0b4c58e9c2d2c84a38465abf757272d8",
+      "destination": "docling-project--docling-layout-heron",
+      "files": [
+        {
+          "source_path": "model.safetensors",
+          "sha256": "00333a43451945aaf89db8ca9c0a17e75d1537c17db60fdb91aa95f4c7929e0c",
+          "size_bytes": 171658996
+        },
+        {
+          "source_path": "config.json",
+          "sha256": "fdea30805ce2f5666b147fca941dcdd27ad468e27d6ed21902207d3da056a97d",
+          "size_bytes": 3268
+        },
+        {
+          "source_path": "preprocessor_config.json",
+          "sha256": "cd38cd59999e7a95d68e487fbe5132df3d4e5c32a0836add57e6126ba0c4eaf1",
+          "size_bytes": 444
+        }
+      ]
+    },
+    {
+      "repository": "docling-project/docling-models",
+      "revision": "fc0f2d45e2218ea24bce5045f58a389aed16dc23",
+      "destination": "docling-project--docling-models",
+      "files": [
+        {
+          "source_path": "model_artifacts/tableformer/fast/tableformer_fast.safetensors",
+          "sha256": "3119563aab5a7c96fda4d621119b63fd8806272b86c30936d15507616422f718",
+          "size_bytes": 145453276
+        },
+        {
+          "source_path": "model_artifacts/tableformer/fast/tm_config.json",
+          "sha256": "dca6762508dddfae6d57d6cb4ef822c6000119dff0f3b6489db7413118c2622a",
+          "size_bytes": 7060
+        }
+      ]
+    }
+  ]
+}

@@ -21,7 +21,7 @@ from mastervault.contracts.page_grounded_claims import (
 from mastervault.core.budget import BudgetLedger
 from mastervault.core.errors import EvidenceGroundingError
 from mastervault.document_intelligence.grounding import resolve_evidence
-from mastervault.document_intelligence.models import ParsedDocument
+from mastervault.document_intelligence.models import ParsedDocumentAny
 from mastervault.models import Claim, SourceType
 from mastervault.prompts.untrusted import fence
 from mastervault.providers.llm import LLMProvider
@@ -145,7 +145,7 @@ def extract_page_grounded_claims(
     title: str,
     source_type: SourceType,
     domain: str,
-    document: ParsedDocument,
+    document: ParsedDocumentAny,
     max_claims: int,
     ledger: BudgetLedger | None = None,
     emit=None,

@@ -51,6 +51,12 @@ dependencies = [
 
 [project.optional-dependencies]
 rerank = ["cohere>=5.5"]
+pdf-layout = [
+    "docling-slim[convert-core,format-pdf,models-local]==2.118.0",
+    # TableFormer imports cv2; the headless extra is required for a clean
+    # layout/table install and avoids a GUI/OpenGL dependency.
+    "docling-ibm-models[opencv-python-headless]==3.13.3",
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",

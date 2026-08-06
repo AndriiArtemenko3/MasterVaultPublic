@@ -34,6 +34,7 @@ runs_app = _optional_typer("mastervault.cli.runs", "runs_app")
 demo_app = _optional_typer("mastervault.cli.demo", "demo_app")
 eval_app = _optional_typer("mastervault.cli.evals", "eval_app")
 evidence_app = _optional_typer("mastervault.cli.evidence", "evidence_app")
+document_app = _optional_typer("mastervault.cli.document", "document_app")
 
 app = typer.Typer(
     name="mvault",
@@ -82,6 +83,9 @@ if eval_app is not None:
 
 if evidence_app is not None:
     app.add_typer(evidence_app, name="evidence")
+
+if document_app is not None:
+    app.add_typer(document_app, name="document")
 
 
 def main() -> None:

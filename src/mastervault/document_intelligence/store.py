@@ -12,19 +12,21 @@ from pydantic import ValidationError
 from mastervault.core.errors import DocumentIntegrityError
 from mastervault.core.paths import resolve_within
 from mastervault.document_intelligence.models import (
-    ParsedDocument,
+    PARSED_DOCUMENT_ADAPTER,
+    ParsedDocumentAny,
     ParsedDocumentRef,
+    ParsedDocumentV2,
     SourceAssetRef,
 )
 from mastervault.document_intelligence.parser import PdfSource
 
 
-def parsed_document_bytes(document: ParsedDocument) -> bytes:
+def parsed_document_bytes(document: ParsedDocumentAny) -> bytes:
     """Deterministic JSON representation used for hashing and persistence."""
     return (document.model_dump_json(indent=2) + "\n").encode("utf-8")
 
 
-def parsed_document_sha256(document: ParsedDocument) -> str:
+def parsed_document_sha256(document: ParsedDocumentAny) -> str:
     return hashlib.sha256(parsed_document_bytes(document)).hexdigest()
 
 
@@ -75,7 +77,7 @@ def store_source_asset(source: PdfSource, workspace: Path | str) -> SourceAssetR
     )
 
 
-def store_parsed_document(document: ParsedDocument, workspace: Path | str) -> ParsedDocumentRef:
+def store_parsed_document(document: ParsedDocumentAny, workspace: Path | str) -> ParsedDocumentRef:
     workspace = Path(workspace)
     payload = parsed_document_bytes(document)
     artifact_sha = hashlib.sha256(payload).hexdigest()
@@ -93,12 +95,25 @@ def store_parsed_document(document: ParsedDocument, workspace: Path | str) -> Pa
         parser=document.parser,
         parser_version=document.parser_version,
         parser_profile=document.parser_profile,
+        document_schema_version=document.schema_version,
+        normalization_profile=(
+            document.normalization.profile
+            if isinstance(document, ParsedDocumentV2)
+            else document.parser_profile
+        ),
+        parser_core_version=(
+            document.parser_core_version if isinstance(document, ParsedDocumentV2) else None
+        ),
+        model_identity=document.model_identity if isinstance(document, ParsedDocumentV2) else None,
+        resource_limits=(
+            document.resource_limits if isinstance(document, ParsedDocumentV2) else None
+        ),
         artifact_path=relative.as_posix(),
         artifact_sha256=artifact_sha,
     )
 
 
-def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) -> ParsedDocument:
+def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) -> ParsedDocumentAny:
     path = resolve_within(Path(workspace), reference.artifact_path)
     try:
         payload = path.read_bytes()
@@ -111,7 +126,7 @@ def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) ->
             f"found {actual_sha}"
         )
     try:
-        document = ParsedDocument.model_validate_json(payload)
+        document = PARSED_DOCUMENT_ADAPTER.validate_json(payload)
     except (ValidationError, ValueError) as exc:
         raise DocumentIntegrityError(f"parsed artefact does not validate: {path}") from exc
     if document.asset_sha256 != reference.asset_sha256:
@@ -122,6 +137,22 @@ def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) ->
         or document.parser_profile != reference.parser_profile
     ):
         raise DocumentIntegrityError("parsed artefact parser identity does not match its reference")
+    if document.schema_version != reference.document_schema_version:
+        raise DocumentIntegrityError("parsed artefact schema version does not match its reference")
+    if isinstance(document, ParsedDocumentV2):
+        if (
+            document.normalization.profile != reference.normalization_profile
+            or document.parser_core_version != reference.parser_core_version
+            or document.model_identity != reference.model_identity
+            or document.resource_limits != reference.resource_limits
+        ):
+            raise DocumentIntegrityError(
+                "parsed artefact normalization/model identity does not match its reference"
+            )
+    elif reference.normalization_profile != document.parser_profile:
+        raise DocumentIntegrityError(
+            "legacy parsed artefact normalization profile does not match its reference"
+        )
     return document
 
 

@@ -5,12 +5,12 @@ from __future__ import annotations
 import re
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mastervault.contracts.base import Contract
 from mastervault.contracts.claims import MAX_STATEMENT_WORDS, MIN_STATEMENT_CHARS
 from mastervault.document_intelligence.grounding import evidence_errors
-from mastervault.document_intelligence.models import ParsedDocument
+from mastervault.document_intelligence.models import ParsedDocument, ParsedDocumentV2
 from mastervault.models import Confidence
 from mastervault.providers.llm import Tier
 
@@ -22,21 +22,31 @@ class EvidenceCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    block_id: str = Field(
-        min_length=1,
+    block_id: str | None = Field(
+        default=None,
         description="Exact BLOCK identifier containing the evidence.",
+    )
+    cell_id: str | None = Field(
+        default=None,
+        description="Exact CELL identifier containing the evidence; never add table/row/page data.",
     )
     quote: str = Field(
         min_length=1,
         description="Short verbatim quote copied from that block.",
     )
 
-    @field_validator("block_id", "quote")
+    @field_validator("block_id", "cell_id", "quote")
     @classmethod
-    def _not_blank(cls, value: str) -> str:
-        if not value.strip():
+    def _not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
             raise ValueError("must contain a non-whitespace character")
         return value
+
+    @model_validator(mode="after")
+    def _one_target(self) -> EvidenceCandidate:
+        if (self.block_id is None) == (self.cell_id is None):
+            raise ValueError("exactly one of block_id or cell_id is required")
+        return self
 
 
 class PageGroundedClaimCandidate(BaseModel):
@@ -52,7 +62,7 @@ class PageGroundedClaimCandidate(BaseModel):
     affects_candidates: list[str] = Field(default_factory=list)
     evidence: list[EvidenceCandidate] = Field(
         default_factory=list,
-        description="One or more BLOCK identifiers with verbatim supporting quotes.",
+        description="One or more BLOCK or CELL identifiers with verbatim supporting quotes.",
     )
 
 
@@ -95,11 +105,14 @@ class PageGroundedClaimExtractionContract(Contract[PageGroundedClaimExtractionOu
 
             evidence: list[EvidenceCandidate] = []
             for item in claim.evidence:
-                block_id = item.block_id.strip()
+                block_id = item.block_id.strip() if item.block_id is not None else None
+                cell_id = item.cell_id.strip() if item.cell_id is not None else None
                 quote = item.quote.strip()
-                if block_id != item.block_id or quote != item.quote:
-                    fixes.append(f"trimmed evidence for block {block_id!r}")
-                evidence.append(EvidenceCandidate(block_id=block_id, quote=quote))
+                if block_id != item.block_id or cell_id != item.cell_id or quote != item.quote:
+                    fixes.append(f"trimmed evidence for {block_id or cell_id!r}")
+                evidence.append(
+                    EvidenceCandidate(block_id=block_id, cell_id=cell_id, quote=quote)
+                )
             claims.append(
                 PageGroundedClaimCandidate(
                     statement=statement,
@@ -120,7 +133,7 @@ class PageGroundedClaimExtractionContract(Contract[PageGroundedClaimExtractionOu
         if max_claims is not None and len(parsed.claims) > max_claims:
             errors.append(f"{len(parsed.claims)} claims exceeds max_claims={max_claims}")
         document = ctx.get("document")
-        if not isinstance(document, ParsedDocument):
+        if not isinstance(document, (ParsedDocument, ParsedDocumentV2)):
             errors.append("grounding context is missing the parsed document")
             return errors
         for idx, claim in enumerate(parsed.claims, start=1):

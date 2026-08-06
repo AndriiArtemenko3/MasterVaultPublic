@@ -126,6 +126,48 @@ def test_pdf_ingest_resolves_source_note_search_hit_and_cli(
     backend.close()
 
 
+def test_normal_docling_selection_parses_each_pdf_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Planning and execution share one parse; resume has a separate parse gate."""
+    from mastervault.document_intelligence import PypdfParser
+
+    settings, backend, embedder, llm = _environment(tmp_path)
+    llm.push("page_grounded_claim_extraction", _grounded_output())
+
+    class CountingParser:
+        name = "docling"
+        parser_version = "test"
+        profile = "test"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def parse(self, source):
+            self.calls += 1
+            return PypdfParser().parse(source)
+
+    parser = CountingParser()
+    monkeypatch.setattr(
+        "mastervault.pipelines.ingest.make_document_parser",
+        lambda *_args, **_kwargs: parser,
+    )
+    outcome = run_ingest(
+        FIXTURE,
+        Domain.CUSTOMER_SUPPORT,
+        settings,
+        backend,
+        embedder,
+        llm,
+        pdf_parser_name="docling",
+    )
+    assert outcome.exit_code == EXIT_CODES["ok"]
+    assert parser.calls == 1
+    plan = json.loads((outcome.run_dir / "plan.json").read_text(encoding="utf-8"))
+    assert plan["args"]["pdf_parser"] == "docling"
+    backend.close()
+
+
 def test_pdf_byte_identity_dedupes_exact_bytes_but_not_equivalent_text(
     tmp_path: Path,
 ) -> None:

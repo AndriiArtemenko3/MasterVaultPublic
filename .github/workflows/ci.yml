@@ -44,8 +44,8 @@ jobs:
       - name: Verify the lockfile is current
         run: uv lock --check
 
-      - name: Install (with dev + rerank extras)
-        run: uv sync --all-extras
+      - name: Install (with dev + rerank extras; no optional PDF models)
+        run: uv sync --extra dev --extra rerank
 
       - name: Lint (ruff)
         run: uv run ruff check src tests
@@ -120,8 +120,8 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
-      - name: Install (with dev + rerank extras)
-        run: uv sync --all-extras
+      - name: Install (with dev + rerank extras; no optional PDF models)
+        run: uv sync --extra dev --extra rerank
 
       - name: Backend contract tests (both backends, parametrized)
         run: uv run pytest -q tests/integration/test_storage_backends.py --junitxml=junit-backend.xml

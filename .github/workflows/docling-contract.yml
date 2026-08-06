@@ -1,0 +1,144 @@
+name: Optional Docling contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/docling-contract.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/mastervault/document_intelligence/**"
+      - "src/mastervault/contracts/page_grounded_claims.py"
+      - "src/mastervault/ingest/**"
+      - "src/mastervault/pipelines/ingest.py"
+      - "datasets/larkstead/pdf/**"
+      - "tests/integration/test_docling_offline_contract.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/docling-contract.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/mastervault/document_intelligence/**"
+      - "src/mastervault/contracts/page_grounded_claims.py"
+      - "src/mastervault/ingest/**"
+      - "src/mastervault/pipelines/ingest.py"
+      - "datasets/larkstead/pdf/**"
+      - "tests/integration/test_docling_offline_contract.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docling-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-contract:
+    name: real layout/table parse (offline)
+    # PyPI's Linux torch 2.13 wheel pulls a multi-gigabyte CUDA 13 graph even
+    # for a CPU-only profile. The hosted macOS 15 arm64 image exercises the
+    # same production CPU path with the measured ~1 GB optional environment.
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      MV_DOCUMENT__DOCLING_ARTIFACTS_PATH: ${{ github.workspace }}/.ci-cache/docling-artifacts
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      OMP_NUM_THREADS: "2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Verify lock and build the wheel
+        run: |
+          uv lock --check
+          uv build --wheel
+
+      - name: Install the locked document profile from the wheel
+        run: |
+          WHEEL_VENV="${RUNNER_TEMP}/mastervault-docling-wheel"
+          REQUIREMENTS="${RUNNER_TEMP}/mastervault-docling-requirements.txt"
+          WHEEL="$(find "${GITHUB_WORKSPACE}/dist" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "${WHEEL}"
+          uv export --frozen --extra dev --extra pdf-layout --no-emit-project \
+            --output-file "${REQUIREMENTS}"
+          uv venv "${WHEEL_VENV}"
+          uv pip sync --python "${WHEEL_VENV}/bin/python" "${REQUIREMENTS}"
+          uv pip install --python "${WHEEL_VENV}/bin/python" --no-deps \
+            "${WHEEL}[pdf-layout]"
+          printf 'DOCLING_WHEEL_VENV=%s\n' "${WHEEL_VENV}" >> "${GITHUB_ENV}"
+
+      - name: Prove imports resolve outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          unset PYTHONPATH
+          "${DOCLING_WHEEL_VENV}/bin/python" -c \
+            'import mastervault; p = mastervault.__file__; assert p and "site-packages" in p, p; print(p)'
+
+      - name: Restore certified layout and TableFormer artifacts
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/docling-artifacts
+          key: docling-layout-tableformer-a289c24d-macos15-arm64-slim-2.118.0-core-2.91.0-ibm-3.13.3-parse-7.10.0
+
+      - name: Prepare real artifact cache parent
+        env:
+          MODEL_CACHE_HIT: ${{ steps.model-cache.outputs.cache-hit }}
+        run: |
+          CACHE_PARENT="${GITHUB_WORKSPACE}/.ci-cache"
+          if [ -e "${CACHE_PARENT}" ] || [ -L "${CACHE_PARENT}" ]; then
+            test -d "${CACHE_PARENT}"
+            test ! -L "${CACHE_PARENT}"
+          else
+            mkdir -m 700 -- "${CACHE_PARENT}"
+          fi
+          if [ "${MODEL_CACHE_HIT}" != "true" ]; then
+            test ! -e "${MV_DOCUMENT__DOCLING_ARTIFACTS_PATH}"
+            test ! -L "${MV_DOCUMENT__DOCLING_ARTIFACTS_PATH}"
+          fi
+
+      # This is the workflow's only network-enabled model step. The acquisition
+      # helper downloads only manifest-listed files at full immutable commits;
+      # the production adapter never invokes it or downloads on a cache miss.
+      - name: Fetch immutable models on an empty cache
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        env:
+          HF_HUB_OFFLINE: "0"
+          TRANSFORMERS_OFFLINE: "0"
+        working-directory: ${{ runner.temp }}
+        run: |
+          unset PYTHONPATH
+          "${DOCLING_WHEEL_VENV}/bin/python" -m \
+            mastervault.document_intelligence.fetch_docling_artifacts \
+            --output-dir "${MV_DOCUMENT__DOCLING_ARTIFACTS_PATH}"
+
+      - name: Verify exact package and artifact identity
+        working-directory: ${{ runner.temp }}
+        run: |
+          unset PYTHONPATH
+          "${DOCLING_WHEEL_VENV}/bin/mvault" document doctor --parser docling
+
+      - name: Parse the committed fixture twice with network calls denied
+        working-directory: ${{ runner.temp }}
+        env:
+          MV_EXPECT_INSTALLED_WHEEL: "1"
+        run: |
+          unset PYTHONPATH
+          "${DOCLING_WHEEL_VENV}/bin/python" -m pytest -q \
+            "${GITHUB_WORKSPACE}/tests/integration/test_docling_offline_contract.py" \
+            --junitxml="${RUNNER_TEMP}/junit-docling-contract.xml"
+
+      - name: Upload contract result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-result-docling-contract
+          path: ${{ runner.temp }}/junit-docling-contract.xml
+          if-no-files-found: ignore

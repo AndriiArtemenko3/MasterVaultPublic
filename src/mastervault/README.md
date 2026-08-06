@@ -7,12 +7,12 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | Package marker; pins `__version__ = "0.2.0"` and states the file-canonical / derived-index contract. |
-| `config.py` | `Settings` (pydantic-settings) plus `load_settings()`. Merges `mastervault.toml`, `MV_*` env vars, and `.env`; secrets (`DATABASE_URL`, API keys) come from the environment only. Holds nested config blocks for storage, embedding, llm, reranker, retrieval, ingestion, ask, budgets, and paths. |
-| `models.py` | The shared data model: `Claim`, the note frontmatter views (`SourceNote`, `WikiEntry`, `DecisionNote`, `StrategyNote`), the embeddable `Record`, retrieval `Hit`/`ChannelRank`, `ReviewItem`, closed-set enums, and `content_hash()`. Pydantic-only so storage, retrieval, and pipelines can all import it. |
-| [cli/](./cli) | Typer command surface for `mvault`: `ask`, `ingest`, `lint`, `review`, `runs`, `evals`, `demo`, `query`, `admin`. Subcommand modules register on the root `app`. |
+| `config.py` | `Settings` (pydantic-settings) plus `load_settings()`. Merges `mastervault.toml`, `MV_*` env vars, and `.env`; secrets come from the environment only. Includes the default `pypdf`/optional Docling document configuration. |
+| `models.py` | Shared notes, claims, retrieval/review types, and evidence union. Legacy page evidence and schema-v2 structural block/cell evidence coexist without changing old JSON. |
+| [cli/](./cli) | Typer command surface including `ingest --pdf-parser` and the read-only `document doctor` parser diagnostic. |
 | [contracts/](./contracts) | Versioned-prompt + typed-output contracts with autofix/hard-fail guards, one per LLM task (claim extraction, contradiction judge, corpus check, sufficiency judge, grounded synthesis, wiki draft). |
 | [core/](./core) | Orchestration substrate: exit-code errors, append-only `EventLog`, `BudgetLedger`, and `RunContext`. |
-| [document_intelligence/](./document_intelligence) | Immutable PDF byte identity, strict parser-neutral page/block JSON, the page-preserving `pypdf` baseline, and fail-closed evidence-span resolution. |
+| [document_intelligence/](./document_intelligence) | Immutable PDF identity; compatible schema-v1 `pypdf`; optional offline Docling normalization to schema-v2 layout/tables; deterministic rendering and fail-closed block/cell grounding. |
 | [evals/](./evals) | Retrieval eval harness: golden-set grading, per-`RetrievalConfig` ablation runs, recall@k/nDCG/MRR metrics, and a mechanical citation-validity checker for `ask` answers. |
 | [ingest/](./ingest) | Ingestion stages: raw-file conversion, claim extraction, concept matching, corpus-check adjudication, wiki drafting, wikilink insertion, and the claim schema gate (`validate`). |
 | [pipelines/](./pipelines) | The three end-to-end runs (`run_ingest`, `run_ask`, `run_lint`) that compose contracts, storage, retrieval, and the review queue under a `RunContext`. |

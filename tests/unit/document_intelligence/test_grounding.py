@@ -83,6 +83,23 @@ def test_persisted_asset_page_and_offsets_are_revalidated() -> None:
         validate_resolved_evidence(document, [wrong_offsets])
 
 
+def test_persisted_v1_duplicate_rejected_but_distinct_spans_are_valid() -> None:
+    document = parse_pdf(FIXTURE)
+    first, second = resolve_evidence(
+        document,
+        [
+            EvidenceCandidate(block_id="page-0001-block-0001", quote=QUOTE),
+            EvidenceCandidate(
+                block_id="page-0001-block-0001",
+                quote="Unused items returned in their original packaging receive a full refund.",
+            ),
+        ],
+    )
+    validate_resolved_evidence(document, [first, second])
+    with pytest.raises(EvidenceGroundingError, match="duplicate persisted"):
+        validate_resolved_evidence(document, [first, first])
+
+
 def test_source_note_rejects_mismatched_asset_and_parse_identity() -> None:
     asset = SourceAssetRef(
         asset_sha256="1" * 64,

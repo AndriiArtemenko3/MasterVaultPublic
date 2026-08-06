@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from mastervault.core.errors import DocumentIntegrityError, EvidenceGroundingError
 from mastervault.document_intelligence import (
     EvidenceRef,
-    ParsedDocument,
+    ParsedDocumentAny,
     ParsedDocumentRef,
     SourceAssetRef,
+    StructuralEvidenceRef,
     load_parsed_document,
     validate_resolved_evidence,
     verify_source_asset,
@@ -28,7 +29,7 @@ class EvidenceBundle(BaseModel):
     document_path: str
     source_asset: SourceAssetRef
     parsed_document: ParsedDocumentRef
-    evidence: list[EvidenceRef]
+    evidence: list[EvidenceRef | StructuralEvidenceRef]
 
 
 def _load_source_note(row: DocumentRow) -> SourceNote:
@@ -44,14 +45,14 @@ def evidence_by_claim(
     claims: list[HydratedClaimRow],
     backend: StorageBackend,
     workspace: Path | str,
-) -> dict[str, list[EvidenceRef]]:
+) -> dict[str, list[EvidenceRef | StructuralEvidenceRef]]:
     """Batch-resolve evidence for hydrated claims; legacy claims map to ``[]``."""
     document_rows = {
         row.doc_id: row for row in backend.get_documents(sorted({claim.doc_id for claim in claims}))
     }
     notes: dict[str, SourceNote] = {}
-    parsed: dict[str, ParsedDocument] = {}
-    result: dict[str, list[EvidenceRef]] = {}
+    parsed: dict[str, ParsedDocumentAny] = {}
+    result: dict[str, list[EvidenceRef | StructuralEvidenceRef]] = {}
     for claim in claims:
         row = document_rows.get(claim.doc_id)
         if row is None or row.doc_type != "source":
