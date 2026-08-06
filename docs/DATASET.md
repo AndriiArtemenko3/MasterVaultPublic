@@ -6,9 +6,11 @@ The usual way to demo a RAG system is to hand-pick a few dozen documents
 that make the retrieval look good. Larkstead was built the opposite way: 372
 raw business documents were generated against a single bible file, checked
 by a mechanical consistency checker, and then run through the real
-`mvault ingest` pipeline to produce everything this demo loads. Every claim,
-wiki concept, and review-queue item under `datasets/larkstead/processed/`
-came out of the same CLI a real deployment uses, validated against the same
+`mvault ingest` pipeline. The retained snapshot contains 352 processed source
+notes and 20 historical no-output observations, all accounted for in
+`datasets/larkstead/corpus-ledger.json`; nothing is silently missing. Every
+extracted claim and wiki concept under `datasets/larkstead/processed/` came
+through the same CLI a real deployment uses, validated against the same
 schema. Two real schema mismatches turned up during that build (a
 `status: active` value the `NoteStatus` enum did not accept, and an early
 cost estimate that undercounted real ingest spend by roughly 2.7x) and got
@@ -77,12 +79,39 @@ because the actual shipped queue is 1 price-match pair plus 3 variants of
 one return-window pair, and a demo dataset that claims otherwise would be
 lying about its own retrieval product.
 
+## Raw-to-processed accounting
+
+The corpus ledger gives every raw Markdown file exactly one state:
+
+- **processed** — a unique source note exists and its full raw SHA-256 matches
+  both the ledger and the note's `provenance_hash` prefix;
+- **excluded** — an explicit stable reason is required (there are currently
+  none); or
+- **historical_no_output** — an immutable historical record proves that the referenced
+  snapshot had no processed output; whether it failed, was skipped, or stopped
+  elsewhere remains explicitly unknown.
+
+The result is 372 raw = 352 processed + 0 excluded + 20 historical no-output
+observations. The omitted 20 are not duplicates. The original build referenced temporary per-run logs under
+`/tmp/mv-build/p5a.log`, but did not commit them, so the exact historical
+pipeline stage, provider response, retry count, and error cannot be
+reconstructed. The audit therefore verifies the retained raw hashes and
+snapshot observations. It does not run the shipped mock
+LLM as causal evidence: that provider lacks structured extraction for every raw
+document, so its generic failure would not explain why these 20 were omitted.
+
+```bash
+uv run python datasets/larkstead/qa/validate_corpus_ledger.py
+uv run python datasets/larkstead/qa/mechanical_check.py --check
+uv run python datasets/larkstead/qa/replay_corpus_failures.py
+```
+
 ## Quality gates
 
 Two independent checks ran against the raw corpus before it shipped, and
 both are reproducible:
 
-**Mechanical checker** (`datasets/larkstead/qa/mechanical_check.py`, run
+**Mechanical checker** (`datasets/larkstead/qa/mechanical_check.py --check`, run
 against `bible/company.yaml` + `bible/storylines/*.yaml` as ground truth).
 Ten checks: every SKU/vendor/ticket/invoice/order/lot/opportunity id
 resolves against a real grammar in the bible; staff full names match a real
@@ -95,12 +124,12 @@ raw file; no ticket or invoice id is the primary subject of two unrelated
 files; and `banned_strings` (see below) never appear. Run it yourself:
 
 ```bash
-uv run python datasets/larkstead/qa/mechanical_check.py
+uv run python datasets/larkstead/qa/mechanical_check.py --check
 ```
 
-`datasets/larkstead/qa/violations.jsonl` is the frozen output: zero lines,
-zero violations, independently re-run to confirm before the corpus was
-committed.
+`--check` leaves `datasets/larkstead/qa/violations.jsonl` byte-identical and
+exits nonzero for blocker findings. The tracked output is currently zero lines;
+use the explicit `--write` mode only when intentionally updating it.
 
 **Rubric judges.** Four LLM-based critic passes reviewed the generated
 corpus for voice consistency (does a document sound like the staff member's
@@ -139,8 +168,9 @@ it.
 
 The processed layer under `datasets/larkstead/processed/` is not hand-edited
 raw output. It came from four domain-scoped `mvault ingest` runs over
-`datasets/larkstead/raw/` (total cost $0.2213 against `gpt-4o-mini`, per the
-real per-run logs), followed by hand curation: pruning wiki concepts the
+`datasets/larkstead/raw/` (recorded total cost $0.2213), with 352 successful
+source notes, followed by
+hand curation: pruning wiki concepts the
 extractor over-generated with no inbound claims (65 drafted, 43 survived),
 shipping only review items whose `base_hash` still matched the live wiki
 file, and authoring the 10 decisions and 4 strategy files ingest does not
@@ -155,4 +185,5 @@ on that domain's document mix, not quietly pruned away.
 `datasets/larkstead/processed/MANIFEST.md` has the full per-domain counts,
 the wiki-pruning accounting, and the review-queue accounting (101 items
 proposed, 97 dropped as stale conflicts from re-running lint against a
-moving vault, 4 shipped).
+moving vault, 4 shipped). `datasets/larkstead/corpus-ledger.json` and
+`datasets/larkstead/failures/` provide the separate raw-input accounting.

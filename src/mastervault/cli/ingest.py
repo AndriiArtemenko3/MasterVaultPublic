@@ -27,10 +27,16 @@ _DOMAINS = tuple(d.value for d in Domain)
 def ingest_cmd(
     path_arg: str = typer.Argument(..., help="Raw file or directory to ingest.", metavar="PATH"),
     domain: str = typer.Option(..., "--domain", help=f"One of: {', '.join(_DOMAINS)}."),
-    budget: float | None = typer.Option(None, "--budget", help="USD cap (default: budgets.ingest)."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan + cost estimate; write nothing."),
+    budget: float | None = typer.Option(
+        None, "--budget", help="USD cap (default: budgets.ingest)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print the plan + cost estimate; write nothing."
+    ),
     resume: str | None = typer.Option(None, "--resume", help="Resume a previous run by run_id."),
-    auto_approve: bool = typer.Option(False, "--auto-approve", help="Apply tier-2 review items immediately."),
+    auto_approve: bool = typer.Option(
+        False, "--auto-approve", help="Apply tier-2 review items immediately."
+    ),
     fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop at the first unit hard-fail."),
 ) -> None:
     """Ingest raw .md/.txt/.pdf files into vault source notes."""
@@ -53,9 +59,17 @@ def ingest_cmd(
     llm = get_llm(settings)
     try:
         outcome = run_ingest(
-            path, domain_enum, settings, backend, embedder, llm,
-            budget_usd=budget, dry_run=dry_run, resume_run_id=resume,
-            auto_approve=auto_approve, fail_fast=fail_fast,
+            path,
+            domain_enum,
+            settings,
+            backend,
+            embedder,
+            llm,
+            budget_usd=budget,
+            dry_run=dry_run,
+            resume_run_id=resume,
+            auto_approve=auto_approve,
+            fail_fast=fail_fast,
             announce=lambda msg: typer.echo(f"  {msg}"),
         )
     finally:
@@ -76,9 +90,16 @@ def ingest_cmd(
     table.add_column("metric")
     table.add_column("value", justify="right")
     for key in (
-        "units_total", "units_completed", "claims_routed", "wikilinks_inserted",
-        "tier2_enqueued", "tier3_enqueued", "new_concepts_drafted",
-        "docs_upserted", "records_embedded",
+        "units_total",
+        "units_completed",
+        "claims_routed",
+        "wikilinks_inserted",
+        "tier2_enqueued",
+        "tier3_enqueued",
+        "new_concepts_drafted",
+        "auto_approve_conflicts",
+        "docs_upserted",
+        "records_embedded",
     ):
         table.add_row(key.replace("_", " "), str(outcome.summary.get(key, 0)))
     table.add_row("cost usd", f"${outcome.summary.get('cost_usd', 0.0):.4f}")

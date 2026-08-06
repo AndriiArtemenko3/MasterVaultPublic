@@ -19,6 +19,24 @@ Curated, exported output of the MasterVault ingestion pipeline run over `dataset
 
 Pending review is domain-agnostic in storage (`_review/pending/`) but all 4 kept items target customer-support wiki files, so the column above shows where they land.
 
+## Raw source accounting
+
+The 352 source notes are the successful subset of 372 raw Markdown inputs, not
+the complete raw corpus. `../corpus-ledger.json` accounts for every input by
+full SHA-256: 352 processed with a unique matching `provenance` and
+`provenance_hash`, 0 intentionally excluded, and 20 `historical_no_output`
+entries. The immutable observation rows are retained in
+`../failures/historical-ingest.json` and audited by
+`../qa/replay_corpus_failures.py`.
+
+The original provider logs lived under `/tmp/mv-build/` and were not committed,
+so the exact historical stage, provider response, retry count, and error text
+for the 20 observations are unavailable. The record reproduces only the facts the
+repository can prove—the exact raw hashes and absent processed provenance.
+The mock provider cannot distinguish these files because it lacks structured
+claim extraction for every raw document, so that generic limitation is not
+mislabelled as the historical cause.
+
 The `operations` domain has zero surviving wiki concepts. Every wiki page the claim extractor drafted for that domain named a specific entity (a vendor code, an invoice recipient, a status sentence) rather than a reusable concept, and every one of them had zero inbound claims. Pruning removed all three; nothing generalizable survived. This is a genuine finding about the extractor's behavior on that domain's source mix (receiving logs, bug reports, checklists), not a pruning bug — flagged for the morning reviewer as a real gap rather than smoothed over.
 
 ## Wiki pruning
@@ -31,11 +49,11 @@ The cause was structural, not a typo budget. `affects:` was written straight fro
 
 The fix is in the pipeline, not in the files. `mastervault.ingest.affects.reconcile_affects()` now runs at the end of the route phase and drops any `affects:` entry with no matching wiki note. It only ever drops — nothing is remapped, so `shipping` is *not* rewritten to `free-shipping`; guessing the intended target of 70 invented labels would be fabricating links between concepts that differ. A claim whose concept genuinely does not exist yet is already represented: the router tallies it toward a new-concept proposal in the review queue, where a human decides whether the concept should exist at all.
 
-The shipped corpus was then repaired by running that same function over `processed/`: 34 files touched, 75 references dropped, 71 claims left with `affects: []`. The rewrite goes through `surgical_replace_field`, so the diff is exactly the removed lines. Nothing else moved — document/claim/wiki/chunk counts are unchanged, the embeddings sidecar still imports 5,352/5,352 with 0 hash mismatch (claim hashes cover the statement, chunk hashes cover the body; neither includes `affects:`), the four seeded contradictions C1–C4 still verify their `base_hash` against unmodified wiki files, and the retrieval eval is unchanged to three decimals on every metric and every query class — a slug with no wiki note was never a graph-channel seed, so it carried no retrieval signal to lose.
+The shipped corpus was then repaired by running that same function over `processed/`: 34 files touched, 75 references dropped, 71 claims left with `affects: []`. The rewrite goes through `surgical_replace_field`, so the diff is exactly the removed lines. Nothing else moved — document/claim/wiki/chunk counts are unchanged, the embeddings sidecar still imports 5,352/5,352 with 0 hash mismatch (claim hashes cover the statement, chunk hashes cover the body; neither includes `affects:`), the four pending review items still verify their `base_hash` against unmodified wiki files, and the retrieval eval is unchanged to three decimals on every metric and every query class — a slug with no wiki note was never a graph-channel seed, so it carried no retrieval signal to lose.
 
 ## Review queue
 
-101 items in, 97 dropped, 4 shipped. The 97 dropped items all carried `status: conflict` — stale cross-ref and wiki-body-edit proposals whose base_hash no longer matched the current file, mechanical byproducts of the ingestion pipeline re-running lint passes against a moving vault. The 4 kept items are the seeded open contradictions (C1–C4: a price-match policy conflict and three variants of the 30-vs-45-day return-window conflict), all `status: pending`, all with a `base_hash` that was verified to match the current wiki file content before shipping. Nothing was fabricated to pad the queue; if the 4 real contradictions were the only clean items, that's what shipped.
+101 items in, 97 dropped, 4 shipped. The 97 dropped items all carried `status: conflict` — stale cross-ref and wiki-body-edit proposals whose base_hash no longer matched the current file, mechanical byproducts of the ingestion pipeline re-running lint passes against a moving vault. The 4 kept items are one price-match policy conflict and three variants of the 30-vs-45-day return-window conflict, all `status: pending`, all with a `base_hash` that was verified to match the current wiki file content before shipping. They are the measured semantic-lint output, not a one-to-one representation of the five narrative contradictions C1–C5. Nothing was fabricated to pad the queue; if these 4 clean items were the only clean items, that's what shipped.
 
 ## Contradiction detection
 
@@ -43,7 +61,7 @@ The shipped corpus was then repaired by running that same function over `process
 
 ## Ingest cost
 
-Four domain-scoped ingest runs totaled **$0.2213** (customer-support $0.0102, sales-crm $0.0739, operations $0.0650, internal-admin $0.0722), read directly from `/tmp/mv-build/p5a.log`'s per-run cost rows. This corrects an earlier rough estimate of "~$0.08" for the whole run; the real figure is roughly 2.7x that, still low for 352 source documents with full claim extraction and wiki drafting.
+The build recorded **$0.2213** across four domain-scoped ingest runs (customer-support $0.0102, sales-crm $0.0739, operations $0.0650, internal-admin $0.0722). This corrected an earlier rough estimate of "~$0.08" for the whole run. The temporary log that held the per-run rows was not committed, so these contemporaneously recorded values cannot be independently reconstructed from the repository today.
 
 ## Decisions and strategy
 

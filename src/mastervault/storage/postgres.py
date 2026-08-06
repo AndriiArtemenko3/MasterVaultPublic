@@ -12,6 +12,8 @@ with a different dim or model refuses instead of corrupting the index.
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -37,6 +39,7 @@ from mastervault.storage.base import (
     StorageError,
     ensure_indexable_vector,
     overfetch_limit,
+    validate_schema_meta,
 )
 
 # Package-relative, like the prompt files: an installed wheel and an editable
@@ -44,10 +47,13 @@ from mastervault.storage.base import (
 # meant `mvault init` against Postgres worked from a clone and failed from a
 # wheel with "no migrations found".
 _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "pg"
+_MIGRATION_FILE_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
+_SCHEMA_MIGRATION_LOCK_ID = 0x4D_56_4C_54  # "MVLT", transaction-scoped
 
 _CONFIDENCE_ORDER_SQL = "CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
 
 _INDEX_TABLES = (
+    "schema_migrations",
     "meta",
     "documents",
     "claims",
@@ -97,33 +103,125 @@ class PostgresBackend:
         rows = self.conn.execute("SELECT key, value FROM meta").fetchall()
         return dict(rows)
 
-    def init_schema(self, dim: int, model_version: str) -> None:
-        meta = self._read_meta()
-        if meta and (META_KEY_DIM in meta or META_KEY_MODEL in meta):
-            stored_dim = meta.get(META_KEY_DIM)
-            stored_model = meta.get(META_KEY_MODEL)
-            if stored_dim != dim or stored_model != model_version:
+    def _refuse_unidentified_schema(self) -> None:
+        existing = [
+            table
+            for table in _INDEX_TABLES
+            if table != "meta" and self._scalar(f"SELECT to_regclass('{table}')") is not None
+        ]
+        if existing:
+            raise SchemaMismatchError(
+                "index tables exist without a meta table; refusing to adopt an "
+                f"unidentified schema ({existing}). Rebuild the index explicitly."
+            )
+
+    def _migration_files(self) -> dict[int, Path]:
+        files: dict[int, Path] = {}
+        for path in sorted(self.migrations_dir.glob("*.sql")):
+            match = _MIGRATION_FILE_RE.fullmatch(path.name)
+            if match is None:
+                raise StorageError(f"invalid PostgreSQL migration filename: {path.name}")
+            version = int(match.group("version"))
+            if version in files:
+                raise StorageError(f"duplicate PostgreSQL migration version {version:03d}")
+            files[version] = path
+        expected = list(range(1, SCHEMA_VERSION + 1))
+        if sorted(files) != expected:
+            raise StorageError(
+                f"PostgreSQL migrations must be contiguous {expected}, found {sorted(files)} "
+                f"in {self.migrations_dir}"
+            )
+        return files
+
+    @staticmethod
+    def _migration_checksum(path: Path) -> str:
+        """SHA-256 of the unrendered migration template bytes."""
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _validate_migration_ledger(self, migrations: dict[int, Path], version: int) -> None:
+        exists = self._scalar("SELECT to_regclass('schema_migrations')") is not None
+        if version < 2:
+            if exists:
                 raise SchemaMismatchError(
-                    f"index was built with model={stored_model!r} dim={stored_dim}, "
-                    f"requested model={model_version!r} dim={dim}. "
-                    "Re-index explicitly (wipe + re-embed) before changing either."
+                    f"schema_version={version} has an unexpected schema_migrations table; "
+                    "refusing to mutate conflicting migration history"
                 )
-        sql_files = sorted(self.migrations_dir.glob("*.sql"))
-        if not sql_files:
-            raise StorageError(f"no migrations found in {self.migrations_dir}")
+            return
+        if not exists:
+            raise SchemaMismatchError(
+                "schema_version is current but schema_migrations is missing; "
+                "refusing to infer migration history"
+            )
+        rows = self.conn.execute(
+            "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        actual = [(int(row[0]), str(row[1]), str(row[2])) for row in rows]
+        expected = [
+            (item_version, migrations[item_version].stem, self._migration_checksum(migrations[item_version]))
+            for item_version in range(1, version + 1)
+        ]
+        if actual != expected:
+            raise SchemaMismatchError(
+                "schema_migrations does not exactly match the packaged migration history: "
+                f"expected {expected}, found {actual}"
+            )
+
+    def init_schema(self, dim: int, model_version: str) -> None:
+        migrations = self._migration_files()
         with self.conn.transaction():
-            for sql_file in sql_files:
-                self.conn.execute(sql_file.read_text(encoding="utf-8").replace("{{DIM}}", str(dim)))
-            for key, value in (
-                (META_KEY_MODEL, model_version),
-                (META_KEY_DIM, dim),
-                (META_KEY_SCHEMA, SCHEMA_VERSION),
-            ):
-                self.conn.execute(
-                    "INSERT INTO meta (key, value) VALUES (%s, %s) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                    (key, Jsonb(value)),
-                )
+            # Serialize version selection and execution, then read/recheck
+            # metadata only after the transaction-scoped lock is held.
+            self.conn.execute("SELECT pg_advisory_xact_lock(%s)", (_SCHEMA_MIGRATION_LOCK_ID,))
+            meta = self._read_meta()
+            if meta is None:
+                self._refuse_unidentified_schema()
+            version = validate_schema_meta(meta, dim=dim, model_version=model_version)
+            if version:
+                self._validate_migration_ledger(migrations, version)
+
+            for next_version in range(version + 1, SCHEMA_VERSION + 1):
+                path = migrations[next_version]
+                sql = path.read_bytes().decode("utf-8").replace("{{DIM}}", str(dim))
+                self.conn.execute(sql)
+                if next_version == 1:
+                    for key, value in (
+                        (META_KEY_MODEL, model_version),
+                        (META_KEY_DIM, dim),
+                        (META_KEY_SCHEMA, 1),
+                    ):
+                        self.conn.execute(
+                            "INSERT INTO meta (key, value) VALUES (%s, %s)",
+                            (key, Jsonb(value)),
+                        )
+                else:
+                    cursor = self.conn.execute(
+                        "UPDATE meta SET value = %s WHERE key = %s",
+                        (Jsonb(next_version), META_KEY_SCHEMA),
+                    )
+                    if cursor.rowcount != 1:
+                        raise SchemaMismatchError(
+                            "schema_version metadata disappeared during migration"
+                        )
+                    if next_version == 2:
+                        for history_version in range(1, next_version + 1):
+                            history_path = migrations[history_version]
+                            self.conn.execute(
+                                "INSERT INTO schema_migrations "
+                                "(version, name, checksum_sha256) VALUES (%s, %s, %s)",
+                                (
+                                    history_version,
+                                    history_path.stem,
+                                    self._migration_checksum(history_path),
+                                ),
+                            )
+                    elif next_version > 2:
+                        self.conn.execute(
+                            "INSERT INTO schema_migrations "
+                            "(version, name, checksum_sha256) VALUES (%s, %s, %s)",
+                            (next_version, path.stem, self._migration_checksum(path)),
+                        )
+            if SCHEMA_VERSION >= 2:
+                self._validate_migration_ledger(migrations, SCHEMA_VERSION)
         self._maybe_register_vector()
 
     # -- documents ------------------------------------------------------------
@@ -186,8 +284,14 @@ class PostgresBackend:
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
                     " content_hash) VALUES (%s, %s, %s, %s, %s, %s)",
                     [
-                        (c.claim_id, doc.doc_id, c.ordinal, c.statement, c.confidence,
-                         c.content_hash)
+                        (
+                            c.claim_id,
+                            doc.doc_id,
+                            c.ordinal,
+                            c.statement,
+                            c.confidence,
+                            c.content_hash,
+                        )
                         for c in claims
                     ],
                 )
@@ -203,8 +307,10 @@ class PostgresBackend:
                 cur.executemany(
                     "INSERT INTO chunks (chunk_id, doc_id, ordinal, text, content_hash)"
                     " VALUES (%s, %s, %s, %s, %s)",
-                    [(ch.chunk_id, doc.doc_id, ch.ordinal, ch.text, ch.content_hash)
-                     for ch in chunks],
+                    [
+                        (ch.chunk_id, doc.doc_id, ch.ordinal, ch.text, ch.content_hash)
+                        for ch in chunks
+                    ],
                 )
             if aliases:
                 cur.executemany(
@@ -264,8 +370,15 @@ class PostgresBackend:
                     updated_at = now()
                 """,
                 [
-                    (r.record_id, r.record_type, r.doc_id, r.domain, r.content_hash,
-                     r.model_version, np.asarray(r.vector, dtype=np.float32))
+                    (
+                        r.record_id,
+                        r.record_type,
+                        r.doc_id,
+                        r.domain,
+                        r.content_hash,
+                        r.model_version,
+                        np.asarray(r.vector, dtype=np.float32),
+                    )
                     for r in rows
                 ],
             )
@@ -357,8 +470,14 @@ class PostgresBackend:
         ).fetchall()
         by_id = {
             r[0]: DocumentRow(
-                doc_id=r[0], doc_type=r[1], domain=r[2], rel_path=r[3], title=r[4],
-                frontmatter=r[5], body=r[6], content_hash=r[7],
+                doc_id=r[0],
+                doc_type=r[1],
+                domain=r[2],
+                rel_path=r[3],
+                title=r[4],
+                frontmatter=r[5],
+                body=r[6],
+                content_hash=r[7],
             )
             for r in rows
         }
@@ -381,8 +500,15 @@ class PostgresBackend:
         ).fetchall()
         by_id = {
             r[0]: HydratedClaimRow(
-                claim_id=r[0], doc_id=r[1], ordinal=r[2], statement=r[3], confidence=r[4],
-                content_hash=r[5], affects=list(r[8]), rel_path=r[6], domain=r[7],
+                claim_id=r[0],
+                doc_id=r[1],
+                ordinal=r[2],
+                statement=r[3],
+                confidence=r[4],
+                content_hash=r[5],
+                affects=list(r[8]),
+                rel_path=r[6],
+                domain=r[7],
             )
             for r in rows
         }
@@ -400,8 +526,13 @@ class PostgresBackend:
         ).fetchall()
         by_id = {
             r[0]: HydratedChunkRow(
-                chunk_id=r[0], doc_id=r[1], ordinal=r[2], text=r[3], content_hash=r[4],
-                rel_path=r[5], domain=r[6],
+                chunk_id=r[0],
+                doc_id=r[1],
+                ordinal=r[2],
+                text=r[3],
+                content_hash=r[4],
+                rel_path=r[5],
+                domain=r[6],
             )
             for r in rows
         }
@@ -417,8 +548,14 @@ class PostgresBackend:
             return {"backend": "postgres", "initialized": False}
         counts = {
             table: self._scalar(f"SELECT count(*) FROM {table}")
-            for table in ("documents", "claims", "claim_affects", "wiki_aliases",
-                          "chunks", "embeddings")
+            for table in (
+                "documents",
+                "claims",
+                "claim_affects",
+                "wiki_aliases",
+                "chunks",
+                "embeddings",
+            )
         }
         return {
             "backend": "postgres",
@@ -438,9 +575,7 @@ class PostgresBackend:
 
     def drop_schema(self) -> None:
         with self.conn.transaction():
-            self.conn.execute(
-                f"DROP TABLE IF EXISTS {', '.join(_INDEX_TABLES)} CASCADE"
-            )
+            self.conn.execute(f"DROP TABLE IF EXISTS {', '.join(_INDEX_TABLES)} CASCADE")
 
     def close(self) -> None:
         self.conn.close()

@@ -60,6 +60,24 @@ def test_archived_item_does_not_block_reenqueue(queue, make_item):
     assert again is not None
 
 
+def test_same_id_can_be_reenqueued_and_archived_without_overwriting_history(queue, make_item):
+    first = queue.enqueue(make_item(id="rv-repeat"), PROPOSAL, kind="replace")
+    assert first is not None
+    first_archive = queue.archive(first, outcome="rejected", note="first resolution")
+
+    second = queue.enqueue(make_item(id="rv-repeat"), PROPOSAL, kind="replace")
+    assert second is not None
+    assert second.name != first_archive.name
+    assert queue.load(second).item.id == "rv-repeat"
+
+    second_archive = queue.archive(second, outcome="rejected", note="second resolution")
+    assert first_archive.read_text(encoding="utf-8") != second_archive.read_text(encoding="utf-8")
+    assert {path.name for path in queue.archive_dir.glob("*.md")} == {
+        first_archive.name,
+        second_archive.name,
+    }
+
+
 def test_enqueue_empty_pattern_key_raises(queue, make_item):
     # pydantic already rejects empty pattern_key at construction; model_construct
     # simulates a buggy producer that bypassed validation.
@@ -94,6 +112,19 @@ def test_archive_unknown_outcome_raises(queue, make_item):
         queue.archive(path, outcome="maybe-later")
     with pytest.raises(UsageError, match="resolved"):
         queue.archive(path, outcome="pending")
+
+
+def test_archive_refuses_to_overwrite_an_existing_resolution(queue, make_item):
+    path = queue.enqueue(make_item(), PROPOSAL, kind="replace")
+    queue.archive_dir.mkdir(parents=True)
+    existing = queue.archive_dir / path.name
+    existing.write_text("prior resolution", encoding="utf-8")
+
+    with pytest.raises(UsageError, match="already exists"):
+        queue.archive(path, outcome="applied")
+
+    assert path.exists()
+    assert existing.read_text(encoding="utf-8") == "prior resolution"
 
 
 def test_list_items_filters_by_status_and_pattern(queue, make_item):

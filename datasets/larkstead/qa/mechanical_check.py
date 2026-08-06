@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Mechanical consistency checker for the Larkstead raw corpus.
 
-Loads bible/company.yaml + bible/storylines/*.yaml as the ground truth,
-scans every file under raw/, and writes one JSON line per finding to
-qa/violations.jsonl. Read-only: never edits corpus files.
+Loads bible/company.yaml + bible/storylines/*.yaml as the ground truth and
+scans every file under raw/. ``--check`` (also the default) is non-mutating
+and exits nonzero on blocker findings. ``--write`` explicitly updates
+qa/violations.jsonl and uses the same blocker exit gate. Neither mode edits
+corpus files.
 
 Run from the datasets/larkstead directory or anywhere -- paths are
 resolved relative to this script's own location.
 
-    uv run python datasets/larkstead/qa/mechanical_check.py
+    uv run python datasets/larkstead/qa/mechanical_check.py --check
 
 Checks (see run_all_checks for the numbered list):
   1  SKU tokens resolve to a real SKU in company.yaml (family-prefix
@@ -37,9 +39,8 @@ Checks (see run_all_checks for the numbered list):
 
 from __future__ import annotations
 
-import glob
+import argparse
 import json
-import os
 import re
 import sys
 from collections import defaultdict
@@ -526,8 +527,34 @@ def run_all_checks(bible: Bible, files: list[Path]) -> list[dict]:
     return findings
 
 
-def main() -> int:
+def _write_findings(findings: list[dict]) -> None:
+    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with OUT_PATH.open("w", encoding="utf-8") as fh:
+        for item in findings:
+            fh.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    _findings_override: list[dict] | None = None,
+) -> int:
+    """Run the gate; the private override exists only for deterministic probes."""
     global STRICT_SKU_RE, STRICT_TICKET_RE, STRICT_INVOICE_RE, STRICT_VENDOR_RE
+
+    parser = argparse.ArgumentParser()
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Check without modifying violations.jsonl (default).",
+    )
+    mode.add_argument(
+        "--write",
+        action="store_true",
+        help="Explicitly update violations.jsonl with the current findings.",
+    )
+    args = parser.parse_args(argv)
 
     if not COMPANY_YAML.exists():
         print(f"FATAL: company.yaml not found at {COMPANY_YAML}", file=sys.stderr)
@@ -547,24 +574,26 @@ def main() -> int:
         print(f"FATAL: no .md files found under {RAW_DIR}", file=sys.stderr)
         return 2
 
-    findings = run_all_checks(bible, files)
-
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUT_PATH, "w", encoding="utf-8") as fh:
-        for f in findings:
-            fh.write(json.dumps(f, ensure_ascii=False) + "\n")
+    findings = (
+        run_all_checks(bible, files)
+        if _findings_override is None
+        else _findings_override
+    )
+    if args.write:
+        _write_findings(findings)
 
     # ---- summary -----------------------------------------------------
     by_check = defaultdict(lambda: {"blocker": 0, "minor": 0})
     for f in findings:
         by_check[f["check"]][f["severity"]] += 1
 
-    print(f"Larkstead mechanical check")
+    print("Larkstead mechanical check")
     print(f"  company.yaml : {relpath(COMPANY_YAML)}")
     print(f"  storylines   : {len(storylines)}")
     print(f"  raw files    : {len(files)}")
     print(f"  findings     : {len(findings)}")
-    print(f"  output       : {relpath(OUT_PATH)}")
+    output_state = relpath(OUT_PATH) if args.write else "not modified (check mode)"
+    print(f"  output       : {output_state}")
     print()
     print(f"{'check':<24} {'blocker':>8} {'minor':>8}")
     total_blocker = total_minor = 0
@@ -576,7 +605,7 @@ def main() -> int:
         print(f"{check:<24} {b:>8} {m:>8}")
     print(f"{'TOTAL':<24} {total_blocker:>8} {total_minor:>8}")
 
-    return 0
+    return 1 if total_blocker else 0
 
 
 if __name__ == "__main__":

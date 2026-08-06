@@ -9,22 +9,28 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 | `bible/company.yaml` | Single source of truth: staff voice cards, 150+ SKUs, customers, vendors, policies, `tax_table`, `id_grammars`, and `banned_strings`. Every date, price, and ID in the corpus traces here. |
 | `bible/corpus-plan.yaml` | Doc-count allocation across 4 domains and their doc types (372 total = 89 storyline + 283 filler), with filler guardrails and ID-monotonicity rules. |
 | `bible/style-rules.md` | Per-doc-type register, typo budget, banned vocabulary, and the date/price-consistency rule that makes cross-doc contradictions deliberate. |
-| `bible/storylines/SL{1..5}-*.yaml` | Five multi-doc storylines (mat defect, refund-window change, Cobalt dental deal, Halo firmware flicker, ParcelPoint cutover). Each lists beats, produced `doc_id`s, `required_facts`, and the seeded contradiction (C1–C4). |
+| `bible/storylines/SL{1..5}-*.yaml` | Five multi-doc storylines (mat defect, refund-window change, Cobalt dental deal, Vireo firmware flicker, ParcelPoint cutover). Each lists beats, produced `doc_id`s, `required_facts`, and one seeded narrative contradiction (C1–C5). |
 | `bible/doc-templates/*.md` | 32 per-doc-type exemplars (ticket, invoice, memo, lead-note, receiving-log, …) that writer agents fill. |
 | `bible/manifest.yaml` | Frozen bible inventory with per-file sha256 prefixes. |
 | `raw/<domain>/<doc-type>/*.md` | 372 in-world source documents across the 4 domains, organized by doc type (e.g. `customer-support/policy/`, `sales-crm/lead-note/`). This is what `mvault ingest` reads. |
 | `processed/<domain>/sources/*.md` | 352 source notes: raw docs plus ingestion frontmatter (`key_claims` with id/statement/confidence/`affects`, `provenance`, `provenance_hash`). |
 | `processed/<domain>/wiki/*.md` | 43 drafted wiki concepts (aliases, Definition, Cross-Refs), after pruning 22 malformed zero-inbound slugs. `operations` has zero surviving concepts by design. |
 | `processed/<domain>/{decisions,strategy}/*.md` | 10 decision notes and 4 strategy notes (one per domain, 2026-Q2), hand-authored on top of the verified claims layer. |
-| `processed/_review/pending/*.md` | 4 shipped review items, the seeded open contradictions C1–C4, each with a `base_hash` verified current against its target wiki file. |
+| `processed/_review/pending/*.md` | 4 shipped review items: one price-match pair plus three return-window variants, each with a `base_hash` verified against its target wiki file. |
 | `processed/MANIFEST.md` | Curation record: per-domain counts, wiki-pruning math, review-queue triage, contradiction-detection base rate, and the $0.2213 ingest cost. |
 | `golden/queries.yaml` | 52 hand-built eval queries across 5 classes (easy-lexical, semantic-paraphrase, cross-domain-multi-hop, contradiction, negative-no-answer) with `relevant_docs` and `relevant_claims`. |
 | `golden/resolved.yaml` | Resolver output asserting all 69 docs / 78 claims resolve against the live `processed/` corpus; a non-empty `errors` list is a build error. |
 | `golden/baseline.json` | Recorded metrics for `lexical-only`, `vector-only`, and `hybrid` configs (recall@k, nDCG@10, MRR, abstention) overall and per class. |
+| `golden/ask_cases.yaml` / `ask_baseline.json` | 14 deterministic end-to-end ask cases and their frozen 97-check result, separate from retrieval ranking. |
 | `embeddings/embeddings.jsonl.gz` | 5352-vector sidecar (3412 claim + 43 wiki + 1897 chunk) from bge-small-en-v1.5, L2-normalized, 384-dim. |
 | `embeddings/manifest.json` | Sidecar metadata: model, dimensions, count, record-type breakdown, and extraction source. |
-| `qa/mechanical_check.py` | Read-only ground-truth checker: 10 checks against `company.yaml` + storylines (SKU/staff/vendor resolution, id-grammar, banned strings, invoice arithmetic, timestamp monotonicity, doc_id coverage, single-owner IDs). |
+| `corpus-ledger.json` | Deterministic accounting for all 372 raw files: 352 processed with full matching provenance hashes, 0 excluded, and 20 neutral `historical_no_output` entries. |
+| `failures/historical-ingest.json` | Immutable record for the 20 historical no-output observations: raw hashes, the source commit, and an explicit split between facts the repository proves and lost per-unit details. |
+| `exclusions.json` | Explicit exclusion registry, currently empty. Any future row must retain the raw hash plus a stable reason code and truthful explanation. |
+| `qa/mechanical_check.py` | Ground-truth checker with non-mutating `--check` and explicit `--write` modes: 10 checks against `company.yaml` + storylines (SKU/staff/vendor resolution, id-grammar, banned strings, invoice arithmetic, timestamp monotonicity, doc_id coverage, single-owner IDs). |
+| `qa/validate_corpus_ledger.py` / `qa/replay_corpus_failures.py` | Validate one current ledger entry per raw file and verify immutable historical raw hashes. The legacy replay filename does not claim to reproduce an unknown mechanism. |
 | `qa/violations.jsonl` | One JSON line per finding; currently empty (0 violations). |
+| `LICENSE.md` | CC BY 4.0 scope and attribution for synthetic data assets; code in this directory remains Apache-2.0. |
 
 > The `embeddings.jsonl.gz` sidecar (~19 MB) is committed in-tree on purpose:
 > `mvault demo load` reads it straight from the clone, which is what makes the
@@ -35,11 +41,26 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 
 ## How it fits
 
-`bible/` is the upstream contract: writer agents generate `raw/` from the templates and storylines, and `qa/mechanical_check.py` gates `raw/` against `company.yaml` before ingestion. Running `mvault ingest` over `raw/` produces `processed/` (source notes, claims, wiki drafts, review queue), which `mvault sync --full` embeds to yield the `embeddings/` sidecar. Downstream, the demo loader reads `processed/` plus the sidecar to stand up a queryable vault keyless, and the eval harness in [../../src/mastervault/evals](../../src/mastervault/evals) resolves `golden/queries.yaml` and scores the [../../src/mastervault/retrieval](../../src/mastervault/retrieval) channels against `golden/baseline.json`.
+`bible/` is the upstream contract: writer agents generate `raw/` from the templates and storylines, and `qa/mechanical_check.py --check` gates `raw/` against `company.yaml` before ingestion. Of 372 raw inputs, the retained processed snapshot has 352 source notes. `corpus-ledger.json` proves the provenance hash for each successful note and classifies the other 20 neutrally as `historical_no_output`, with the precise reason `historical_no_output_unknown_cause`; the snapshot proves no output, not whether ingestion failed, skipped the source, or stopped elsewhere. No raw file is silently omitted or marked excluded. The separate 20-row history is never regenerated from current absence and remains if a file is processed later. `mvault sync --full` embeds the processed layer to yield the `embeddings/` sidecar. Downstream, the demo loader reads `processed/` plus the sidecar to stand up a queryable vault keyless, and the eval harness in [../../src/mastervault/evals](../../src/mastervault/evals) resolves `golden/queries.yaml` and scores the [../../src/mastervault/retrieval](../../src/mastervault/retrieval) channels against `golden/baseline.json`.
+
+The original build referenced per-run logs under `/tmp/mv-build/p5a.log`, but
+those temporary logs were not committed, so the exact historical provider
+response for each omission cannot be recovered truthfully. The 20 files are
+not duplicates and have no evidence of intentional exclusion. Their retained
+records state only what the referenced snapshot proves: each exact raw file
+had no processed provenance there. Verification checks retained hashes; a
+later processed output does not erase that history. The shipped mock LLM lacks structured claim
+extraction for every raw document, so running it on just these 20 would not
+explain their historical omission and is deliberately not presented as such.
+
+```bash
+uv run python datasets/larkstead/qa/validate_corpus_ledger.py
+uv run python datasets/larkstead/qa/replay_corpus_failures.py
+```
 
 ## Key concepts / entry points
 
-- Seeded contradictions C1–C4: policy-boundary conflicts (returns 30→45 days in `bible/storylines/SL2-refund-window-change.yaml:59`, price-match v1 vs v2 in `processed/_review/pending/lint-2026-07-07-1258-rv-0060.md`) that give the router something to flag instead of overwrite.
+- Narrative contradictions C1–C5 live in the five storylines; the shipped semantic-lint queue is a separate measured result of one price-match item plus three variants of the return-window conflict.
 - Claim provenance: each source note carries atomic `key_claims` with `provenance`/`provenance_hash` back to its raw file, e.g. `processed/customer-support/sources/chat-log-chat-ana-priya-refund-batch-hold.md:52`.
 - Date/price consistency rule: a document quotes the policy version and price in force on its own date, so contradictions live across documents, never inside one (`bible/style-rules.md:78`).
 - Five query classes: the eval taxonomy that separates lexical recall from semantic, multi-hop, contradiction, and abstention behavior (`golden/resolved.yaml:5`).

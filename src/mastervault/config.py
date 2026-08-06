@@ -12,7 +12,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -96,17 +96,21 @@ class PathsCfg(BaseModel):
         return self.workspace / "index.db"
 
 
-def _toml_source(settings_cls: type[BaseSettings]) -> dict[str, Any]:
-    """Load mastervault.toml from MV_CONFIG, CWD, or the repo default."""
+def resolve_config_path() -> Path | None:
+    """Return the exact TOML source selected by the settings precedence."""
     candidates = []
     if env_path := os.environ.get("MV_CONFIG"):
         candidates.append(Path(env_path))
     candidates.append(Path.cwd() / CONFIG_FILENAME)
     candidates.append(Path(__file__).resolve().parents[2] / CONFIG_FILENAME)
-    for p in candidates:
-        if p.is_file():
-            with p.open("rb") as fh:
-                return tomllib.load(fh)
+    return next((path.resolve() for path in candidates if path.is_file()), None)
+
+
+def _toml_source(settings_cls: type[BaseSettings]) -> dict[str, Any]:  # noqa: ARG001
+    """Load mastervault.toml from MV_CONFIG, CWD, or the repo default."""
+    if path := resolve_config_path():
+        with path.open("rb") as fh:
+            return tomllib.load(fh)
     return {}
 
 
@@ -123,6 +127,8 @@ class TomlSettingsSource(PydanticBaseSettingsSource):
 
 
 class Settings(BaseSettings):
+    _config_source: Path | None = PrivateAttr(default=None)
+
     model_config = SettingsConfigDict(
         env_prefix="MV_",
         env_nested_delimiter="__",
@@ -175,6 +181,14 @@ class Settings(BaseSettings):
     def cohere_api_key(self) -> str | None:
         return os.environ.get("COHERE_API_KEY")
 
+    @property
+    def config_source(self) -> Path | None:
+        """TOML file actually selected by :func:`load_settings`, if any."""
+        return self._config_source
+
 
 def load_settings() -> Settings:
-    return Settings()
+    source = resolve_config_path()
+    settings = Settings()
+    settings._config_source = source
+    return settings

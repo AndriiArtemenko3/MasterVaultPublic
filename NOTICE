@@ -1,29 +1,28 @@
 MasterVault — NOTICE
 
-NOTE TO REVIEWERS: this license split (Apache-2.0 code / CC BY 4.0 dataset)
-is the default the project shipped with. It is pending the repository
-owner's explicit confirmation before the first public release.
-
-------------------------------------------------------------------------------
-
 MasterVault
-Copyright 2026 Andrii A.
+Copyright 2026 Andrii Artemenko
 
-Licensing is split by directory:
+Licensing is split by material type:
 
-1. Code — everything under `src/`, `tests/`, `migrations/`, and the
-   top-level tooling (`pyproject.toml`, `docker-compose.yml`, and this
-   repository's CLI/build scripts) is licensed under the Apache License,
+1. Code — source code and tooling throughout the repository, including code
+   under `datasets/larkstead/qa/`, is licensed under the Apache License,
    Version 2.0. See LICENSE for the full text.
 
-2. Dataset — everything under `datasets/larkstead/` (the raw document
-   corpus, the processed vault, the bible, the golden query set, and the
-   precomputed embeddings sidecar) is licensed under the Creative Commons
-   Attribution 4.0 International License (CC BY 4.0):
+2. Dataset — the synthetic Larkstead content and data assets (the bible, raw
+   corpus, processed vault, golden evaluation data, embeddings sidecar,
+   corpus ledger, retained historical no-output observation records, and
+   future PDFs derived from this
+   synthetic corpus) are licensed under the Creative Commons Attribution 4.0
+   International License (CC BY 4.0):
    https://creativecommons.org/licenses/by/4.0/
 
    Attribution: "Larkstead Goods Co. dataset, MasterVault project,
-   Andrii A., 2026."
+   Andrii Artemenko, 2026."
+
+   The dataset-local scope and attribution guidance are in
+   `datasets/larkstead/LICENSE.md`. Code does not become CC BY 4.0 merely
+   because it is stored inside the dataset directory.
 
 3. Fictional entities — Larkstead Goods Co. and every person, company,
    vendor, product, ticket, invoice, and transaction named in

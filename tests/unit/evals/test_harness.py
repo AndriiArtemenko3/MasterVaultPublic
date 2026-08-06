@@ -300,4 +300,55 @@ class TestCompareToBaseline:
         baseline = {"configs": {"hybrid": good.to_dict()}}
         result = compare_to_baseline({"vector-only": good}, baseline, tolerance=0.02)
         assert result["deltas"]["vector-only"] == {"note": "no baseline for this config"}
-        assert result["regressed"] == []
+        assert result["regressed"] == [
+            "hybrid: expected baseline configuration was not evaluated",
+            "vector-only: current configuration is missing from the baseline",
+        ]
+
+    def test_missing_hybrid_configuration_is_a_regression(self):
+        good = self._report(1.0)
+        baseline = {"configs": {"hybrid": good.to_dict()}}
+        result = compare_to_baseline({}, baseline)
+        assert any("hybrid" in line for line in result["regressed"])
+
+    def test_removed_query_is_a_regression(self):
+        good = self._report(1.0)
+        baseline = {"configs": {"hybrid": good.to_dict()}}
+        current = ConfigReport(config="hybrid", scores=[])
+        result = compare_to_baseline({"hybrid": current}, baseline)
+        assert any("q1" in line and "removed" in line for line in result["regressed"])
+
+    @pytest.mark.parametrize("cls", ["contradiction", "cross-domain-multi-hop"])
+    def test_safety_critical_per_class_regression_is_not_hidden_by_overall(self, cls):
+        baseline_report = ConfigReport(
+            config="hybrid",
+            scores=[
+                QueryScore("safe", cls, 1.0, 1.0, 1.0, 1.0),
+                QueryScore("other", "easy-lexical", 0.0, 0.0, 0.0, 0.0),
+            ],
+        )
+        current_report = ConfigReport(
+            config="hybrid",
+            scores=[
+                QueryScore("safe", cls, 0.0, 0.0, 0.0, 0.0),
+                QueryScore("other", "easy-lexical", 1.0, 1.0, 1.0, 1.0),
+            ],
+        )
+        result = compare_to_baseline(
+            {"hybrid": current_report}, {"configs": {"hybrid": baseline_report.to_dict()}}
+        )
+        assert any(cls in line or "safe" in line for line in result["regressed"])
+
+    def test_abstention_drop_is_a_regression(self):
+        baseline_report = ConfigReport(
+            config="hybrid",
+            scores=[QueryScore("negative", "negative-no-answer", abstained=True)],
+        )
+        current_report = ConfigReport(
+            config="hybrid",
+            scores=[QueryScore("negative", "negative-no-answer", abstained=False)],
+        )
+        result = compare_to_baseline(
+            {"hybrid": current_report}, {"configs": {"hybrid": baseline_report.to_dict()}}
+        )
+        assert any("abstention" in line or "abstained" in line for line in result["regressed"])

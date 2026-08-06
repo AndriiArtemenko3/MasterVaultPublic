@@ -44,6 +44,7 @@ class EventName(StrEnum):
     BUDGET_EXHAUSTED = "budget.exhausted"
     REVIEW_ENQUEUED = "review.enqueued"
     REVIEW_DEDUPED = "review.deduped"
+    REVIEW_CONFLICT = "review.conflict"
     AUTO_APPLIED = "auto.applied"
     JUDGE_VERDICT = "judge.verdict"
     RUN_COMPLETED = "run.completed"

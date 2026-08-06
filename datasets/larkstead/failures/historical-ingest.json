@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "dataset": "larkstead",
+  "classification": "historical_no_output_observations",
+  "historical_build": {
+    "date": "2026-07-07",
+    "commit": "703aa2e93d4aaeab6368aab3c5329d000f61194d",
+    "known": [
+      "The commit records 372 raw inputs and 352 processed source outputs.",
+      "Each listed raw file has no processed note whose provenance names it.",
+      "The contemporaneous manifest referenced /tmp/mv-build/p5a.log for run data, but that temporary log was not committed."
+    ],
+    "unknown": [
+      "The exact failed or skipped pipeline stage for each source.",
+      "The execution-time provider response, retry count, and error text."
+    ]
+  },
+  "verification": {
+    "command": "uv run python datasets/larkstead/qa/replay_corpus_failures.py",
+    "checks": [
+      "raw_sha256_matches",
+      "historical_record_is_well_formed"
+    ],
+    "note": "This verifies retained raw hashes and the immutable snapshot record. It does not reproduce or infer a missing failure mechanism, and it remains valid if a source gains a processed output later."
+  },
+  "observations": [
+    {
+      "id": "failed-contract-addendum-verdant-qc",
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/contract-addendum-verdant-qc.md",
+      "raw_sha256": "e3fff7be1b72cbbfb573681235dc4f254dad824d48afd334ce94957cdca1c25c",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-hr-policy-remote-hybrid-work",
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-remote-hybrid-work.md",
+      "raw_sha256": "471abc2cd13c62496e3fb6707c9c6ae934a3cdeb4b3d08d36e4a450a55882b3f",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-hr-policy-timekeeping-payroll-calendar",
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-timekeeping-payroll-calendar.md",
+      "raw_sha256": "cb243331408c89e9e1bc5145c621df99221c203928d7af4e05b04c0b0be40260",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-invoice-inv-csf-2025-044",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-csf-2025-044.md",
+      "raw_sha256": "0bd5b542ef2208f511db8ba946c9edb97025f0f2fbb5414e038ea60202eb0ec1",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-invoice-inv-ctl-2025-019",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-ctl-2025-019.md",
+      "raw_sha256": "55f765edc57b7b4e8e39199608f71eeeca69480e4f710a6471d0ef838eaba549",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-invoice-inv-gcp-2025-104",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-gcp-2025-104.md",
+      "raw_sha256": "287f1752bd6f72c012d7afef65435e52ef63029572a558225170c8174853e54a",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-invoice-inv-mrc-2025-021",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-mrc-2025-021.md",
+      "raw_sha256": "fdb31fd4c48b45bb3ca776da52a61239ae5e70da59c20ee930d2d85fda76267c",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-invoice-inv-nmi-2025-002",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-nmi-2025-002.md",
+      "raw_sha256": "8dda1d54a3ca4a3f3963f9fda2e02dc6d9a26f856a85f98c4751ee33cc346efd",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-sl5-invoice-ppf-2026-002",
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/sl5-invoice-ppf-2026-002.md",
+      "raw_sha256": "c1a25c324b5aa7dbc7a71a1449911ab9c0f65da77103c8fcad9dc75a784b8551",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-memo-finance-lot-2025-14-cost-tally",
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/memo-finance-lot-2025-14-cost-tally.md",
+      "raw_sha256": "c331882b728135f63e4a3133b6298297a34e924a438696f681222247b4e01c2f",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-mailloft-drizzle-segment-misfire-postmortem",
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/mailloft-drizzle-segment-misfire-postmortem.md",
+      "raw_sha256": "e8525e3989c480b9dc8ea4c84b2cfa22b677bbd7de72c4802ec3ec95528c1e71",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-process-campaign-launch",
+      "raw_path": "datasets/larkstead/raw/operations/process/process-campaign-launch.md",
+      "raw_sha256": "061ce490fb8e859c3154ab4dec108a93e5c407101e44dee6bf333d6174eb0c9f",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-process-purchase-order-issuance",
+      "raw_path": "datasets/larkstead/raw/operations/process/process-purchase-order-issuance.md",
+      "raw_sha256": "62065b34908790fadad9ef219b3baa6ea95c074b1e0709355d076e49f2144434",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-receiving-log-ostrava-lot-2024-07",
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2024-07.md",
+      "raw_sha256": "96bf3589e69264eefb0a2de92283a74bc7e97a8daa5b26f6145ad8835394bd8e",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-relnote-warehouse-safety-2025-09",
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-warehouse-safety-2025-09.md",
+      "raw_sha256": "a765a0de9e224d7c0d81e251ea3ec781bbd4f7167289bf0ed584c05857d0bb48",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-competitor-note-ergonest-returns-2024-08",
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/competitor-note-ergonest-returns-2024-08.md",
+      "raw_sha256": "5021b8f2f0755cf00680d78af42ef44b2b93c87b50feceebbe74cc79adde78b1",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-sl3-competitor-note-ergonest",
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/sl3-competitor-note-ergonest.md",
+      "raw_sha256": "2e112fc8cf657c4bd5dac9f38430244d229bdf1ffca45a1040bec3f312e01e4c",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-lead-note-suttoncole-inbound",
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-suttoncole-inbound.md",
+      "raw_sha256": "e7500f72d10da8c6c1811d116cad10b713829b0843859e9d9de2bf9057afdf46",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-sl3-objection-note-price",
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/sl3-objection-note-price.md",
+      "raw_sha256": "9068cacc71464dae762e7cc1cf82cac649f0fb72b503ebdf44a7043a7e0adf6d",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    },
+    {
+      "id": "failed-qbr-dtc-segment-mix-2025-02",
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-dtc-segment-mix-2025-02.md",
+      "raw_sha256": "7003cb07194a0c3bfe215b75fa75c659db16bc2ac35d35c30ba80518139481f5",
+      "stage": "historical_snapshot_comparison",
+      "reason_code": "historical_no_output_unknown_cause",
+      "observation": "no processed output names this raw source in the referenced 2026-07-07 snapshot; whether the source failed, was skipped, or stopped at another stage is unknown",
+      "attempts": null
+    }
+  ]
+}

@@ -39,8 +39,12 @@ def workspace(tmp_path, monkeypatch, fixed_clock) -> dict:
     ws = tmp_path / "ws"
     monkeypatch.setenv("MV_CONFIG", str(empty_toml))
     monkeypatch.setenv("MV_PATHS__WORKSPACE", str(ws))
+    monkeypatch.setenv("MV_STORAGE__BACKEND", "sqlite")
+    monkeypatch.setenv("MV_EMBEDDING__PROVIDER", "mock")
+    monkeypatch.setenv("MV_LLM__PROVIDER", "mock")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
-    target = ws / "vault" / "wiki" / "refund-policy.md"
+    target = ws / "vault" / "operations" / "wiki" / "refund-policy.md"
     target.parent.mkdir(parents=True)
     target.write_text(NOTE, encoding="utf-8")
 
@@ -53,6 +57,7 @@ def seed(workspace, make_item, *, id: str, tier: int = 2, pattern: str = "wiki-b
         id=id,
         tier=tier,
         pattern_key=pattern,
+        target="operations/wiki/refund-policy.md",
         base_hash=content_hash(NOTE),
         payload={"mode": "full_file"},
     )

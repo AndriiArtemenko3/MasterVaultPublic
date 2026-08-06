@@ -14,6 +14,7 @@ legitimately come back after the target changed.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import re
 from dataclasses import dataclass
@@ -99,15 +100,16 @@ def _split_sections(body: str) -> dict[str, str]:
     return sections
 
 
-def _render_item(item: ReviewItem, rationale: str, proposal: str, kind: str, resolution: str) -> str:
+def _render_item(
+    item: ReviewItem, rationale: str, proposal: str, kind: str, resolution: str
+) -> str:
     fm = serialize_frontmatter(item.model_dump(mode="json", exclude_none=True))
     body = (
         "\n## Rationale\n\n"
         f"{rationale.strip()}\n\n"
         "## Proposal\n\n"
         f"````{kind}\n{proposal}\n````\n\n"
-        "## Resolution\n"
-        + (f"\n{resolution.strip()}\n" if resolution.strip() else "")
+        "## Resolution\n" + (f"\n{resolution.strip()}\n" if resolution.strip() else "")
     )
     return join_frontmatter(fm, body)
 
@@ -174,12 +176,32 @@ class ReviewQueue:
         # `item.id` is producer-derived (it embeds ctx.run_id, which resume
         # reads back out of events.jsonl), so it is untrusted here: joining it
         # raw would let an id of "../../x" write outside the queue entirely.
-        path = resolve_within(self.pending_dir, f"{item.id}.md")
-        path.write_text(
-            _render_item(item, item.rationale, proposal, kind, resolution=""),
-            encoding="utf-8",
-        )
-        return path
+        rendered = _render_item(item, item.rationale, proposal, kind, resolution="")
+        # A producer may legitimately reuse an id after the original proposal
+        # was archived (notably an ingest resume whose per-run counter starts
+        # over). Keep the id in frontmatter, but allocate a collision-safe
+        # queue filename so immutable archive history is never overwritten and
+        # the new item can still be resolved.
+        suffix = f"--{key[:8]}"
+        attempt = 0
+        while True:
+            if attempt == 0:
+                filename = f"{item.id}.md"
+            elif attempt == 1:
+                filename = f"{item.id}{suffix}.md"
+            else:
+                filename = f"{item.id}{suffix}-{attempt}.md"
+            path = resolve_within(self.pending_dir, filename)
+            if (self.archive_dir / filename).exists():
+                attempt += 1
+                continue
+            try:
+                with path.open("x", encoding="utf-8") as handle:
+                    handle.write(rendered)
+            except FileExistsError:
+                attempt += 1
+                continue
+            return path
 
     def archive(self, path: Path, outcome: str, note: str = "") -> Path:
         """Resolve an item: stamp resolution frontmatter + text, move to archive/."""
@@ -199,11 +221,20 @@ class ReviewQueue:
         )
         self.archive_dir.mkdir(parents=True, exist_ok=True)
         dest = self.archive_dir / Path(path).name
-        dest.write_text(
-            _render_item(item, loaded.rationale, loaded.proposal, loaded.kind, resolution=note),
-            encoding="utf-8",
-        )
-        Path(path).unlink()
+        if dest.exists():
+            raise UsageError(f"archive destination already exists: {dest}")
+        try:
+            dest.write_text(
+                _render_item(item, loaded.rationale, loaded.proposal, loaded.kind, resolution=note),
+                encoding="utf-8",
+            )
+            Path(path).unlink()
+        except Exception:
+            # The pending item remains authoritative until its unlink succeeds.
+            # Never leave a second, falsely resolved archive copy behind.
+            with contextlib.suppress(OSError):
+                dest.unlink()
+            raise
         return dest
 
     def mark_conflict(self, path: Path, reason: str) -> None:

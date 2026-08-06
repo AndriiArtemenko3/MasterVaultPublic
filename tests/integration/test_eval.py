@@ -17,13 +17,15 @@ from __future__ import annotations
 
 import json
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from mastervault.cli.app import app
-from mastervault.config import EmbeddingCfg, PathsCfg, Settings, StorageCfg
+from mastervault.config import EmbeddingCfg, PathsCfg, Settings, StorageCfg, load_settings
+from mastervault.evals.provenance import embedding_runtime_identity, validate_baseline_metadata
 from mastervault.providers import get_embedding_provider
 from mastervault.storage import get_backend
 from mastervault.sync import load_demo_dataset
@@ -32,6 +34,7 @@ pytestmark = pytest.mark.integration
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATASET_DIR = REPO_ROOT / "datasets" / "larkstead"
+BASELINE_PATH = DATASET_DIR / "golden" / "baseline.json"
 
 EXPECTED_CLASS_COUNTS = {
     "easy-lexical": 14,
@@ -76,7 +79,11 @@ def loaded_workspace(tmp_path_factory):
         assert report.counts.get("embeddings", 0) > 0
     finally:
         backend.close()
-    for d in (settings.paths.review_pending, settings.paths.review_archive, settings.paths.runs_dir):
+    for d in (
+        settings.paths.review_pending,
+        settings.paths.review_archive,
+        settings.paths.runs_dir,
+    ):
         d.mkdir(parents=True, exist_ok=True)
     return workspace
 
@@ -101,6 +108,13 @@ def test_eval_lexical_only_json_shape_and_class_breakdown(eval_env):
     result = runner.invoke(app, ["eval", "--config", "lexical-only", "--json"])
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
+
+    metadata = payload["reproducibility"]
+    assert metadata["evaluation"] == "retrieval"
+    assert len(metadata["source"]["tree"]["sha256"]) == 64
+    assert len(metadata["dataset"]["ledger_sha256"]) == 64
+    assert len(metadata["dependencies"]["lock_sha256"]) == 64
+    assert metadata["reproduction"]["command"].startswith("uv run mvault eval")
 
     assert payload["resolve"]["class_counts"] == EXPECTED_CLASS_COUNTS
     assert payload["resolve"]["errors"] == []
@@ -129,6 +143,27 @@ def test_eval_human_table_output(eval_env):
     assert "negative-no-answer" in result.output
 
 
+def test_retrieval_baseline_has_current_machine_independent_metadata(
+    eval_env, monkeypatch
+):
+    monkeypatch.delenv("MV_STORAGE__BACKEND", raising=False)
+    settings = load_settings()
+    provider = get_embedding_provider(settings)
+    provider.embed(["baseline identity probe"])
+    baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    assert (
+        validate_baseline_metadata(
+            REPO_ROOT,
+            "retrieval",
+            settings,
+            baseline["reproducibility"],
+            model_identity=embedding_runtime_identity(provider),
+            effective_backend="sqlite",
+        )
+        == []
+    )
+
+
 def test_eval_invalid_config_name_exits_2(eval_env):
     runner = CliRunner()
     result = runner.invoke(app, ["eval", "--config", "not-a-real-config"])
@@ -139,20 +174,15 @@ def test_eval_compare_flags_regression_and_passes_when_not_worse(eval_env, tmp_p
     runner = CliRunner()
     baseline_result = runner.invoke(app, ["eval", "--config", "lexical-only", "--json"])
     assert baseline_result.exit_code == 0, baseline_result.output
-    current_overall = json.loads(baseline_result.output)["configs"]["lexical-only"]["overall"]
+    current_payload = json.loads(baseline_result.output)
+    current_overall = current_payload["configs"]["lexical-only"]["overall"]
 
     inflated_path = tmp_path / "inflated.json"
-    inflated_path.write_text(
-        json.dumps(
-            {
-                "configs": {
-                    "lexical-only": {
-                        "overall": {k: min(1.0, v + 0.5) for k, v in current_overall.items()}
-                    }
-                }
-            }
-        )
-    )
+    inflated = deepcopy(current_payload)
+    inflated["configs"]["lexical-only"]["overall"] = {
+        k: min(1.0, v + 0.5) for k, v in current_overall.items()
+    }
+    inflated_path.write_text(json.dumps(inflated))
     regressed = runner.invoke(
         app, ["eval", "--config", "lexical-only", "--compare", str(inflated_path), "--json"]
     )
@@ -160,17 +190,11 @@ def test_eval_compare_flags_regression_and_passes_when_not_worse(eval_env, tmp_p
     assert json.loads(regressed.output)["compare"]["regressed"]
 
     deflated_path = tmp_path / "deflated.json"
-    deflated_path.write_text(
-        json.dumps(
-            {
-                "configs": {
-                    "lexical-only": {
-                        "overall": {k: max(0.0, v - 0.5) for k, v in current_overall.items()}
-                    }
-                }
-            }
-        )
-    )
+    deflated = deepcopy(current_payload)
+    deflated["configs"]["lexical-only"]["overall"] = {
+        k: max(0.0, v - 0.5) for k, v in current_overall.items()
+    }
+    deflated_path.write_text(json.dumps(deflated))
     passed = runner.invoke(
         app, ["eval", "--config", "lexical-only", "--compare", str(deflated_path), "--json"]
     )

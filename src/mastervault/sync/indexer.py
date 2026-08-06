@@ -89,6 +89,11 @@ class SyncReport:
     records_embedded: int = 0
     records_reused: int = 0
     skipped: list[SkippedFile] = field(default_factory=list)
+    # Positive evidence of the notes that passed both the walker and parser
+    # gates in this run.  Callers that need to prove a particular file was
+    # indexed must not infer that merely from its absence in ``skipped``:
+    # walk_vault intentionally ignores dot-directories and non-Markdown files.
+    prepared_paths: set[str] = field(default_factory=set)
 
 
 def _prepare(note: NoteRef, loaded: LoadedNote) -> _Prepared:
@@ -251,7 +256,10 @@ def sync_vault(
             progress(message)
 
     prepared, skipped = prepare_vault(vault_dir, progress=progress)
-    report = SyncReport(skipped=skipped)
+    report = SyncReport(
+        skipped=skipped,
+        prepared_paths={item.doc.rel_path for item in prepared},
+    )
 
     stored_hashes = {
         row.doc_id: row.content_hash

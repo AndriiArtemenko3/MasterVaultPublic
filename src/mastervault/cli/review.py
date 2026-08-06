@@ -20,9 +20,12 @@ from rich.table import Table
 from mastervault.config import Settings, load_settings
 from mastervault.core.errors import EXIT_CODES
 from mastervault.models import ReviewItem, ReviewStatus
+from mastervault.providers import get_embedding_provider
 from mastervault.review.apply import ApplyResult, ConflictResult
 from mastervault.review.apply import apply as apply_item
 from mastervault.review.queue import LoadedReview, ReviewQueue
+from mastervault.review.reindex import sync_review_target
+from mastervault.storage import get_backend
 
 review_app = typer.Typer(
     name="review",
@@ -51,9 +54,7 @@ def _resolve(queue: ReviewQueue, item_id: str) -> Path:
         raise _fail(f"no pending item matches id prefix {item_id!r}", EXIT_CODES["usage"])
     if len(matches) > 1:
         stems = ", ".join(p.stem for p in matches)
-        raise _fail(
-            f"id prefix {item_id!r} is ambiguous: {stems}", EXIT_CODES["usage"]
-        )
+        raise _fail(f"id prefix {item_id!r} is ambiguous: {stems}", EXIT_CODES["usage"])
     return matches[0]
 
 
@@ -70,7 +71,25 @@ def _age(created: datetime, now: datetime | None = None) -> str:
 
 
 def _apply_one(path: Path, item: ReviewItem, settings: Settings) -> ApplyResult:
-    result = apply_item(path, vault_root=settings.paths.vault_dir)
+    def reindex(target: Path) -> None:
+        provider = get_embedding_provider(settings)
+        backend = get_backend(settings)
+        try:
+            backend.init_schema(provider.dimensions, provider.model_version)
+            sync_review_target(
+                target,
+                vault_root=settings.paths.vault_dir,
+                backend=backend,
+                embedder=provider,
+            )
+        finally:
+            backend.close()
+
+    result = apply_item(
+        path,
+        vault_root=settings.paths.vault_dir,
+        reindex_hook=reindex,
+    )
     if isinstance(result, ConflictResult):
         typer.echo(f"CONFLICT {item.id}: {result.reason}", err=True)
     else:
@@ -118,8 +137,7 @@ def list_cmd(
         parsed_status = ReviewStatus(status) if status else None
     except ValueError:
         raise _fail(
-            f"unknown status {status!r} (expected one of "
-            f"{[s.value for s in ReviewStatus]})",
+            f"unknown status {status!r} (expected one of {[s.value for s in ReviewStatus]})",
             EXIT_CODES["usage"],
         ) from None
 

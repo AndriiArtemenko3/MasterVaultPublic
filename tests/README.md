@@ -1,6 +1,6 @@
 # tests — automated test suite for every subsystem
 
-The pytest suite for MasterVault: 416 tests split into fast, hermetic `unit/` tests that mirror `src/mastervault/` package-for-package, `integration/` tests that need a real storage backend and a synced vault, and shared `fixtures/` (a mini vault and a raw-docs corpus) plus the root `conftest.py`. Unit tests run with mock providers and never touch the network or the real workspace; integration tests exercise whole flows (`sync`, `search`, `ask`, `ingest`, `demo`, `eval`) end to end against sqlite (always) and postgres (when `DATABASE_URL` is reachable).
+The pytest suite for MasterVault is split into fast, hermetic `unit/` tests that mirror `src/mastervault/` package-for-package, `integration/` tests that need a real storage backend and a synced vault, and shared `fixtures/` (a mini vault and a raw-docs corpus) plus the root `conftest.py`. Unit tests run with mock providers and never touch the network or the real workspace; integration tests exercise whole flows (`sync`, `search`, `ask`, `ingest`, `demo`, `eval`) end to end against sqlite (always) and postgres (when `DATABASE_URL` is reachable). The final collected count belongs in CI output rather than this file so it cannot silently go stale.
 
 ## Files
 
@@ -15,6 +15,8 @@ The pytest suite for MasterVault: 416 tests split into fast, hermetic `unit/` te
 | `integration/test_demo_load.py` | Sidecar embedding import + `load_demo_dataset`/`load_embeddings`, plus one CLI run of `mvault demo load` over the shipped `datasets/larkstead` corpus. |
 | `integration/test_demo_lifecycle.py` | `mvault demo {status,reset,delete}` lifecycle against the shipped dataset, including hand-mutation then idempotent reset. |
 | `integration/test_eval.py` | `mvault eval` CLI over the real Larkstead demo dataset and golden query set; vector-channel tests skip when the local embedder can't load. |
+| `integration/test_review_apply_sync.py` | End-to-end approval: canonical Markdown and the derived index change together, old content disappears, and approved content becomes searchable. |
+| `integration/test_dataset_integrity.py` | Corpus and eval ship gate, including 372-file ledger validation and verification of the 20 immutable historical no-output observations. |
 | `unit/storage/` | `StorageBackend` unit-level behavior isolated from the integration matrix. |
 | `unit/retrieval/` | Fusion (`test_fuse.py`), MMR diversification (`test_mmr.py`), alias front-door (`test_alias_frontdoor.py`). |
 | `unit/pipelines/` | `ask`, `ingest`, `route_claim`, `lint` pipelines with a per-test sqlite backend and mock embedder/LLM (see `conftest.py`). |
@@ -39,4 +41,4 @@ The suite imports the production packages under [../src/mastervault](../src/mast
 - `integration` marker (`pyproject.toml:53`) — every file in `integration/` sets `pytestmark = pytest.mark.integration`; run only those with `pytest -m integration`, or skip them with `pytest -m "not integration"`.
 - `unit/` mirrors `src/mastervault/` one subfolder per subsystem, so a change in a source package maps to a sibling-named test folder.
 - `provider_doubles.py` (`unit/providers/provider_doubles.py:1`) — recording fakes (e.g. `FakeOpenAIEmbeddingsClient`, `FakeAPIError`) that let provider tests assert batching and error handling without any SDK or network.
-- Running: `pytest` runs all 416 (postgres tests self-skip without `DATABASE_URL`); set a reachable `DATABASE_URL` (or repo `.env`) to also cover the postgres backend.
+- Running: `uv run pytest` runs the full suite (postgres tests self-skip without `DATABASE_URL`); set a reachable `DATABASE_URL` (or repo `.env`) to exercise the live postgres backend too.

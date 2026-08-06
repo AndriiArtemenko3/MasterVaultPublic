@@ -732,5 +732,206 @@
       ]
     }
   ],
-  "uncovered_classes": []
+  "baseline_schema_version": 2,
+  "baseline_kind": "ask",
+  "generated": "2026-08-06T02:09:03+00:00",
+  "uncovered_classes": [],
+  "reproducibility": {
+    "schema_version": 2,
+    "evaluation": "ask",
+    "source": {
+      "git_sha": "34257a94fb7c135d345eb8b12e2e410c3fa657b2",
+      "git_dirty": false,
+      "tree": {
+        "sha256": "73800c5b4172fa4633fc20fb4b26039383a3a80b7e31219bdda7cf613c26d3e5",
+        "file_count": 101
+      },
+      "package_version": "0.2.0"
+    },
+    "dataset": {
+      "name": "larkstead",
+      "ledger_sha256": "55267778f8317204918cbf8c8879bff910ff568799106afe910c96186a1b6292",
+      "entries_sha256": "94c0f2ada9fa2119dcabdaa1336a4654fb51bfa85a3b032973efab51b7fd8104",
+      "processed": 352,
+      "historical_no_output": 20,
+      "processed_tree": {
+        "sha256": "f12018de58d80c32edcdd78bb5e506206164e29bd15ab1a9765b0c6821dd9374",
+        "file_count": 414
+      },
+      "embeddings": {
+        "sha256": "d4bfe285c65ce7978a63511ec9ede791f0cb588588ff81eef75937d8cd6f1b5d",
+        "file_count": 2,
+        "files": [
+          {
+            "path": "datasets/larkstead/embeddings/embeddings.jsonl.gz",
+            "sha256": "58c2c54c0c4f475904b11b57a47e3a4fa788b755d199f311b90fdedf3f12db24"
+          },
+          {
+            "path": "datasets/larkstead/embeddings/manifest.json",
+            "sha256": "2b6b5f8fe3a2339cacf853b8e6d4d5de533b6d4acad52d616668815eb87388bd"
+          }
+        ]
+      },
+      "evaluation_input": {
+        "path": "datasets/larkstead/golden/ask_cases.yaml",
+        "sha256": "802e19d81296bb590e675d8a8e0c07b79c860a9da7c9c68dfc0052978042434f"
+      }
+    },
+    "dependencies": {
+      "lock_path": "uv.lock",
+      "lock_sha256": "dbbeebf70940cd50c103171ef8bfc2f2ea2e592aed70424984f34c4df8f6779b"
+    },
+    "config": {
+      "source": {
+        "descriptor": "mastervault.toml",
+        "sha256": "07791600a2cfa98f189ed50ab5e94ea9a736f1606e835d3ef707d7464d7e66de"
+      },
+      "resolved": {
+        "storage": {
+          "configured_backend": "auto",
+          "effective_backend": "sqlite",
+          "schema_version": 2
+        },
+        "embedding": {
+          "provider": "local",
+          "model": "BAAI/bge-small-en-v1.5",
+          "batch_size": 128,
+          "cost_cap_usd": 1.0,
+          "effective_provider": "local",
+          "effective_model": "BAAI/bge-small-en-v1.5",
+          "effective_dimensions": 384
+        },
+        "retrieval": {
+          "k": 10,
+          "rrf_k": 60,
+          "rerank_pool": 30,
+          "mmr_lambda": 0.7
+        },
+        "ask": {
+          "max_rounds": 3,
+          "budget_usd": 0.25
+        },
+        "ingestion": {
+          "band_exists": 0.8,
+          "band_candidate": 0.6,
+          "max_claims_per_doc": 10
+        },
+        "reranker": {
+          "backend": "auto"
+        },
+        "llm": {
+          "provider": "mock",
+          "model_small": "claude-haiku-4-5",
+          "model_medium": "claude-sonnet-5",
+          "model_large": "claude-sonnet-5",
+          "endpoint": null
+        },
+        "budgets": {
+          "ingest": 5.0,
+          "lint": 0.5,
+          "deliberate": 0.75
+        }
+      }
+    },
+    "prompts": {
+      "sha256": "95adb79d42c64c2c7a4e3f61af568f204a41e0f3ea65edaf764ad93a04472cbf",
+      "file_count": 6,
+      "files": [
+        {
+          "path": "src/mastervault/prompts/claim_extraction/v1.md",
+          "sha256": "c3d353d2d725bacc571910466d11689218826a507293b0445ff1b3980fc0b664"
+        },
+        {
+          "path": "src/mastervault/prompts/contradiction_judge/v1.md",
+          "sha256": "7896617071ea8c6286a8d87558210e7d7114532f2e1a6d42318a82d082c070af"
+        },
+        {
+          "path": "src/mastervault/prompts/corpus_check/v1.md",
+          "sha256": "98905ef43e2ae5f2a4e0af5039a09e777bf9a1f322f2fe42981219bc4093437f"
+        },
+        {
+          "path": "src/mastervault/prompts/grounded_synthesis/v1.md",
+          "sha256": "dbd51179962d6f460554aa0834b6407736adb6b0086ad26f757711ee1206f002"
+        },
+        {
+          "path": "src/mastervault/prompts/sufficiency_judge/v1.md",
+          "sha256": "62cf05b62d1d3ba49c1ace2a836b03c415e3e72fb897d89e6cd591859a8db025"
+        },
+        {
+          "path": "src/mastervault/prompts/wiki_draft/v1.md",
+          "sha256": "6b8e659be050a347f1ac0325ffbca5c245bcb1fc6bc4aceffe13fd40d5bdab31"
+        }
+      ]
+    },
+    "storage_schema": {
+      "version": 2,
+      "migrations": {
+        "sha256": "b8f3747268f7b95cf17b2f1ede24bf5cada9ec893f5227d1be52b94fb16533ab",
+        "file_count": 4,
+        "files": [
+          {
+            "path": "src/mastervault/storage/migrations/pg/001_init.sql",
+            "sha256": "2d0e3ab2b734e01de2b548681336e3b6a6a25e930332bb7f8b1a142314b26930"
+          },
+          {
+            "path": "src/mastervault/storage/migrations/pg/002_migration_ledger.sql",
+            "sha256": "a08310c54f6bf86f9b4ec875e5dd99c49d627d0d621cd6d40e8a38081b3c3914"
+          },
+          {
+            "path": "src/mastervault/storage/migrations/sqlite/001_init.sql",
+            "sha256": "eb5ed35311e82c726f034f3a679c7781ecf927d76f17c5499d30ec1e153aa08a"
+          },
+          {
+            "path": "src/mastervault/storage/migrations/sqlite/002_migration_ledger.sql",
+            "sha256": "c5df585e0bf78bf20ff1c4c12303eac5657a622175d37d8f3caa2aa48f84b076"
+          }
+        ]
+      }
+    },
+    "models": {
+      "embedding_provider": "local",
+      "embedding_model": "BAAI/bge-small-en-v1.5",
+      "llm_provider": "mock",
+      "llm_small": "claude-haiku-4-5",
+      "llm_medium": "claude-sonnet-5",
+      "llm_large": "claude-sonnet-5",
+      "reranker": "auto",
+      "runtime_identity": {
+        "provider": "local",
+        "implementation": "mastervault.providers.embedding.LocalEmbedding",
+        "effective_model": "BAAI/bge-small-en-v1.5",
+        "dimensions": 384,
+        "runtime_packages": {
+          "fastembed": "0.8.0",
+          "onnxruntime": "1.19.2",
+          "tokenizers": "0.23.1",
+          "numpy": "2.5.1"
+        },
+        "artifact": {
+          "kind": "fastembed-cache-snapshot",
+          "source_repository": "qdrant/bge-small-en-v1.5-onnx-q",
+          "snapshot_revision": "52398278842ec682c6f32300af41344b1c0b0bb2",
+          "tree_sha256": "088dd18e11c1e1784c2675339c50318a4b7d90f9cc27c212f9b5d48714741773",
+          "file_count": 5,
+          "total_bytes": 67179163
+        }
+      }
+    },
+    "environment": {
+      "python": "3.12.13",
+      "implementation": "CPython",
+      "platform": "macOS-26.4-arm64-arm-64bit",
+      "system": "Darwin",
+      "machine": "arm64",
+      "executable": "python3"
+    },
+    "reproduction": {
+      "setup_commands": [
+        "uv sync --all-extras",
+        "uv run mvault init",
+        "uv run mvault demo load"
+      ],
+      "command": "uv run mvault ask-eval --json --freeze /tmp/mastervault-m0-baselines.zYwWfb/ask_baseline.json"
+    }
+  }
 }

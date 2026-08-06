@@ -15,8 +15,10 @@ import json
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
-from mastervault.config import EmbeddingCfg, PathsCfg, Settings
+from mastervault.cli.app import app
+from mastervault.config import EmbeddingCfg, PathsCfg, Settings, load_settings
 from mastervault.evals.ask_harness import (
     ASK_CASE_CLASSES,
     compare_ask_to_baseline,
@@ -24,6 +26,7 @@ from mastervault.evals.ask_harness import (
     missing_case_classes,
     run_ask_suite,
 )
+from mastervault.evals.provenance import embedding_runtime_identity, validate_baseline_metadata
 from mastervault.providers import get_embedding_provider
 from mastervault.storage.sqlite import SqliteBackend
 from mastervault.sync import load_demo_dataset
@@ -71,9 +74,7 @@ def test_every_required_case_class_is_covered():
 
 
 def test_the_frozen_ask_suite_passes(suite):
-    failures = [
-        f"{r.id} [{c.name}]: {c.detail}" for r in suite.results for c in r.failures()
-    ]
+    failures = [f"{r.id} [{c.name}]: {c.detail}" for r in suite.results for c in r.failures()]
     assert failures == [], "\n".join(failures)
 
 
@@ -100,7 +101,73 @@ def test_suite_does_not_regress_against_the_frozen_baseline(suite):
     )
 
 
+def test_ask_baseline_has_current_machine_independent_reproducibility_metadata(
+    demo_env, monkeypatch
+):
+    fixture_settings, _backend, embedder = demo_env
+    monkeypatch.setenv("MV_PATHS__WORKSPACE", str(fixture_settings.paths.workspace))
+    monkeypatch.setenv("MV_EMBEDDING__PROVIDER", "local")
+    monkeypatch.setenv("MV_LLM__PROVIDER", "mock")
+    monkeypatch.delenv("MV_STORAGE__BACKEND", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    settings = load_settings()
+    embedder.embed(["baseline identity probe"])
+    baseline = json.loads(ASK_BASELINE_PATH.read_text(encoding="utf-8"))
+    assert (
+        validate_baseline_metadata(
+            REPO_ROOT,
+            "ask",
+            settings,
+            baseline["reproducibility"],
+            model_identity=embedding_runtime_identity(embedder),
+            effective_backend="sqlite",
+        )
+        == []
+    )
+
+
 def test_known_limitations_are_declared_not_hidden(suite):
     """A limitation must carry an explanation, so a green suite stays honest."""
     for entry in suite.limitations():
         assert len(entry["limitation"]) > 80, f"{entry['id']}: limitation text is too thin"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_failed_ask_suite_never_creates_or_replaces_a_frozen_baseline(
+    demo_env, tmp_path, monkeypatch, existing
+):
+    settings, _backend, _embedder = demo_env
+    monkeypatch.setenv("MV_PATHS__WORKSPACE", str(settings.paths.workspace))
+    monkeypatch.setenv("MV_STORAGE__BACKEND", "sqlite")
+    monkeypatch.setenv("MV_EMBEDDING__PROVIDER", "local")
+    monkeypatch.setenv("MV_LLM__PROVIDER", "mock")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    failing_cases = tmp_path / "failing-ask-cases.yaml"
+    cases_text = CASES_PATH.read_text(encoding="utf-8")
+    failing_cases.write_text(
+        cases_text.replace("    min_citations: 1", "    min_citations: 999", 1),
+        encoding="utf-8",
+    )
+    destination = tmp_path / "frozen.json"
+    before = b'{"preserve": true}\n'
+    if existing:
+        destination.write_bytes(before)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "ask-eval",
+            "--cases",
+            str(failing_cases),
+            "--json",
+            "--freeze",
+            str(destination),
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    if existing:
+        assert destination.read_bytes() == before
+    else:
+        assert not destination.exists()

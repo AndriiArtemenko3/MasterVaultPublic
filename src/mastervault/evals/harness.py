@@ -442,21 +442,68 @@ def compare_to_baseline(
     deltas: dict[str, Any] = {}
     regressed: list[str] = []
     baseline_configs = baseline.get("configs", {})
+    if not isinstance(baseline_configs, dict):
+        return {"deltas": {}, "regressed": ["baseline configs are missing or malformed"]}
+
+    for missing in sorted(set(baseline_configs) - set(current)):
+        regressed.append(f"{missing}: expected baseline configuration was not evaluated")
+
     for name, report in current.items():
         base = baseline_configs.get(name)
         if base is None:
             deltas[name] = {"note": "no baseline for this config"}
+            regressed.append(f"{name}: current configuration is missing from the baseline")
             continue
         cur_overall = report.overall()
         base_overall = base.get("overall", {})
         metric_deltas = {}
-        for metric, cur_val in cur_overall.items():
-            base_val = base_overall.get(metric)
-            if base_val is None:
+        for metric, base_val in base_overall.items():
+            cur_val = cur_overall.get(metric)
+            if not isinstance(base_val, (int, float)):
+                continue
+            if not isinstance(cur_val, (int, float)):
+                regressed.append(f"{name}.{metric}: expected baseline metric is missing")
                 continue
             delta = round(cur_val - base_val, 6)
             metric_deltas[metric] = {"baseline": base_val, "current": cur_val, "delta": delta}
-            if metric != "abstention_rate" and delta < -tolerance:
+            if delta < -tolerance:
                 regressed.append(f"{name}.{metric}: {base_val} -> {cur_val} ({delta:+.4f})")
         deltas[name] = metric_deltas
+
+        current_classes = report.per_class()
+        for class_name, base_class in base.get("per_class", {}).items():
+            cur_class = current_classes.get(class_name)
+            if cur_class is None:
+                regressed.append(f"{name}.{class_name}: expected baseline class is missing")
+                continue
+            for metric, base_val in base_class.items():
+                if metric == "n" or not isinstance(base_val, (int, float)):
+                    continue
+                cur_val = cur_class.get(metric)
+                if not isinstance(cur_val, (int, float)):
+                    regressed.append(f"{name}.{class_name}.{metric}: expected metric is missing")
+                elif cur_val - base_val < -tolerance:
+                    regressed.append(
+                        f"{name}.{class_name}.{metric}: {base_val} -> {cur_val} "
+                        f"({cur_val - base_val:+.4f})"
+                    )
+
+        current_queries = {score.id: score.to_dict() for score in report.scores}
+        for base_query in base.get("queries", []):
+            query_id = base_query.get("id")
+            current_query = current_queries.get(query_id)
+            if current_query is None:
+                regressed.append(f"{name}.{query_id}: expected baseline query was removed")
+                continue
+            if base_query.get("abstained") is True and current_query.get("abstained") is not True:
+                regressed.append(f"{name}.{query_id}.abstained: True -> False")
+            for metric in ("recall_at_5", "recall_at_10", "ndcg_at_10", "mrr"):
+                base_val = base_query.get(metric)
+                cur_val = current_query.get(metric)
+                if isinstance(base_val, (int, float)) and (
+                    not isinstance(cur_val, (int, float)) or cur_val - base_val < -tolerance
+                ):
+                    regressed.append(
+                        f"{name}.{query_id}.{metric}: {base_val} -> {cur_val}"
+                    )
     return {"deltas": deltas, "regressed": regressed}

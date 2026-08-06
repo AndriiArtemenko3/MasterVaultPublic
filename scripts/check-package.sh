@@ -38,7 +38,7 @@ unzip -Z1 "$WHEEL" > "$WORK/wheel.txt"
 cat "$WORK/sdist.txt" "$WORK/wheel.txt" > "$WORK/all.txt"
 
 # Anything matching these has no business in a distribution.
-FORBIDDEN='(^|/)(\.env|\.env\..*|\.coverage|\.coverage\..*|coverage\.xml|htmlcov|\.pytest_cache|\.ruff_cache|\.mypy_cache|__pycache__|vault_workspace|_build|node_modules|\.venv)(/|$)|\.(key|pem|pyc|pyo|so|log)$|junit-.*\.xml$|BUILD_LOG\.md|MORNING_REPORT\.md'
+FORBIDDEN='(^|/)(\.env|\.env\..*|\.coverage|\.coverage\..*|coverage\.xml|htmlcov|\.pytest_cache|\.ruff_cache|\.mypy_cache|\.uv-cache|__pycache__|vault_workspace|_build|node_modules|\.venv)(/|$)|\.(key|pem|pyc|pyo|so|log)$|junit-.*\.xml$|BUILD_LOG\.md|MORNING_REPORT\.md'
 # `.env.example` is a documented, secret-free template and is meant to ship;
 # every other .env variant is not.
 ALLOWED='(^|/)\.env\.example$'
@@ -47,11 +47,18 @@ if grep -Ei "$FORBIDDEN" "$WORK/all.txt" | grep -Ev "$ALLOWED" | grep -E '.'; th
 fi
 printf '  no workspaces, caches, secrets or test output\n'
 
-# Corpus-generation inputs are repository history, not distribution content.
-if grep -nE 'datasets/larkstead/(raw|bible)/' "$WORK/all.txt"; then
-  fail "distribution contains corpus-generation inputs (raw/ or bible/)"
-fi
-printf '  no corpus-generation inputs (raw/, bible/)\n'
+# The raw corpus and its synthetic bible are intentionally in the sdist
+# because the shipped ledger and raw-QA tests require both. The package-only
+# wheel is checked separately below and carries neither.
+grep -q 'datasets/larkstead/raw/internal-admin/contract/contract-addendum-verdant-qc.md' \
+  "$WORK/sdist.txt" || fail "sdist is missing the raw corpus required by ledger tests"
+grep -q 'datasets/larkstead/bible/company.yaml' "$WORK/sdist.txt" \
+  || fail "sdist is missing the synthetic company bible required by raw-QA tests"
+grep -q 'datasets/larkstead/bible/storylines/SL1-alder-mat-defect.yaml' "$WORK/sdist.txt" \
+  || fail "sdist is missing the synthetic storylines required by raw-QA tests"
+grep -q 'datasets/larkstead/failures/historical-ingest.json' "$WORK/sdist.txt" \
+  || fail "sdist is missing immutable corpus history"
+printf '  sdist includes raw ledger and synthetic bible QA inputs\n'
 
 # The wheel is source-only. Assert on what every entry MUST look like rather
 # than on shapes a zip cannot contain -- with packages=["src/mastervault"] every
@@ -65,11 +72,18 @@ if grep -nE '^mastervault/(datasets|tests|docs|scripts)/' "$WORK/wheel.txt"; the
 fi
 printf '  wheel is package-only\n'
 
-# The Postgres schema MUST be packaged: shipping without it broke `mvault init`
-# against Postgres from an installed wheel in 0.1.x.
-grep -q 'mastervault/storage/migrations/pg/001_init.sql' "$WORK/wheel.txt" \
-  || fail "wheel is missing the Postgres schema (storage/migrations/pg/001_init.sql)"
-printf '  wheel ships the Postgres schema\n'
+# Every ordered migration MUST be packaged: omitting even one leaves clean
+# installs or upgrades dependent on the repository checkout.
+for MIGRATION in \
+  'mastervault/storage/migrations/pg/001_init.sql' \
+  'mastervault/storage/migrations/pg/002_migration_ledger.sql' \
+  'mastervault/storage/migrations/sqlite/001_init.sql' \
+  'mastervault/storage/migrations/sqlite/002_migration_ledger.sql'
+do
+  grep -q "$MIGRATION" "$WORK/wheel.txt" \
+    || fail "wheel is missing an ordered schema migration ($MIGRATION)"
+done
+printf '  wheel ships every ordered SQLite and PostgreSQL migration\n'
 
 # The prompt files are package data too; without them every contract dies.
 grep -q 'mastervault/prompts/grounded_synthesis/v1.md' "$WORK/wheel.txt" \
@@ -196,5 +210,18 @@ grep -q 'ships with the repository' "$WORK/demo.out" \
   || fail "mvault demo load did not explain where the dataset comes from"
 if grep -qi 'traceback' "$WORK/demo.out"; then fail "mvault demo load raised a traceback"; fi
 printf '  demo load fails cleanly and actionably\n'
+
+# ---------------------------------------------------------------------------
+step "extracted-sdist corpus contract"
+# ---------------------------------------------------------------------------
+EXTRACTED="$WORK/extracted"
+mkdir -p "$EXTRACTED"
+tar xzf "$REPO_ROOT/$SDIST" -C "$EXTRACTED" --strip-components=1
+(
+  cd "$EXTRACTED"
+  UV_CACHE_DIR="$WORK/uv-cache" uv sync --all-extras -q
+  UV_CACHE_DIR="$WORK/uv-cache" uv run pytest -q tests/integration/test_dataset_integrity.py
+) || fail "tests shipped in the extracted sdist cannot validate their corpus inputs"
+printf '  extracted sdist corpus-ledger suite OK\n'
 
 printf '\nPACKAGE CHECK PASSED\n'

@@ -30,7 +30,7 @@ embeddings (fastembed, ships in core dependencies) and tests that exercise
 2. Preview the plan without spending anything:
 
    ```bash
-   mvault ingest datasets/larkstead/raw/customer-support/ticket --domain customer-support --dry-run
+   uv run mvault ingest datasets/larkstead/raw/customer-support/ticket --domain customer-support --dry-run
    ```
 
    This needs no LLM key: it estimates cost from token counts and never
@@ -40,19 +40,22 @@ embeddings (fastembed, ships in core dependencies) and tests that exercise
 3. Run it for real with a key set (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`):
 
    ```bash
-   mvault ingest <path> --domain <domain> --budget 1.00
+   uv run mvault ingest <path> --domain <domain> --budget 1.00
    ```
 
    Extraction runs on the `small` model tier (`llm.model_small`). The real
-   build's four full-domain ingest runs over 352 documents cost $0.2213
-   total against `gpt-4o-mini` — budget a few cents per document, not
-   dollars.
-4. `mvault review list` to see what routed to tier 2 (batch-reviewable) or
+   build attempted 372 documents and produced 352 source notes; its recorded
+   cost summary totals $0.2213. The other 20 raw files are retained in the
+   immutable history as no-output observations of unknown cause. The current
+   corpus ledger references those observations without regenerating them. The temporary
+   run log was not committed, so do not infer a per-file cause or execution
+   provider from the snapshot.
+4. `uv run mvault review list` to see what routed to tier 2 (batch-reviewable) or
    tier 3 (new concept or contradiction, one-by-one confirm only). Nothing
    from ingest reaches the wiki layer without going through
-   `mvault review approve`.
+   `uv run mvault review approve`.
 5. If you changed anything that a golden query resolves against, re-run
-   `mvault eval` before committing; it exits 1 if any `relevant_docs` or
+   `uv run mvault eval` before committing; it exits 1 if any `relevant_docs` or
    `relevant_claims` entry in the golden set no longer resolves against the
    live corpus.
 
@@ -109,9 +112,11 @@ case needs a path the cold mock cannot reach (malformed output, a forged
 citation, a looping judge). If a case pins behaviour that is not what we would
 want, say so in `known_limitation` rather than asserting the wrong thing — the
 report prints those, and a test refuses a limitation without an explanation.
-Then run `mvault ask-eval`, and refresh the frozen baseline with
-`mvault ask-eval --json > datasets/larkstead/golden/ask_baseline.json` only
-when the new result is deliberate.
+Then run `uv run mvault ask-eval`. A baseline is an indivisible measurement
+plus its generation provenance: after a deliberate change, rerun and freeze
+the actual suite with `uv run mvault ask-eval --json --freeze
+datasets/larkstead/golden/ask_baseline.json`. Never rewrite provenance without
+rerunning the measurement.
 
 Adding a query: pick a real question, grep-confirm the answer's location (or
 its absence, for a negative), add it to `queries.yaml` with a `notes:` field
@@ -134,9 +139,10 @@ you have not personally verified against the live corpus.
   (workspaces are gitignored; if yours somehow isn't, that's a bug in
   `.gitignore`, not a green light to commit it).
 - Changes to `mastervault.toml`'s shipped defaults without a corresponding
-  test update — `llm.provider = "anthropic"` and `embedding.provider =
-  "local"` are load-bearing for the test suite's keyless-by-default
-  assumptions.
+  test update — `llm.provider = "mock"` and `embedding.provider = "local"`
+  are load-bearing for the keyless default. The mock LLM supports extractive
+  `ask`, but intentionally does not pretend to produce schema-valid real
+  ingestion output.
 - New CLI subcommands that bypass the review queue for anything landing in
   `wiki/` or `decisions/`. Tier 1 auto-apply is reserved for wikilink
   insertion against an already-confirmed alias; everything else earns a
