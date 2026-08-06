@@ -8,6 +8,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The first v0.3 document-intelligence vertical slice for clean digital PDFs:
+  full-byte SHA-256 source identity, immutable content-addressed assets,
+  deterministic schema-v1 page/block artefacts, and explicit rejection of
+  corrupt, encrypted, or wholly textless inputs.
+- A separate page-grounded PDF claim contract. Models propose a block and
+  supporting quote; MasterVault resolves authoritative pages and character
+  offsets, rejects unsupported evidence before canonical publication, and
+  preserves legacy Markdown/text ingestion unchanged.
+- Verified evidence hydration for claim search hits and
+  `mvault evidence show <claim-id> [--json]` for inspecting the exact immutable
+  asset, parser artefact, page, block, and quote behind an accepted PDF claim.
+- A deterministic two-page Larkstead clean-digital PDF fixture, manifest,
+  generator check, golden page evidence, and end-to-end coverage from PDF
+  ingestion through retrieval and CLI inspection. It is a development
+  parser-smoke fixture, not a held-out performance benchmark.
+
 - Ordered schema-v2 migrations for SQLite and PostgreSQL, with an explicit
   `schema_migrations` ledger and upgrade coverage from a representative v0.2
   schema-v1 workspace.

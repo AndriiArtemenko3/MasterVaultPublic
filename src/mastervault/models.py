@@ -15,7 +15,13 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from mastervault.document_intelligence.models import (
+    EvidenceRef,
+    ParsedDocumentRef,
+    SourceAssetRef,
+)
 
 # ---------------------------------------------------------------------------
 # Enums (closed sets — validators hard-fail outside them)
@@ -120,6 +126,7 @@ class Claim(BaseModel):
     statement: str = Field(min_length=8)
     confidence: Confidence
     affects: list[str] = Field(default_factory=list)  # wiki slugs (bare basenames)
+    evidence: list[EvidenceRef] = Field(default_factory=list)
 
     @field_validator("affects")
     @classmethod
@@ -149,7 +156,30 @@ class SourceNote(NoteBase):
     type: NoteType = NoteType.SOURCE
     source_type: SourceType
     key_claims: list[Claim] = Field(default_factory=list)
-    provenance: str | None = None  # raw-layer path this note was derived from
+    # Canonical source pointer: raw-layer path for text/Markdown, immutable
+    # workspace asset path for grounded PDFs.
+    provenance: str | None = None
+    # Legacy v0.2 extracted-text hash retained for compatibility and corpus
+    # accounting. It is not an immutable PDF byte identity.
+    provenance_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    source_asset: SourceAssetRef | None = None
+    parsed_document: ParsedDocumentRef | None = None
+
+    @model_validator(mode="after")
+    def _grounding_chain_is_consistent(self) -> SourceNote:
+        if (self.source_asset is None) != (self.parsed_document is None):
+            raise ValueError("source_asset and parsed_document must be present together")
+        if (
+            self.source_asset is not None
+            and self.parsed_document is not None
+            and self.source_asset.asset_sha256 != self.parsed_document.asset_sha256
+        ):
+            raise ValueError("source_asset and parsed_document refer to different PDF bytes")
+        if any(claim.evidence for claim in self.key_claims) and self.source_asset is None:
+            raise ValueError("grounded claims require source_asset and parsed_document references")
+        if self.source_asset is not None and any(not claim.evidence for claim in self.key_claims):
+            raise ValueError("every claim extracted from a PDF must carry grounded evidence")
+        return self
 
 
 class WikiEntry(NoteBase):
@@ -208,6 +238,7 @@ class Hit(BaseModel):
     text: str
     rel_path: str | None = None
     confidence: Confidence | None = None  # claims only
+    evidence: list[EvidenceRef] = Field(default_factory=list)  # grounded claims only
     channels: ChannelRank = Field(default_factory=ChannelRank)
     rrf_score: float = 0.0
     rerank_score: float | None = None
@@ -251,8 +282,7 @@ class ReviewItem(BaseModel):
         normalized = stripped.replace("\\", "/")
         if normalized.startswith("/") or ".." in PurePosixPath(normalized).parts:
             raise ValueError(
-                "unsafe path: must be workspace-relative without '..' segments,"
-                f" got {value!r}"
+                f"unsafe path: must be workspace-relative without '..' segments, got {value!r}"
             )
         if "\x00" in value:
             raise ValueError("must not contain a NUL byte")

@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from mastervault.core.errors import UnreadableDocument
+from mastervault.document_intelligence.parser import parse_pdf
 
 SUPPORTED_SUFFIXES: tuple[str, ...] = (".md", ".txt", ".pdf")
 
@@ -61,18 +62,4 @@ def read_raw_text(path: Path | str) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    # pypdf raises its own hierarchy plus assorted stdlib errors on malformed
-    # input; none of them is a contract this package wants to re-export.
-    from pypdf import PdfReader
-
-    try:
-        reader = PdfReader(str(path))
-        pages = [page.extract_text() or "" for page in reader.pages]
-    except UnreadableDocument:
-        raise
-    except Exception as exc:
-        raise UnreadableDocument(
-            f"{path.name}: not a readable PDF ({type(exc).__name__}: {exc}). "
-            "Re-export it, or convert it to .md/.txt before ingesting."
-        ) from exc
-    return "\n\n".join(pages).strip()
+    return parse_pdf(path).flattened_text()

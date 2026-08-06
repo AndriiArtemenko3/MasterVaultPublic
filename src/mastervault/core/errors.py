@@ -53,6 +53,14 @@ class UnreadableDocument(MasterVaultError):
     """
 
 
+class DocumentIntegrityError(MasterVaultError):
+    """An immutable source or parsed artefact no longer matches its identity."""
+
+
+class EvidenceGroundingError(MasterVaultError):
+    """A proposed or persisted evidence span cannot be resolved mechanically."""
+
+
 # Outcome name -> process exit code. CLI entrypoints exit through this table.
 EXIT_CODES: dict[str, int] = {
     "ok": 0,

@@ -734,17 +734,17 @@
   ],
   "baseline_schema_version": 2,
   "baseline_kind": "ask",
-  "generated": "2026-08-06T02:09:03+00:00",
+  "generated": "2026-08-06T13:30:12+00:00",
   "uncovered_classes": [],
   "reproducibility": {
     "schema_version": 2,
     "evaluation": "ask",
     "source": {
-      "git_sha": "34257a94fb7c135d345eb8b12e2e410c3fa657b2",
-      "git_dirty": false,
+      "git_sha": "d1729cd9631203e52763dc64916a47d5e3914390",
+      "git_dirty": true,
       "tree": {
-        "sha256": "73800c5b4172fa4633fc20fb4b26039383a3a80b7e31219bdda7cf613c26d3e5",
-        "file_count": 101
+        "sha256": "d594e69138a4c8c9c111c46b7b7ed70d2c9b066401c2911f11d30dd1b99da260",
+        "file_count": 111
       },
       "package_version": "0.2.0"
     },
@@ -779,7 +779,7 @@
     },
     "dependencies": {
       "lock_path": "uv.lock",
-      "lock_sha256": "dbbeebf70940cd50c103171ef8bfc2f2ea2e592aed70424984f34c4df8f6779b"
+      "lock_sha256": "79dfcb3e847509f68ed2fd3c139dccb77eb53dde35e8d8ac7fb15dc24f36c1c6"
     },
     "config": {
       "source": {
@@ -834,8 +834,8 @@
       }
     },
     "prompts": {
-      "sha256": "95adb79d42c64c2c7a4e3f61af568f204a41e0f3ea65edaf764ad93a04472cbf",
-      "file_count": 6,
+      "sha256": "c4bf8135a36df5e782ded5f7a56b19105bbffbe2ce60bca35061b0b5db81ae9c",
+      "file_count": 7,
       "files": [
         {
           "path": "src/mastervault/prompts/claim_extraction/v1.md",
@@ -852,6 +852,10 @@
         {
           "path": "src/mastervault/prompts/grounded_synthesis/v1.md",
           "sha256": "dbd51179962d6f460554aa0834b6407736adb6b0086ad26f757711ee1206f002"
+        },
+        {
+          "path": "src/mastervault/prompts/page_grounded_claim_extraction/v1.md",
+          "sha256": "2dd4aea7e5867da5bb44c770f3d813a8bcfc7adbb843a24ff50b59e5afcbb74f"
         },
         {
           "path": "src/mastervault/prompts/sufficiency_judge/v1.md",
@@ -931,7 +935,7 @@
         "uv run mvault init",
         "uv run mvault demo load"
       ],
-      "command": "uv run mvault ask-eval --json --freeze /tmp/mastervault-m0-baselines.zYwWfb/ask_baseline.json"
+      "command": "uv run mvault ask-eval --json --freeze datasets/larkstead/golden/ask_baseline.json"
     }
   }
 }

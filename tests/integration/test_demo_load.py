@@ -368,3 +368,18 @@ def test_cli_demo_load_real_dataset(tmp_path, monkeypatch):
     # idempotent re-run: no crash, no duplication.
     result2 = runner.invoke(app, ["demo", "load"])
     assert result2.exit_code == 0, result2.output
+
+    # Reset promises a pristine demo workspace. Raw PDF bytes and their parsed
+    # artefacts may contain sensitive post-demo ingestion data, so neither may
+    # survive that lifecycle operation.
+    asset = workspace / "assets/sha256/aa/example.pdf"
+    parsed = workspace / "parsed/sha256/aa/example.json"
+    asset.parent.mkdir(parents=True)
+    parsed.parent.mkdir(parents=True)
+    asset.write_bytes(b"post-demo source bytes")
+    parsed.write_text("{}", encoding="utf-8")
+
+    reset = runner.invoke(app, ["demo", "reset", "--yes"])
+    assert reset.exit_code == 0, reset.output
+    assert not settings.paths.assets_dir.exists()
+    assert not settings.paths.parsed_documents_dir.exists()

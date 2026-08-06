@@ -16,6 +16,7 @@ This folder is the presentation layer of MasterVault. Each module defines a smal
 | `runs.py` | `mvault runs` sub-app: default callback lists run directories (pipeline, start time, status, cost); `runs show <run-id>` prints the `summary.json`, failed units, and the budget snapshot at exhaustion. Reads `events.jsonl` through `read_events` and maps exit codes to status strings. |
 | `demo.py` | `mvault demo` sub-app over the shipped Larkstead dataset: `load` (copy `processed/` into the workspace and import the precomputed embeddings sidecar instead of recomputing vectors), `status` (compare live counts against counts derived from the shipped files), `reset` (restore pristine state), `delete` (remove the workspace tree). |
 | `evals.py` | `mvault eval`: runs the golden query set through `hybrid_search` under channel-ablation configs, prints recall@5/10, nDCG@10, and MRR per config with a per-class breakdown, and optionally diffs against a frozen `baseline.json`. Exits 1 if the golden set fails to resolve or a metric regressed beyond `--tolerance`. |
+| `evidence.py` | `mvault evidence show <claim-id>`: verifies the immutable PDF and parsed JSON, re-resolves persisted spans, and prints page/block/quote evidence or a machine-readable `--json` bundle. |
 | `__init__.py` | Empty package marker. |
 
 ## How it fits

@@ -26,6 +26,8 @@ def _workspace_dirs(settings: Settings) -> tuple:
         settings.paths.review_pending,
         settings.paths.review_archive,
         settings.paths.runs_dir,
+        settings.paths.assets_dir,
+        settings.paths.parsed_documents_dir,
     )
 
 

@@ -10,7 +10,7 @@
 > service dependency. `demo load` is offline; the local embedding model is
 > downloaded on the first command that embeds new text or a query.
 
-**Contents:** [Why this shape](#why-this-shape) · [Quickstart](#quickstart) ·
+**Contents:** [Why this shape](#why-this-shape) · [v0.3 work](#v03-in-development-page-grounded-pdf-evidence) · [Quickstart](#quickstart) ·
 [Architecture](#architecture-at-a-glance) · [The 10-minute tour](#the-10-minute-tour) ·
 [Eval numbers](#honest-eval-numbers) · [Command reference](#command-reference) ·
 [The dataset](#the-dataset) · [FAQ and troubleshooting](#faq-and-troubleshooting) ·
@@ -41,6 +41,36 @@ MasterVault treats the vault itself as the database: claims carry
 open contradictions, and a file-backed human-in-the-loop review queue means
 nothing gets merged into the shared knowledge layer without a pattern-batched
 approval step.
+
+## v0.3 in development: page-grounded PDF evidence
+
+The first v0.3 vertical slice replaces lossy PDF flattening with an auditable
+evidence spine for clean, digitally generated PDFs. MasterVault snapshots the
+exact source bytes under a full SHA-256 identity, preserves physical pages in
+a strict parser-independent representation, and accepts a PDF claim only when
+its supporting quote resolves inside a real page block. The canonical source
+note retains the immutable asset and parsed-artifact references, while search
+hydrates and revalidates the evidence without changing v0.2 ranking inputs.
+
+```text
+PDF bytes → immutable asset → page-preserving parse → grounded claim
+          → canonical Markdown → unchanged hybrid index → evidence inspection
+```
+
+After ingesting with a real LLM provider, inspect the source behind a grounded
+claim with:
+
+```bash
+uv run mvault evidence show <claim-id>
+uv run mvault evidence show <claim-id> --json
+```
+
+This is deliberately a narrow foundation, not a claim of complete document
+intelligence. The current baseline uses `pypdf`, emits one text block per page,
+and rejects scanned, textless, corrupt, and encrypted PDFs. OCR, layout-aware
+sections, table cells, bounding-box highlighting, and Docling routing are later
+measured milestones. The design and compatibility boundaries are recorded in
+[ADR 0001](docs/decisions/0001-page-grounded-pdf-substrate.md).
 
 ## Quickstart
 
@@ -342,6 +372,7 @@ Three caveats, stated plainly rather than buried in a footnote:
 | `uv run mvault wiki [show <slug>]` | List wiki entries, or render one |
 | `uv run mvault ask <question>` | Agentic multi-round retrieval, judged, grounded, cited |
 | `uv run mvault ingest <path> --domain <d>` | Raw files → source notes → indexed → concept-routed |
+| `uv run mvault evidence show <claim-id> [--json]` | Verify and display the immutable page/block evidence behind a grounded PDF claim |
 | `uv run mvault lint [--mechanical-only]` | Vault health check: mechanical always, semantic (LLM) optional |
 | `uv run mvault review list \| show \| approve \| reject \| approve-pattern \| spot-check` | Triage the human-in-the-loop queue |
 | `uv run mvault runs show <run-id>` | Inspect one pipeline run: cost, status, failed units |
@@ -404,7 +435,10 @@ that it can run from the local model cache.
 Drop `.md`, `.txt`, or `.pdf` files in a folder and run
 `uv run mvault ingest ./my-docs --domain operations` (domains: `customer-support`,
 `sales-crm`, `operations`, `internal-admin`). Use `--dry-run` first to see the
-plan and cost estimate. PDF ingestion is raw text extraction, with no OCR.
+plan and cost estimate. Clean digital PDFs retain an immutable byte identity
+and page-grounded claim evidence. The current `pypdf` baseline has no OCR,
+layout-aware section reconstruction, table-cell model, or bounding boxes;
+scanned/textless and encrypted PDFs are rejected visibly.
 
 **How do I use Postgres instead of SQLite?**
 `docker compose up -d`, then export the `DATABASE_URL` shown in the Quickstart

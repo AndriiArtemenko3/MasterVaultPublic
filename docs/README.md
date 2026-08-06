@@ -1,6 +1,6 @@
-# docs — architecture and dataset deep-dives
+# docs — architecture, dataset, and decision records
 
-The two long-form design documents that sit behind the root README's quickstart. `ARCHITECTURE.md` explains how the system actually works once you look past the CLI surface: the data model, the retrieval math, how a proposed change reaches a human, the storage schema, and the provider seams. `DATASET.md` records how the Larkstead demo corpus was built and quality-checked, including the mismatches found and fixed during that build. Neither file ships code; both point at `src/mastervault/` and `datasets/larkstead/` for the real thing.
+The long-form design documents and architecture decision records behind the root README's quickstart. `ARCHITECTURE.md` explains the existing system, `DATASET.md` records how the Larkstead corpus was built and checked, and `decisions/` captures consequential v0.3 choices together with their explicit limits.
 
 ## Files
 
@@ -8,6 +8,7 @@ The two long-form design documents that sit behind the root README's quickstart.
 |---|---|
 | `ARCHITECTURE.md` | The internals a quickstart user never sees. Covers the three-layer data model (Markdown sources → wiki/decisions → derived index), the four-channel `hybrid_search` and its RRF fusion, the agentic `mvault ask` loop with its sufficiency judge and citation gate, the file-backed `ReviewQueue` and its three routing tiers, the shared `StorageBackend` protocol over SQLite/Postgres, the two content-hash idempotency gates plus the embeddings sidecar, and the embedding/LLM/reranker provider seams with their keyless mock defaults. |
 | `DATASET.md` | How Larkstead Goods Co. was made and validated. Documents the `company.yaml` bible as single source of truth, the dated-policy-history mechanism that generates contradictions, the five interlocking storylines versus the four semantic-lint-confirmed contradictions that actually shipped, the mechanical checker's ten checks, the four rubric-judge passes, the `banned_strings` trademark denylist, and how the processed layer was reproduced from four `mvault ingest` runs plus hand curation. |
+| `decisions/0001-page-grounded-pdf-substrate.md` | Why the first v0.3 slice establishes immutable byte identity and exact page/block evidence with a deliberately coarse `pypdf` baseline before Docling, OCR, tables, or LangGraph. |
 
 ## How it fits
 
