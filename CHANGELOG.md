@@ -23,6 +23,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   generator check, golden page evidence, and end-to-end coverage from PDF
   ingestion through retrieval and CLI inspection. It is a development
   parser-smoke fixture, not a held-out performance benchmark.
+- A bounded, family-separated Larkstead layout benchmark covering 6 semantic
+  families and 24 deterministic PDFs, with runtime/golden isolation, separate
+  semantic/render hashes, and an evaluator-only SL2 temporal-impact seed. This
+  is an evaluation contract and implementation foundation, not a claim of
+  measured parser or change-control performance.
 
 - Ordered schema-v2 migrations for SQLite and PostgreSQL, with an explicit
   `schema_migrations` ledger and upgrade coverage from a representative v0.2
