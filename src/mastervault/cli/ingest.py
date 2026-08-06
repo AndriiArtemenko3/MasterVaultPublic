@@ -82,8 +82,14 @@ def ingest_cmd(
     if outcome.summary.get("dry_run"):
         typer.echo(f"plan: {outcome.run_id}")
         typer.echo(f"  units planned:      {outcome.summary['units_planned']}")
+        typer.echo(f"  unreadable inputs:  {outcome.summary.get('unreadable_inputs', 0)}")
         typer.echo(f"  estimated cost:     ${outcome.summary['estimated_cost_usd']:.4f}")
         typer.echo(f"  budget cap:         ${outcome.summary['budget_cap_usd']:.4f}")
+        for item in outcome.summary.get("unreadable", []):
+            typer.echo(
+                f"error: skipped unreadable input {item['src_path']}: {item['error']}",
+                err=True,
+            )
         raise typer.Exit(outcome.exit_code)
 
     table = Table(title=f"ingest report ({outcome.run_id})")
@@ -98,12 +104,18 @@ def ingest_cmd(
         "tier3_enqueued",
         "new_concepts_drafted",
         "auto_approve_conflicts",
+        "unreadable_inputs",
         "docs_upserted",
         "records_embedded",
     ):
         table.add_row(key.replace("_", " "), str(outcome.summary.get(key, 0)))
     table.add_row("cost usd", f"${outcome.summary.get('cost_usd', 0.0):.4f}")
     _console.print(table)
+    for item in outcome.summary.get("unreadable", []):
+        typer.echo(
+            f"error: skipped unreadable input {item['src_path']}: {item['error']}",
+            err=True,
+        )
     if outcome.summary.get("tier2_enqueued") or outcome.summary.get("tier3_enqueued"):
         typer.echo("next: mvault review list")
     raise typer.Exit(outcome.exit_code)

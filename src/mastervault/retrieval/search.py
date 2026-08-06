@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import TypeVar
 
 from pydantic import BaseModel, Field
 
 from mastervault.config import Settings
+from mastervault.evidence import evidence_by_claim
 from mastervault.models import ChannelRank, Confidence, Domain, Hit, RecordType
 from mastervault.providers import Candidate, EmbeddingProvider, Reranker
 from mastervault.retrieval.channels import (
@@ -89,14 +91,18 @@ def _doc_hit(doc_id: str, backend: StorageBackend) -> Hit | None:
     )
 
 
-def _hydrate(fused_ids: list[str], backend: StorageBackend) -> dict[str, Hit]:
+def _hydrate(
+    fused_ids: list[str], backend: StorageBackend, workspace: Path | str
+) -> dict[str, Hit]:
     """Hydrate fused ids into Hit models. Ids that no longer resolve are dropped."""
     claim_ids = [i.removeprefix("claim:") for i in fused_ids if i.startswith("claim:")]
     chunk_ids = [i for i in fused_ids if i.startswith("chunk:")]
     doc_ids = [i for i in fused_ids if not i.startswith(("claim:", "chunk:"))]
 
     hits: dict[str, Hit] = {}
-    for claim in backend.get_claims(claim_ids):
+    hydrated_claims = backend.get_claims(claim_ids)
+    evidence = evidence_by_claim(hydrated_claims, backend, workspace)
+    for claim in hydrated_claims:
         hits[f"claim:{claim.claim_id}"] = Hit(
             record_id=f"claim:{claim.claim_id}",
             record_type=RecordType.CLAIM,
@@ -105,6 +111,7 @@ def _hydrate(fused_ids: list[str], backend: StorageBackend) -> dict[str, Hit]:
             text=claim.statement,
             rel_path=claim.rel_path,
             confidence=Confidence(claim.confidence),
+            evidence=evidence.get(claim.claim_id, []),
         )
     for chunk in backend.get_chunks(chunk_ids):
         hits[chunk.chunk_id] = Hit(
@@ -206,7 +213,7 @@ def hybrid_search(
         name: {record_id: rank for rank, record_id in enumerate(ids, start=1)}
         for name, ids in channel_lists.items()
     }
-    hydrated = _hydrate(fused_ids, backend)
+    hydrated = _hydrate(fused_ids, backend, settings.paths.workspace)
     hits: list[Hit] = []
     for record_id in fused_ids:
         hit = hydrated.get(record_id)

@@ -288,9 +288,10 @@ def reset_cmd(
     """Restore the demo workspace to its pristine shipped state.
 
     Wipes the index, discards any local edits to the copied domain files,
-    clears the review queue (pending + archive), and re-imports the demo
-    dataset from scratch. Idempotent: safe to run again on an already-
-    pristine workspace, or on one that was never loaded."""
+    clears the review queue and any immutable PDF/parse artefacts created by
+    later ingestion, then re-imports the demo dataset from scratch. Idempotent:
+    safe to run again on an already-pristine workspace, or on one that was
+    never loaded."""
     if not DATASET_DIR.is_dir():
         typer.echo(f"error: dataset not found at {DATASET_DIR}", err=True)
         raise typer.Exit(code=1)
@@ -301,16 +302,22 @@ def reset_cmd(
     if not yes:
         typer.confirm(
             f"Wipe the index at {settings.paths.workspace} and restore the pristine "
-            "demo dataset? Local edits and review decisions will be discarded.",
+            "demo dataset? Local edits, review decisions, and ingested PDF assets "
+            "will be discarded.",
             abort=True,
         )
 
     backend, provider = _init_backend(settings)
     backend.wipe()
 
-    for review_dir in (settings.paths.review_pending, settings.paths.review_archive):
-        if review_dir.exists():
-            shutil.rmtree(review_dir)
+    for generated_dir in (
+        settings.paths.review_pending,
+        settings.paths.review_archive,
+        settings.paths.assets_dir,
+        settings.paths.parsed_documents_dir,
+    ):
+        if generated_dir.exists():
+            shutil.rmtree(generated_dir)
 
     try:
         report = load_demo_dataset(

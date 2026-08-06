@@ -58,6 +58,8 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "types-pyyaml",
+    # Reproducible generation of the committed Larkstead PDF fixtures.
+    "reportlab==4.4.3",
 ]
 
 [project.scripts]

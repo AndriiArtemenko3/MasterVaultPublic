@@ -92,6 +92,14 @@ class PathsCfg(BaseModel):
         return self.workspace / "runs"
 
     @property
+    def assets_dir(self) -> Path:
+        return self.workspace / "assets"
+
+    @property
+    def parsed_documents_dir(self) -> Path:
+        return self.workspace / "parsed"
+
+    @property
     def sqlite_path(self) -> Path:
         return self.workspace / "index.db"
 

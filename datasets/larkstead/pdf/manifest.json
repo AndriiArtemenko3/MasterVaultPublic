@@ -1,0 +1,83 @@
+{
+  "dataset": "larkstead",
+  "description": "Deterministic PDF renditions with page-level ground truth for document intelligence evaluation.",
+  "documents": [
+    {
+      "document_family": "returns-policy",
+      "document_id": "sl2-policy-returns-v2",
+      "encrypted": false,
+      "family_id": "SL2-refund-window-change",
+      "golden_evidence": [
+        {
+          "block_id": "page-0001-block-0001",
+          "evidence_id": "sl2-returns-v2-return-window",
+          "page": 1,
+          "section": "1. Return window",
+          "text": "Customers may return any item within 45 days of the delivery date."
+        },
+        {
+          "block_id": "page-0002-block-0001",
+          "evidence_id": "sl2-returns-v2-refund-timing",
+          "page": 2,
+          "section": "5. Refund timing",
+          "text": "Refunds go to the original payment method within 5 business days of warehouse receipt."
+        },
+        {
+          "block_id": "page-0002-block-0001",
+          "evidence_id": "sl2-returns-v2-supersession",
+          "page": 2,
+          "section": "Change note",
+          "text": "This version makes 45 days permanent policy."
+        }
+      ],
+      "layout_features": [
+        "digital-text",
+        "single-column",
+        "metadata-table",
+        "repeated-header",
+        "page-footer"
+      ],
+      "license": "CC-BY-4.0",
+      "media_type": "application/pdf",
+      "native_text": true,
+      "page_count": 2,
+      "page_size_points": [
+        595.2756,
+        841.8898
+      ],
+      "pages": [
+        {
+          "block_id": "page-0001-block-0001",
+          "block_type": "page_text",
+          "normalized_text_sha256": "35d770a30a04186a8bbfe63aec66cb48c65acd06c5ebef102cad68cc711f5590",
+          "page": 1
+        },
+        {
+          "block_id": "page-0002-block-0001",
+          "block_type": "page_text",
+          "normalized_text_sha256": "93d80cfeccfc17d2838ab82266767736400245ed41ed86e06d6640a98621673c",
+          "page": 2
+        }
+      ],
+      "pdf_bytes": 5172,
+      "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-clean-digital.pdf",
+      "pdf_sha256": "d12dc2de2b5a9fff9bba869c80cec305e5fc3744a1559302c3bbadf147e4332e",
+      "role": "parser-smoke",
+      "source_bytes": 1996,
+      "source_path": "datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md",
+      "source_sha256": "d9ee838873469234faa0e5e435ab61cfda1b1cff32daf7d792f7b1e8d673bb6d",
+      "split": "development",
+      "storyline": "SL2",
+      "text_normalization": "NFKC; CRLF/CR to LF; strip line edges; discard blank lines",
+      "variant": "clean-digital"
+    }
+  ],
+  "generator": {
+    "deterministic_pdf": true,
+    "path": "datasets/larkstead/qa/generate_pdf_fixtures.py",
+    "render_profile": "clean-digital-a4-v1",
+    "reportlab_version": "4.4.3",
+    "sha256": "bff31ca20bd993315b9ee89cf0b2184d6b0b33d3649c41582200aa0e7b7595d7"
+  },
+  "schema_version": 1
+}

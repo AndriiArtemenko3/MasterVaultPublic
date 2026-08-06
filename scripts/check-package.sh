@@ -58,7 +58,13 @@ grep -q 'datasets/larkstead/bible/storylines/SL1-alder-mat-defect.yaml' "$WORK/s
   || fail "sdist is missing the synthetic storylines required by raw-QA tests"
 grep -q 'datasets/larkstead/failures/historical-ingest.json' "$WORK/sdist.txt" \
   || fail "sdist is missing immutable corpus history"
-printf '  sdist includes raw ledger and synthetic bible QA inputs\n'
+grep -q 'datasets/larkstead/pdf/sl2-policy-returns-v2-clean-digital.pdf' "$WORK/sdist.txt" \
+  || fail "sdist is missing the deterministic PDF fixture"
+grep -q 'datasets/larkstead/pdf/manifest.json' "$WORK/sdist.txt" \
+  || fail "sdist is missing the PDF fixture manifest"
+grep -q 'datasets/larkstead/qa/generate_pdf_fixtures.py' "$WORK/sdist.txt" \
+  || fail "sdist is missing the PDF fixture generator"
+printf '  sdist includes raw ledger, synthetic bible and PDF QA inputs\n'
 
 # The wheel is source-only. Assert on what every entry MUST look like rather
 # than on shapes a zip cannot contain -- with packages=["src/mastervault"] every
@@ -88,6 +94,8 @@ printf '  wheel ships every ordered SQLite and PostgreSQL migration\n'
 # The prompt files are package data too; without them every contract dies.
 grep -q 'mastervault/prompts/grounded_synthesis/v1.md' "$WORK/wheel.txt" \
   || fail "wheel is missing the prompt files"
+grep -q 'mastervault/prompts/page_grounded_claim_extraction/v1.md' "$WORK/wheel.txt" \
+  || fail "wheel is missing the page-grounded PDF extraction prompt"
 printf '  wheel ships the prompt files\n'
 
 # No absolute developer paths baked into the metadata.
@@ -126,6 +134,7 @@ unset DATABASE_URL
 # grep -q exits on its first match, the writer takes SIGPIPE, and the pipeline
 # reports failure for a command that actually succeeded. Capture, then assert.
 "$MV" --help > "$WORK/help.out" || fail "mvault --help"
+"$MV" evidence --help > "$WORK/evidence-help.out" || fail "mvault evidence --help"
 "$MV" version > "$WORK/version.out" || fail "mvault version"
 # Assert the ACTUAL version, read from pyproject.toml -- `grep 'mastervault '`
 # passes on any version, including a stale one, which is exactly the mistake a
@@ -134,7 +143,7 @@ EXPECTED_VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$REPO_ROOT/pyproject.to
 [ -n "$EXPECTED_VERSION" ] || fail "could not read the version out of pyproject.toml"
 grep -qx "mastervault $EXPECTED_VERSION" "$WORK/version.out" \
   || fail "installed wheel reports $(cat "$WORK/version.out"), pyproject says $EXPECTED_VERSION"
-printf '  --help and version OK (%s)\n' "$EXPECTED_VERSION"
+printf '  --help, evidence --help and version OK (%s)\n' "$EXPECTED_VERSION"
 
 "$MV" init > /dev/null || fail "mvault init"
 printf '  init OK\n'
@@ -220,7 +229,9 @@ tar xzf "$REPO_ROOT/$SDIST" -C "$EXTRACTED" --strip-components=1
 (
   cd "$EXTRACTED"
   UV_CACHE_DIR="$WORK/uv-cache" uv sync --all-extras -q
-  UV_CACHE_DIR="$WORK/uv-cache" uv run pytest -q tests/integration/test_dataset_integrity.py
+  UV_CACHE_DIR="$WORK/uv-cache" uv run pytest -q \
+    tests/integration/test_dataset_integrity.py \
+    tests/unit/datasets/test_pdf_fixtures.py
 ) || fail "tests shipped in the extracted sdist cannot validate their corpus inputs"
 printf '  extracted sdist corpus-ledger suite OK\n'
 

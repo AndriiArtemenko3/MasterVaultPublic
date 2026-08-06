@@ -14,7 +14,14 @@ import re
 from dataclasses import dataclass, field
 
 from mastervault.contracts.claims import ClaimCandidate, ClaimExtractionContract
+from mastervault.contracts.page_grounded_claims import (
+    PageGroundedClaimCandidate,
+    PageGroundedClaimExtractionContract,
+)
 from mastervault.core.budget import BudgetLedger
+from mastervault.core.errors import EvidenceGroundingError
+from mastervault.document_intelligence.grounding import resolve_evidence
+from mastervault.document_intelligence.models import ParsedDocument
 from mastervault.models import Claim, SourceType
 from mastervault.prompts.untrusted import fence
 from mastervault.providers.llm import LLMProvider
@@ -77,6 +84,15 @@ class ExtractResult:
     hard_fails: list[str] = field(default_factory=list)
 
 
+@dataclass
+class PageGroundedExtractResult:
+    ok: bool
+    claims: list[Claim] = field(default_factory=list)
+    candidates: list[PageGroundedClaimCandidate] = field(default_factory=list)
+    cost_usd: float = 0.0
+    hard_fails: list[str] = field(default_factory=list)
+
+
 def extract_claims(
     llm: LLMProvider,
     *,
@@ -119,4 +135,64 @@ def extract_claims(
     ]
     return ExtractResult(
         ok=True, claims=claims, candidates=list(result.parsed.claims), cost_usd=result.cost_usd
+    )
+
+
+def extract_page_grounded_claims(
+    llm: LLMProvider,
+    *,
+    unit_slug: str,
+    title: str,
+    source_type: SourceType,
+    domain: str,
+    document: ParsedDocument,
+    max_claims: int,
+    ledger: BudgetLedger | None = None,
+    emit=None,
+) -> PageGroundedExtractResult:
+    """Extract PDF claims and resolve every proposed quote before returning."""
+    contract = PageGroundedClaimExtractionContract()
+    result = contract.dispatch(
+        llm,
+        {
+            "title": title,
+            "source_type": source_type.value,
+            "domain": domain,
+            "document_blocks": fence(document.prompt_text(), "PDF_BLOCKS"),
+        },
+        {"max_claims": max_claims, "document": document},
+        ledger=ledger,
+        emit=emit,
+    )
+    if not result.ok or result.parsed is None:
+        return PageGroundedExtractResult(
+            ok=False,
+            cost_usd=result.cost_usd,
+            hard_fails=result.hard_fails or ["no output"],
+        )
+
+    claims: list[Claim] = []
+    try:
+        for idx, candidate in enumerate(result.parsed.claims, start=1):
+            claims.append(
+                Claim(
+                    id=f"{unit_slug}-{idx:02d}",
+                    statement=candidate.statement,
+                    confidence=candidate.confidence,
+                    affects=list(candidate.affects_candidates),
+                    evidence=resolve_evidence(document, candidate.evidence),
+                )
+            )
+    except EvidenceGroundingError as exc:
+        return PageGroundedExtractResult(
+            ok=False,
+            candidates=list(result.parsed.claims),
+            cost_usd=result.cost_usd,
+            hard_fails=[str(exc)],
+        )
+    return PageGroundedExtractResult(
+        ok=True,
+        claims=claims,
+        candidates=list(result.parsed.claims),
+        cost_usd=result.cost_usd,
     )

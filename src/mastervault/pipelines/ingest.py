@@ -22,27 +22,51 @@ every currently-completed unit rather than tracking its own resume state.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from mastervault.config import Settings
 from mastervault.core.errors import (
     EXIT_CODES,
     BudgetExceeded,
+    DocumentIntegrityError,
+    EvidenceGroundingError,
     ResumeConflict,
     UnreadableDocument,
 )
 from mastervault.core.events import Clock, Event, EventName, utc_now
 from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.core.runctx import RunContext
+from mastervault.document_intelligence import (
+    PypdfParser,
+    load_parsed_document,
+    load_pdf_source,
+    parsed_document_sha256,
+    store_parsed_document,
+    store_source_asset,
+    validate_resolved_evidence,
+    verify_source_asset,
+)
 from mastervault.ingest.affects import existing_wiki_slugs, reconcile_affects
 from mastervault.ingest.concept_match import MatchResult, match_claim
 from mastervault.ingest.convert import discover_units, read_raw_text
 from mastervault.ingest.corpus_check import adjudicate
-from mastervault.ingest.extract import extract_claims, guess_source_type, summary_sentences
+from mastervault.ingest.extract import (
+    ExtractResult,
+    PageGroundedExtractResult,
+    extract_claims,
+    extract_page_grounded_claims,
+    guess_source_type,
+    summary_sentences,
+)
 from mastervault.ingest.linker import insert_wikilink
+from mastervault.ingest.validate import Report as ValidationReport
 from mastervault.ingest.validate import validate_source_note
 from mastervault.ingest.wiki_draft import draft_extend, draft_new_entry
 from mastervault.models import (
@@ -113,20 +137,70 @@ def _existing_provenance_hashes(vault_dir: Path) -> set[str]:
     return hashes
 
 
+def _existing_asset_hashes(vault_dir: Path, workspace: Path) -> set[str]:
+    """Full PDF hashes whose complete canonical evidence chain still verifies."""
+    hashes: set[str] = set()
+    if not vault_dir.is_dir():
+        return hashes
+    for path in vault_dir.rglob("*.md"):
+        try:
+            data, _ = parse_frontmatter(path.read_text(encoding="utf-8"))
+        except (FrontmatterError, OSError, UnicodeDecodeError):
+            continue
+        if not isinstance(data.get("source_asset"), dict):
+            continue
+        try:
+            note = SourceNote.model_validate(data)
+            if note.source_asset is None or note.parsed_document is None:
+                continue
+            verify_source_asset(note.source_asset, workspace)
+            document = load_parsed_document(note.parsed_document, workspace)
+            for claim in note.key_claims:
+                validate_resolved_evidence(document, claim.evidence)
+        except (
+            ValidationError,
+            DocumentIntegrityError,
+            EvidenceGroundingError,
+            PathBoundaryError,
+        ):
+            # Do not treat a broken chain as a valid duplicate. Reingestion can
+            # repair a missing artefact or fail visibly on immutable tampering.
+            continue
+        hashes.add(note.source_asset.asset_sha256)
+    return hashes
+
+
 def _render_source_body(title: str, raw_text: str) -> str:
     summary = summary_sentences(raw_text, 2) or "(no summary available)"
     return f"# {title}\n\n## Summary\n\n{summary}\n\n## Content\n\n{raw_text.strip()}\n"
 
 
-def _write_source_note(path: Path, model: SourceNote, body: str, provenance_hash: str) -> None:
-    """Like `vaultfs.notes.write_note`, plus one extra dedupe-only frontmatter key."""
+def _write_source_note(path: Path, model: SourceNote, body: str) -> None:
+    """Render a source note, including its typed legacy dedupe hash."""
     data = model.model_dump(mode="json", exclude_none=True)
-    data["provenance_hash"] = provenance_hash
     yaml_str = serialize_frontmatter(data)
     normalized_body = body.strip("\n")
     text = join_frontmatter(yaml_str, f"\n{normalized_body}\n" if normalized_body else "")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _write_validated_source_note(
+    path: Path,
+    model: SourceNote,
+    body: str,
+    *,
+    settings: Settings,
+) -> ValidationReport:
+    """Validate a same-named temporary note before atomically publishing it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".mvault-note-", dir=path.parent) as tmp_dir:
+        candidate = Path(tmp_dir) / path.name
+        _write_source_note(candidate, model, body)
+        report = validate_source_note(candidate, fix=True, settings=settings)
+        if report.status != "hard_fail":
+            os.replace(candidate, path)
+        return report
 
 
 def _estimate_plan_cost(units: list[dict[str, Any]], settings: Settings) -> float:
@@ -528,6 +602,7 @@ def run_ingest(
     runs_dir = Path(settings.paths.runs_dir)
     review_queue = review_queue or ReviewQueue.from_settings(settings)
     cap = budget_usd if budget_usd is not None else settings.budgets.ingest
+    pdf_parser = PypdfParser()
 
     try:
         if resume_run_id is not None:
@@ -546,6 +621,7 @@ def run_ingest(
     if resume_run_id is None:
         files = discover_units(path)
         existing_hashes = _existing_provenance_hashes(vault_dir)
+        seen_asset_hashes = _existing_asset_hashes(vault_dir, settings.paths.workspace)
         planned_units: list[dict[str, Any]] = []
         unreadable: list[dict[str, str]] = []
         for f in files:
@@ -553,7 +629,14 @@ def run_ingest(
             # plan. It is recorded, reported, and excluded; every readable file
             # still ingests.
             try:
-                raw = read_raw_text(f)
+                if f.suffix.lower() == ".pdf":
+                    pdf_source = load_pdf_source(f)
+                    parsed_document = pdf_parser.parse(pdf_source)
+                    raw = parsed_document.flattened_text()
+                else:
+                    pdf_source = None
+                    parsed_document = None
+                    raw = read_raw_text(f)
             except UnreadableDocument as exc:
                 unreadable.append({"src_path": str(f), "error": str(exc)})
                 ctx.emit(
@@ -564,16 +647,29 @@ def run_ingest(
                 )
                 continue
             sha = content_hash(raw)
-            if sha in existing_hashes:
+            unit = {
+                "unit_id": _rel_unit_id(path, f),
+                "src_path": str(f),
+                "sha": sha,
+                "est_tokens": estimate_tokens(raw),
+            }
+            if pdf_source is not None and parsed_document is not None:
+                if pdf_source.asset_sha256 in seen_asset_hashes:
+                    continue
+                seen_asset_hashes.add(pdf_source.asset_sha256)
+                unit.update(
+                    {
+                        "source_kind": "pdf",
+                        "asset_sha256": pdf_source.asset_sha256,
+                        "parsed_document_sha256": parsed_document_sha256(parsed_document),
+                        "parser": parsed_document.parser,
+                        "parser_version": parsed_document.parser_version,
+                        "parser_profile": parsed_document.parser_profile,
+                    }
+                )
+            elif sha in existing_hashes:
                 continue
-            planned_units.append(
-                {
-                    "unit_id": _rel_unit_id(path, f),
-                    "src_path": str(f),
-                    "sha": sha,
-                    "est_tokens": estimate_tokens(raw),
-                }
-            )
+            planned_units.append(unit)
         plan = {
             "args": {
                 "path": str(path),
@@ -596,15 +692,20 @@ def run_ingest(
     units: list[dict[str, Any]] = plan.get("units") or []
 
     if dry_run:
+        unreadable_inputs = list(plan.get("unreadable") or [])
+        exit_code = EXIT_CODES["completed-with-failures"] if unreadable_inputs else EXIT_CODES["ok"]
         summary = {
             "run_id": ctx.run_id,
             "dry_run": True,
             "units_planned": len(units),
+            "unreadable_inputs": len(unreadable_inputs),
+            "unreadable": unreadable_inputs,
             "estimated_cost_usd": round(_estimate_plan_cost(units, settings), 4),
             "budget_cap_usd": cap,
+            "exit_code": exit_code,
         }
         ctx.write_summary(summary)
-        return IngestOutcome(EXIT_CODES["ok"], ctx.run_id, ctx.run_dir, summary)
+        return IngestOutcome(exit_code, ctx.run_id, ctx.run_dir, summary)
 
     pending = _pending_units(units, ctx.completed_units)
 
@@ -621,7 +722,38 @@ def run_ingest(
                     EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
                 )
             try:
-                current_sha = content_hash(read_raw_text(src))
+                if u.get("source_kind") == "pdf":
+                    source = load_pdf_source(src)
+                    document = pdf_parser.parse(source)
+                    current_sha = content_hash(document.flattened_text())
+                    if source.asset_sha256 != u.get("asset_sha256"):
+                        reason = (
+                            f"unit {u['unit_id']}: source PDF bytes changed since the plan "
+                            f"was frozen (expected {u.get('asset_sha256')}, now "
+                            f"{source.asset_sha256})"
+                        )
+                        ctx.write_summary({"error": reason})
+                        return IngestOutcome(
+                            EXIT_CODES["resume-conflict"],
+                            ctx.run_id,
+                            ctx.run_dir,
+                            {"error": reason},
+                        )
+                    current_parsed_sha = parsed_document_sha256(document)
+                    if current_parsed_sha != u.get("parsed_document_sha256"):
+                        reason = (
+                            f"unit {u['unit_id']}: parsed PDF artefact changed since the plan "
+                            "was frozen; start a new ingest run"
+                        )
+                        ctx.write_summary({"error": reason})
+                        return IngestOutcome(
+                            EXIT_CODES["resume-conflict"],
+                            ctx.run_id,
+                            ctx.run_dir,
+                            {"error": reason},
+                        )
+                else:
+                    current_sha = content_hash(read_raw_text(src))
             except UnreadableDocument as exc:
                 # A source that became unreadable since the freeze is the same
                 # class of problem as one that vanished: the plan can no longer
@@ -642,7 +774,8 @@ def run_ingest(
                 )
 
     max_claims = settings.ingestion.max_claims_per_doc
-    any_hard_fail = False
+    unreadable_inputs = list(plan.get("unreadable") or [])
+    any_hard_fail = bool(unreadable_inputs)
     budget_exhausted = False
     # ctx.completed_units only reflects prior invocations (populated at resume
     # time from disk) — it never live-updates from this invocation's own
@@ -652,9 +785,25 @@ def run_ingest(
     for idx, u in enumerate(pending):
         unit_id = u["unit_id"]
         src = Path(u["src_path"])
+        pdf_source = None
+        parsed_document = None
         try:
-            raw_text = read_raw_text(src)
-        except (OSError, UnreadableDocument) as exc:
+            if u.get("source_kind") == "pdf":
+                pdf_source = load_pdf_source(src)
+                if pdf_source.asset_sha256 != u.get("asset_sha256"):
+                    raise DocumentIntegrityError(
+                        "source PDF bytes changed after the plan was frozen "
+                        f"(expected {u.get('asset_sha256')}, found {pdf_source.asset_sha256})"
+                    )
+                parsed_document = pdf_parser.parse(pdf_source)
+                if parsed_document_sha256(parsed_document) != u.get("parsed_document_sha256"):
+                    raise DocumentIntegrityError(
+                        "parsed PDF output changed after the plan was frozen"
+                    )
+                raw_text = parsed_document.flattened_text()
+            else:
+                raw_text = read_raw_text(src)
+        except (OSError, UnreadableDocument, DocumentIntegrityError) as exc:
             # read_raw_text funnels parser and codec failures into
             # UnreadableDocument, which is NOT an OSError; a source that was
             # readable at plan time and is not now (deleted, unmounted,
@@ -670,18 +819,32 @@ def run_ingest(
         source_type = guess_source_type(src.name, raw_text)
         title = _title_from_stem(src.stem)
 
+        extraction: ExtractResult | PageGroundedExtractResult
         try:
-            extraction = extract_claims(
-                llm,
-                unit_slug=unit_id,
-                title=title,
-                source_type=source_type,
-                domain=domain.value,
-                body=raw_text,
-                max_claims=max_claims,
-                ledger=ctx.ledger,
-                emit=_emit_adapter(ctx, "extract", unit_id),
-            )
+            if parsed_document is not None:
+                extraction = extract_page_grounded_claims(
+                    llm,
+                    unit_slug=unit_id,
+                    title=title,
+                    source_type=source_type,
+                    domain=domain.value,
+                    document=parsed_document,
+                    max_claims=max_claims,
+                    ledger=ctx.ledger,
+                    emit=_emit_adapter(ctx, "extract", unit_id),
+                )
+            else:
+                extraction = extract_claims(
+                    llm,
+                    unit_slug=unit_id,
+                    title=title,
+                    source_type=source_type,
+                    domain=domain.value,
+                    body=raw_text,
+                    max_claims=max_claims,
+                    ledger=ctx.ledger,
+                    emit=_emit_adapter(ctx, "extract", unit_id),
+                )
         except BudgetExceeded:
             for rest in pending[idx:]:
                 ctx.emit(
@@ -706,6 +869,27 @@ def run_ingest(
                 break
             continue
 
+        source_asset = None
+        parsed_document_ref = None
+        if pdf_source is not None and parsed_document is not None:
+            try:
+                source_asset = store_source_asset(pdf_source, settings.paths.workspace)
+                verify_source_asset(source_asset, settings.paths.workspace)
+                parsed_document_ref = store_parsed_document(
+                    parsed_document, settings.paths.workspace
+                )
+            except DocumentIntegrityError as exc:
+                ctx.emit(
+                    EventName.UNIT_FAILED,
+                    stage="write",
+                    unit=unit_id,
+                    payload={"reason": str(exc)},
+                )
+                any_hard_fail = True
+                if fail_fast:
+                    break
+                continue
+
         note_path = vault_dir / domain.value / "sources" / f"{unit_id}.md"
         model = SourceNote(
             domain=domain,
@@ -716,13 +900,17 @@ def run_ingest(
             updated=tick().date(),
             source_type=source_type,
             key_claims=extraction.claims,
-            provenance=str(src),
+            provenance=source_asset.stored_path if source_asset is not None else str(src),
+            provenance_hash=u["sha"],
+            source_asset=source_asset,
+            parsed_document=parsed_document_ref,
         )
-        _write_source_note(
-            note_path, model, _render_source_body(title, raw_text), provenance_hash=u["sha"]
+        report = _write_validated_source_note(
+            note_path,
+            model,
+            _render_source_body(title, raw_text),
+            settings=settings,
         )
-
-        report = validate_source_note(note_path, fix=True, settings=settings)
         if report.status == "hard_fail":
             ctx.emit(
                 EventName.UNIT_FAILED,
@@ -926,7 +1114,8 @@ def run_ingest(
         "new_concepts_drafted": counters["new_concepts"],
         "affects_dropped": counters["affects_dropped"],
         "auto_approve_conflicts": counters["auto_approve_conflicts"],
-        "unreadable_inputs": len(plan.get("unreadable") or []),
+        "unreadable_inputs": len(unreadable_inputs),
+        "unreadable": unreadable_inputs,
         "docs_upserted": sync_report.docs_upserted,
         "records_embedded": sync_report.records_embedded,
         "cost_usd": round(ctx.ledger.spent, 6),

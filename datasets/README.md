@@ -7,6 +7,7 @@ Top-level home for the datasets that MasterVault ships with. Today it holds one 
 | File | Responsibility |
 |---|---|
 | [larkstead/raw/](larkstead/raw) | 372 in-world Markdown source documents across four domains (customer-support, sales-crm, operations, internal-admin); the corpus's source of truth before ingestion. |
+| [larkstead/pdf/](larkstead/pdf) | Deterministic PDF renditions of selected raw documents, with byte hashes and page-level evidence ground truth in `manifest.json`. |
 | [larkstead/processed/](larkstead/processed) | Curated successful output of `mvault ingest`: 352 source notes, 3,412 claims, 43 wiki concepts, 10 decisions, 4 strategy notes, plus a 4-item review queue (one price-match pair and three return-window variants). See its [MANIFEST.md](larkstead/processed/MANIFEST.md). |
 | [larkstead/embeddings/](larkstead/embeddings) | Precomputed keyless embeddings sidecar: 5,352 L2-normalized bge-small-en-v1.5 vectors (384d) in `embeddings.jsonl.gz`, with a [manifest.json](larkstead/embeddings/manifest.json) recording model, count, and record-type breakdown. |
 | [larkstead/golden/](larkstead/golden) | 52 graded retrieval queries (`queries.yaml`) across five difficulty classes, a `resolved.yaml` doc/claim resolution, and a `baseline.json` of recorded eval scores. |
@@ -21,7 +22,10 @@ The `raw/` documents are the input a fresh `mvault ingest` run consumes; `proces
 
 ## Key concepts / entry points
 
-- **Two-layer split** — `raw/` is human-authored source; `processed/` is the ingestion result. Regenerating `processed/` from `raw/` is the pipeline's end-to-end test.
+- **Canonical source and controlled variants** — `raw/` is the semantic source;
+  `pdf/` contains deterministic renditions for document-intelligence tests; and
+  `processed/` is the ingestion result. PDF variants never become an
+  independent source of company facts.
 - **Keyless sidecar** — `embeddings/embeddings.jsonl.gz` ships vectors so retrieval runs offline; see the count and model in [larkstead/embeddings/manifest.json:1](larkstead/embeddings/manifest.json).
 - **Golden eval set** — 52 queries with verified relevant docs/claims; the header of [larkstead/golden/queries.yaml:1](larkstead/golden/queries.yaml) documents the classes and the 100%-resolve rule.
 - **Everything fictional** — Larkstead Goods Co. and every entity in it are invented; `bible/company.yaml` holds the `banned_strings` denylist that `qa/mechanical_check.py` enforces.

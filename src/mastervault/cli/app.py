@@ -33,6 +33,7 @@ lint_app = _optional_typer("mastervault.cli.lint", "lint_app")
 runs_app = _optional_typer("mastervault.cli.runs", "runs_app")
 demo_app = _optional_typer("mastervault.cli.demo", "demo_app")
 eval_app = _optional_typer("mastervault.cli.evals", "eval_app")
+evidence_app = _optional_typer("mastervault.cli.evidence", "evidence_app")
 
 app = typer.Typer(
     name="mvault",
@@ -78,6 +79,9 @@ if demo_app is not None:
 
 if eval_app is not None:
     app.registered_commands += eval_app.registered_commands
+
+if evidence_app is not None:
+    app.add_typer(evidence_app, name="evidence")
 
 
 def main() -> None:

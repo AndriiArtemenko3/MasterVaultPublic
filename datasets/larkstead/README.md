@@ -1,6 +1,6 @@
 # datasets/larkstead — Synthetic demo & eval corpus
 
-Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose internal documents drive the MasterVault demo and retrieval evals. The folder is layered by pipeline stage: a `bible/` that fixes every fact, `raw/` markdown written against it, a `processed/` layer produced by running `mvault ingest`, and a `golden/` set plus `embeddings/` sidecar that make the demo runnable keyless and the evals reproducible. Contradictions across policy boundaries (30-day vs 45-day returns, price-match v1 vs v2) are seeded on purpose so the ingestion router has real conflicts to flag.
+Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose internal documents drive the MasterVault demo and retrieval evals. The folder is layered by pipeline stage: a `bible/` that fixes every fact, `raw/` Markdown written against it, deterministic `pdf/` renditions for document-intelligence evaluation, a `processed/` layer produced by running `mvault ingest`, and a `golden/` set plus `embeddings/` sidecar that make the demo runnable keyless and the evals reproducible. Contradictions across policy boundaries (30-day vs 45-day returns, price-match v1 vs v2) are seeded on purpose so the ingestion router has real conflicts to flag.
 
 ## Files
 
@@ -13,6 +13,7 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 | `bible/doc-templates/*.md` | 32 per-doc-type exemplars (ticket, invoice, memo, lead-note, receiving-log, …) that writer agents fill. |
 | `bible/manifest.yaml` | Frozen bible inventory with per-file sha256 prefixes. |
 | `raw/<domain>/<doc-type>/*.md` | 372 in-world source documents across the 4 domains, organized by doc type (e.g. `customer-support/policy/`, `sales-crm/lead-note/`). This is what `mvault ingest` reads. |
+| `pdf/*.pdf` / `pdf/manifest.json` | Deterministic renditions of selected raw documents. The first fixture is the two-page SL2 returns-policy v2 clean-digital variant; its manifest binds the semantic-source and PDF byte hashes to page-level evidence labels. |
 | `processed/<domain>/sources/*.md` | 352 source notes: raw docs plus ingestion frontmatter (`key_claims` with id/statement/confidence/`affects`, `provenance`, `provenance_hash`). |
 | `processed/<domain>/wiki/*.md` | 43 drafted wiki concepts (aliases, Definition, Cross-Refs), after pruning 22 malformed zero-inbound slugs. `operations` has zero surviving concepts by design. |
 | `processed/<domain>/{decisions,strategy}/*.md` | 10 decision notes and 4 strategy notes (one per domain, 2026-Q2), hand-authored on top of the verified claims layer. |
@@ -28,6 +29,7 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 | `failures/historical-ingest.json` | Immutable record for the 20 historical no-output observations: raw hashes, the source commit, and an explicit split between facts the repository proves and lost per-unit details. |
 | `exclusions.json` | Explicit exclusion registry, currently empty. Any future row must retain the raw hash plus a stable reason code and truthful explanation. |
 | `qa/mechanical_check.py` | Ground-truth checker with non-mutating `--check` and explicit `--write` modes: 10 checks against `company.yaml` + storylines (SKU/staff/vendor resolution, id-grammar, banned strings, invoice arithmetic, timestamp monotonicity, doc_id coverage, single-owner IDs). |
+| `qa/generate_pdf_fixtures.py` | ReportLab generator with non-mutating `--check` and explicit `--write` modes. It renders PDF bytes from the canonical raw Markdown and records reproducibility metadata in `pdf/manifest.json`. |
 | `qa/validate_corpus_ledger.py` / `qa/replay_corpus_failures.py` | Validate one current ledger entry per raw file and verify immutable historical raw hashes. The legacy replay filename does not claim to reproduce an unknown mechanism. |
 | `qa/violations.jsonl` | One JSON line per finding; currently empty (0 violations). |
 | `LICENSE.md` | CC BY 4.0 scope and attribution for synthetic data assets; code in this directory remains Apache-2.0. |
@@ -56,6 +58,7 @@ explain their historical omission and is deliberately not presented as such.
 ```bash
 uv run python datasets/larkstead/qa/validate_corpus_ledger.py
 uv run python datasets/larkstead/qa/replay_corpus_failures.py
+uv run --extra dev python datasets/larkstead/qa/generate_pdf_fixtures.py --check
 ```
 
 ## Key concepts / entry points

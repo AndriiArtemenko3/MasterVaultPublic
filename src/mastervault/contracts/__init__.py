@@ -12,6 +12,12 @@ from mastervault.contracts.contradiction import (
 )
 from mastervault.contracts.corpus_check import CorpusCheckContract, CorpusCheckOut
 from mastervault.contracts.judge import SufficiencyJudgeContract, SufficiencyVerdictOut
+from mastervault.contracts.page_grounded_claims import (
+    EvidenceCandidate,
+    PageGroundedClaimCandidate,
+    PageGroundedClaimExtractionContract,
+    PageGroundedClaimExtractionOut,
+)
 from mastervault.contracts.synthesis import GroundedAnswerOut, GroundedSynthesisContract
 from mastervault.contracts.wiki_draft import WikiDraftContract, WikiDraftOut
 
@@ -27,6 +33,10 @@ __all__ = [
     "DispatchResult",
     "GroundedAnswerOut",
     "GroundedSynthesisContract",
+    "EvidenceCandidate",
+    "PageGroundedClaimCandidate",
+    "PageGroundedClaimExtractionContract",
+    "PageGroundedClaimExtractionOut",
     "SufficiencyJudgeContract",
     "SufficiencyVerdictOut",
     "WikiDraftContract",

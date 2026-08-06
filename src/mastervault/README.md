@@ -12,6 +12,7 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 | [cli/](./cli) | Typer command surface for `mvault`: `ask`, `ingest`, `lint`, `review`, `runs`, `evals`, `demo`, `query`, `admin`. Subcommand modules register on the root `app`. |
 | [contracts/](./contracts) | Versioned-prompt + typed-output contracts with autofix/hard-fail guards, one per LLM task (claim extraction, contradiction judge, corpus check, sufficiency judge, grounded synthesis, wiki draft). |
 | [core/](./core) | Orchestration substrate: exit-code errors, append-only `EventLog`, `BudgetLedger`, and `RunContext`. |
+| [document_intelligence/](./document_intelligence) | Immutable PDF byte identity, strict parser-neutral page/block JSON, the page-preserving `pypdf` baseline, and fail-closed evidence-span resolution. |
 | [evals/](./evals) | Retrieval eval harness: golden-set grading, per-`RetrievalConfig` ablation runs, recall@k/nDCG/MRR metrics, and a mechanical citation-validity checker for `ask` answers. |
 | [ingest/](./ingest) | Ingestion stages: raw-file conversion, claim extraction, concept matching, corpus-check adjudication, wiki drafting, wikilink insertion, and the claim schema gate (`validate`). |
 | [pipelines/](./pipelines) | The three end-to-end runs (`run_ingest`, `run_ask`, `run_lint`) that compose contracts, storage, retrieval, and the review queue under a `RunContext`. |
@@ -25,7 +26,7 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 
 ## How it fits
 
-[vaultfs](./vaultfs) reads the canonical Markdown; [ingest](./ingest) turns raw files into notes with claims; [sync](./sync) projects those notes into a [storage](./storage) index that [retrieval](./retrieval) queries. The [pipelines](./pipelines) tie those stages together for `ingest`/`ask`/`lint`, calling [contracts](./contracts) (rendered from [prompts](./prompts), executed via [providers](./providers)) and routing proposed changes through [review](./review), all under a [core](./core) `RunContext`. The [cli](./cli) is the operator entry point and [evals](./evals) grades retrieval quality offline. Nearly every module imports `models.py` for its types and `config.py` for `Settings`.
+[vaultfs](./vaultfs) reads the canonical Markdown; [document_intelligence](./document_intelligence) preserves immutable PDF evidence before [ingest](./ingest) turns raw files into notes with claims; [sync](./sync) projects those notes into a [storage](./storage) index that [retrieval](./retrieval) queries. The [pipelines](./pipelines) tie those stages together for `ingest`/`ask`/`lint`, calling [contracts](./contracts) (rendered from [prompts](./prompts), executed via [providers](./providers)) and routing proposed changes through [review](./review), all under a [core](./core) `RunContext`. The [cli](./cli) is the operator entry point and [evals](./evals) grades retrieval quality offline. Nearly every module imports `models.py` for its types and `config.py` for `Settings`.
 
 ## Key concepts / entry points
 

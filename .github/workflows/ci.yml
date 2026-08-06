@@ -56,6 +56,9 @@ jobs:
       - name: Raw corpus mechanical QA (non-mutating blocker gate)
         run: uv run python datasets/larkstead/qa/mechanical_check.py --check
 
+      - name: Deterministic PDF fixture gate
+        run: uv run python datasets/larkstead/qa/generate_pdf_fixtures.py --check
+
       # Split so a failure names its tier in the CI log instead of hiding in one
       # 500-test run. --cov-append accumulates across the tiers; the floor is
       # asserted once at the end, over the union.
