@@ -140,7 +140,8 @@ class ParsedDocumentRef(_StrictModel):
         elif (
             self.parser != "docling"
             or self.parser_profile != "clean-digital-layout-table-v2"
-            or self.normalization_profile != "mv-clean-digital-v1"
+            or self.normalization_profile
+            not in {"mv-clean-digital-v1", "mv-clean-digital-v2"}
             or self.parser_core_version is None
             or self.model_identity is None
             or self.resource_limits is None
@@ -361,7 +362,16 @@ class TableCellV2(_StrictModel):
     text: str
     column_header: bool = False
     row_header: bool = False
-    bbox: NormalizedBBox
+    # Docling retains explicitly empty grid cells but has no text region from
+    # which to derive their coordinates.  Preserve the cell without inventing
+    # a box; any cell carrying content must remain visually grounded.
+    bbox: NormalizedBBox | None
+
+    @model_validator(mode="after")
+    def _ground_non_empty_cell(self) -> TableCellV2:
+        if self.text.strip() and self.bbox is None:
+            raise ValueError("non-empty table cells require a bbox")
+        return self
 
 
 class TableRowV2(_StrictModel):
@@ -463,12 +473,24 @@ class ParsedPageV2(_StrictModel):
 
 
 class NormalizationIdentity(_StrictModel):
-    profile: Literal["mv-clean-digital-v1"] = "mv-clean-digital-v1"
+    profile: Literal["mv-clean-digital-v1", "mv-clean-digital-v2"] = (
+        "mv-clean-digital-v2"
+    )
     coordinate_origin: Literal["top-left"] = "top-left"
     coordinate_precision: Literal[6] = 6
     whitespace_profile: Literal["unicode-lines-v1"] = "unicode-lines-v1"
     furniture_profile: Literal["docling-labels-v1"] = "docling-labels-v1"
-    table_profile: Literal["grid-v1"] = "grid-v1"
+    table_profile: Literal["grid-v1", "grid-v2"] = "grid-v2"
+
+    @model_validator(mode="after")
+    def _matched_profile_versions(self) -> NormalizationIdentity:
+        expected = {
+            "mv-clean-digital-v1": "grid-v1",
+            "mv-clean-digital-v2": "grid-v2",
+        }
+        if self.table_profile != expected[self.profile]:
+            raise ValueError("normalization and table profile versions must match")
+        return self
 
 
 class ParsedDocumentV2(_StrictModel):
@@ -575,6 +597,10 @@ class ParsedDocumentV2(_StrictModel):
         expected_cell_ids = [f"cell-{idx:04d}" for idx in range(1, len(cell_ids) + 1)]
         if row_ids != expected_row_ids or cell_ids != expected_cell_ids:
             raise ValueError("row_id and cell_id values must be canonical and contiguous")
+        if self.normalization.profile == "mv-clean-digital-v1" and any(
+            cell.bbox is None for table in self.tables for cell in table.cells
+        ):
+            raise ValueError("normalization v1 table cells must carry bounding boxes")
         for table in self.tables:
             table_block = block_by_id.get(table.block_id)
             if (

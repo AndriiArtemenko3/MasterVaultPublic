@@ -32,7 +32,7 @@ DOCLING_PREFETCH_COMMAND = (
 DOCLING_DOCUMENT_TIMEOUT_SECONDS = 120.0
 DOCLING_MAX_SOURCE_BYTES = 50 * 1024 * 1024
 DOCLING_MAX_PAGES = 200
-DOCLING_HEADING_HIERARCHY_OPTIONS = {
+DOCLING_HEADING_HIERARCHY_OPTIONS: dict[str, Any] = {
     "enabled": True,
     "use_bookmarks": True,
     "use_numbering": False,
@@ -408,9 +408,13 @@ class DoclingParser:
                 **DOCLING_HEADING_HIERARCHY_OPTIONS
             ),
         )
-        options.layout_options.engine_options.compile_model = False
-        options.table_structure_options.mode = TableFormerMode.FAST
-        options.table_structure_options.do_cell_matching = True
+        # The concrete PDF option types expose these fields at runtime, while
+        # Docling annotates their container properties as broader base classes.
+        layout_options = cast(Any, options.layout_options)
+        table_options = cast(Any, options.table_structure_options)
+        layout_options.engine_options.compile_model = False
+        table_options.mode = TableFormerMode.FAST
+        table_options.do_cell_matching = True
         converter = DocumentConverter(
             allowed_formats=[InputFormat.PDF],
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)},

@@ -74,6 +74,9 @@ adapter, but parser objects never cross its module boundary. Vendor output is
 immediately converted to built-in dictionaries and normalized into the strict
 MasterVault-owned schema-v2: page dimensions, six-decimal top-left bounding
 boxes, sections, blocks, tables, rows, cells, spans, and header flags.
+New parses use the paired `mv-clean-digital-v2`/`grid-v2` normalization
+identity. Previously persisted v1/v1 artifacts remain readable, but v1/v2
+cross-pairing is invalid.
 
 At runtime Docling requires an explicit, real (non-symlink) artifact directory
 whose selected layout/TableFormer files match the packaged full-commit,
@@ -90,6 +93,12 @@ The schema-v2 profile freezes a 50 MiB source ceiling, 200-page ceiling and
 plans. It retains parsed-page style data and enables Docling's deterministic
 bookmark/style heading pass, so the real fixture produces nested section
 parents rather than a flat list. A timeout or partial conversion fails closed.
+The normalizer cross-checks Docling's canonical cells against every declared
+grid slot. Explicit empty grid cells are preserved with `bbox: null` when no
+text region exists; non-empty cells still require coordinates and bbox-less
+cells cannot be cited. Items with more than one provenance region are rejected
+until the IR can retain exact ordered regions without drawing an enclosing box
+over unrelated page content.
 
 The model proposes exactly one `block_id` or `cell_id` plus a verbatim quote.
 Grounding derives page, bbox, table coordinates and offsets from the stored IR;

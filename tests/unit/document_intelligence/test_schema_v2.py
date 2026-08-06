@@ -112,6 +112,19 @@ def _vendor_export(*, second_table: bool = False) -> dict:
                 },
             }
         )
+    for table in tables:
+        data = table["data"]
+        cells_by_coordinate = {
+            (cell["start_row_offset_idx"], cell["start_col_offset_idx"]): cell
+            for cell in data["table_cells"]
+        }
+        data["grid"] = [
+            [
+                cells_by_coordinate[(row_index, column_index)]
+                for column_index in range(data["num_cols"])
+            ]
+            for row_index in range(data["num_rows"])
+        ]
     return {
         "pages": {"1": {"size": {"width": 100.0, "height": 200.0}}},
         "texts": [
@@ -134,6 +147,22 @@ def _document(*, second_table: bool = False) -> ParsedDocumentV2:
     )
 
 
+def _normalization_failure(export: dict) -> str:
+    failures: list[str] = []
+    for _ in range(2):
+        with pytest.raises(ValueError) as caught:
+            normalize_docling_export(
+                export,
+                asset_sha256="a" * 64,
+                parser_version="2.118.0",
+                parser_core_version="2.91.0",
+                model_identity="sha256:" + "b" * 64,
+            )
+        failures.append(str(caught.value))
+    assert failures[0] == failures[1]
+    return failures[0]
+
+
 def test_schema_v2_normalization_ids_json_and_markdown_are_deterministic(tmp_path) -> None:
     first = _document()
     second = _document()
@@ -151,7 +180,7 @@ def test_schema_v2_normalization_ids_json_and_markdown_are_deterministic(tmp_pat
     assert restored == first
     reference = store_parsed_document(first, tmp_path)
     assert reference.document_schema_version == 2
-    assert reference.normalization_profile == "mv-clean-digital-v1"
+    assert reference.normalization_profile == "mv-clean-digital-v2"
     assert reference.resource_limits == first.resource_limits
     assert load_parsed_document(reference, tmp_path) == first
 
@@ -160,6 +189,224 @@ def test_schema_v2_normalization_ids_json_and_markdown_are_deterministic(tmp_pat
     assert "| Column 1 | Column 2 |" in markdown
     assert "| North | 42 |" in markdown
     assert markdown == render_document_markdown(second)
+
+
+def test_docling_explicit_blank_grid_cell_is_preserved_without_fabricated_bbox() -> None:
+    export = _vendor_export()
+    data = export["tables"][0]["data"]
+    header = _cell(0, 2, "Notes")
+    blank = _cell(1, 2, "")
+    blank.pop("bbox")
+    data["num_cols"] = 3
+    # Docling's semantic cell list excludes blank cells, while its explicit
+    # grid retains the empty slot without inventing a text-region bbox.
+    data["table_cells"].append(header)
+    data["grid"] = [
+        [data["table_cells"][0], data["table_cells"][1], header],
+        [data["table_cells"][2], data["table_cells"][3], blank],
+    ]
+
+    first = normalize_docling_export(
+        export,
+        asset_sha256="a" * 64,
+        parser_version="2.118.0",
+        parser_core_version="2.91.0",
+        model_identity="sha256:" + "b" * 64,
+    )
+    second = normalize_docling_export(
+        export,
+        asset_sha256="a" * 64,
+        parser_version="2.118.0",
+        parser_core_version="2.91.0",
+        model_identity="sha256:" + "b" * 64,
+    )
+
+    assert parsed_document_bytes(first) == parsed_document_bytes(second)
+    restored = ParsedDocumentV2.model_validate_json(parsed_document_bytes(first))
+    blank_cell = restored.tables[0].cells[-1]
+    assert (blank_cell.row_index, blank_cell.column_index, blank_cell.text) == (1, 2, "")
+    assert blank_cell.bbox is None
+    assert restored.blocks[-1].text == "Region | Total | Notes |\nNorth | 42 | "
+    assert " ".join(restored.blocks[-1].text.split()) == (
+        "Region | Total | Notes | North | 42 |"
+    )
+    assert "| North | 42 |  |" in render_document_markdown(restored)
+    with pytest.raises(EvidenceGroundingError, match="has no visual bounding box"):
+        resolve_evidence(
+            restored,
+            [EvidenceCandidate(cell_id=blank_cell.cell_id, quote="not present")],
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"text": "conflicting text"},
+        {"row_span": 2, "end_row_offset_idx": 2},
+        {"column_header": False},
+        {"bbox": {"l": 1, "t": 2, "r": 3, "b": 4, "coord_origin": "TOPLEFT"}},
+    ],
+)
+def test_docling_grid_rejects_conflicts_with_canonical_cells(changes) -> None:
+    export = _vendor_export()
+    conflicting = copy.deepcopy(export["tables"][0]["data"]["grid"][0][0])
+    conflicting.update(changes)
+    export["tables"][0]["data"]["grid"][0][0] = conflicting
+    with pytest.raises(ValueError, match="grid conflicts with its canonical cell"):
+        normalize_docling_export(
+            export,
+            asset_sha256="a" * 64,
+            parser_version="2.118.0",
+            parser_core_version="2.91.0",
+            model_identity="sha256:" + "b" * 64,
+        )
+
+
+def test_docling_grid_rejects_slot_outside_referenced_span() -> None:
+    export = _vendor_export()
+    export["tables"][0]["data"]["grid"][0][1] = copy.deepcopy(
+        export["tables"][0]["data"]["grid"][0][0]
+    )
+    with pytest.raises(ValueError, match="grid slot is outside its cell span"):
+        normalize_docling_export(
+            export,
+            asset_sha256="a" * 64,
+            parser_version="2.118.0",
+            parser_core_version="2.91.0",
+            model_identity="sha256:" + "b" * 64,
+        )
+
+
+@pytest.mark.parametrize("field", ["num_rows", "num_cols"])
+@pytest.mark.parametrize("invalid", ["2", 2.0, True, None])
+def test_docling_table_dimensions_reject_coercible_non_integers(field, invalid) -> None:
+    export = _vendor_export()
+    export["tables"][0]["data"][field] = invalid
+    assert "has no integer table" in _normalization_failure(export)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "start_row_offset_idx",
+        "end_row_offset_idx",
+        "start_col_offset_idx",
+        "end_col_offset_idx",
+        "row_span",
+        "col_span",
+    ],
+)
+@pytest.mark.parametrize("invalid", ["1", 1.0, True, None])
+def test_docling_cell_offsets_and_spans_reject_coercible_non_integers(
+    field, invalid
+) -> None:
+    export = _vendor_export()
+    export["tables"][0]["data"]["table_cells"][0][field] = invalid
+    assert "has no integer" in _normalization_failure(export)
+
+
+@pytest.mark.parametrize("field", ["column_header", "row_header"])
+@pytest.mark.parametrize("invalid", ["true", "false", 1, 0.0, None])
+def test_docling_header_flags_reject_truthy_and_falsey_non_booleans(field, invalid) -> None:
+    export = _vendor_export()
+    export["tables"][0]["data"]["table_cells"][0][field] = invalid
+    assert "has no boolean" in _normalization_failure(export)
+
+
+@pytest.mark.parametrize("invalid", ["1", 1.0, True, None])
+def test_docling_provenance_page_number_rejects_coercible_non_integers(invalid) -> None:
+    export = _vendor_export()
+    export["texts"][0]["prov"][0]["page_no"] = invalid
+    assert "has no integer provenance page_no" in _normalization_failure(export)
+
+
+@pytest.mark.parametrize("invalid", ["01", 1.0, True, None])
+def test_docling_page_keys_reject_noncanonical_integer_forms(invalid) -> None:
+    export = _vendor_export()
+    page = export["pages"].pop("1")
+    export["pages"][invalid] = page
+    assert "page key is not a canonical integer" in _normalization_failure(export)
+
+
+def test_docling_optional_cell_spans_and_headers_use_documented_defaults() -> None:
+    export = _vendor_export()
+    for cell in export["tables"][0]["data"]["table_cells"]:
+        cell.pop("row_span")
+        cell.pop("col_span")
+        cell.pop("column_header")
+        cell.pop("row_header")
+    document = normalize_docling_export(
+        export,
+        asset_sha256="a" * 64,
+        parser_version="2.118.0",
+        parser_core_version="2.91.0",
+        model_identity="sha256:" + "b" * 64,
+    )
+    assert all(
+        (cell.row_span, cell.column_span, cell.column_header, cell.row_header)
+        == (1, 1, False, False)
+        for cell in document.tables[0].cells
+    )
+
+
+@pytest.mark.parametrize("invalid", ["2", 2.0, True, None])
+def test_docling_heading_level_rejects_coercible_non_integers(invalid) -> None:
+    export = _vendor_export()
+    heading = next(item for item in export["texts"] if item["label"] == "section_header")
+    heading["level"] = invalid
+    assert "has no integer heading level" in _normalization_failure(export)
+
+
+@pytest.mark.parametrize(("raw_level", "expected"), [(None, 1), (-2, 1), (2, 2), (9, 6)])
+def test_docling_heading_level_defaults_and_clamps_actual_integers(
+    raw_level, expected
+) -> None:
+    export = _vendor_export()
+    heading = next(item for item in export["texts"] if item["label"] == "section_header")
+    if raw_level is not None:
+        heading["level"] = raw_level
+    document = normalize_docling_export(
+        export,
+        asset_sha256="a" * 64,
+        parser_version="2.118.0",
+        parser_core_version="2.91.0",
+        model_identity="sha256:" + "b" * 64,
+    )
+    section = next(value for value in document.sections if value.title == heading["text"])
+    assert section.level == expected
+
+
+def test_docling_same_page_multi_region_item_fails_closed() -> None:
+    export = _vendor_export()
+    export["texts"][-1]["prov"] = [
+        *_prov(1, 10, 140, 40, 130),
+        *_prov(1, 60, 120, 90, 110),
+    ]
+    with pytest.raises(ValueError, match="one exact visual region"):
+        normalize_docling_export(
+            export,
+            asset_sha256="a" * 64,
+            parser_version="2.118.0",
+            parser_core_version="2.91.0",
+            model_identity="sha256:" + "b" * 64,
+        )
+
+
+def test_docling_cross_page_multi_region_item_still_fails_closed() -> None:
+    export = _vendor_export()
+    export["pages"]["2"] = {"size": {"width": 100.0, "height": 200.0}}
+    export["texts"][-1]["prov"] = [
+        *_prov(1, 10, 140, 40, 130),
+        *_prov(2, 60, 120, 90, 110),
+    ]
+    with pytest.raises(ValueError, match="one exact visual region"):
+        normalize_docling_export(
+            export,
+            asset_sha256="a" * 64,
+            parser_version="2.118.0",
+            parser_core_version="2.91.0",
+            model_identity="sha256:" + "b" * 64,
+        )
 
 
 def test_schema_v2_rejects_invalid_ids_hierarchy_coordinates_and_spans() -> None:
@@ -242,10 +489,12 @@ def test_schema_v2_rejects_a_skipped_nearest_section_parent() -> None:
 
 def test_row_span_keeps_empty_covered_row_and_renders_explicit_grid() -> None:
     export = _vendor_export()
+    spanning_cell = _cell(0, 0, "Spans both rows", row_span=2, end_row_offset_idx=2)
     export["tables"][0]["data"] = {
         "num_rows": 2,
         "num_cols": 1,
-        "table_cells": [_cell(0, 0, "Spans both rows", row_span=2)],
+        "table_cells": [spanning_cell],
+        "grid": [[spanning_cell], [spanning_cell]],
     }
     document = normalize_docling_export(
         export,
@@ -262,6 +511,31 @@ def test_row_span_keeps_empty_covered_row_and_renders_explicit_grid() -> None:
     markdown = render_document_markdown(document)
     assert "```table-grid table-0001" in markdown
     assert "rowspan=2 colspan=1" in markdown
+
+
+def test_normalization_identity_v2_is_current_and_v1_remains_readable(tmp_path) -> None:
+    current = _document()
+    assert current.normalization.profile == "mv-clean-digital-v2"
+    assert current.normalization.table_profile == "grid-v2"
+
+    legacy_payload = current.model_dump()
+    legacy_payload["normalization"]["profile"] = "mv-clean-digital-v1"
+    legacy_payload["normalization"]["table_profile"] = "grid-v1"
+    legacy = ParsedDocumentV2.model_validate(legacy_payload)
+    reference = store_parsed_document(legacy, tmp_path)
+    assert reference.normalization_profile == "mv-clean-digital-v1"
+    assert load_parsed_document(reference, tmp_path) == legacy
+
+    mismatched = copy.deepcopy(legacy_payload)
+    mismatched["normalization"]["table_profile"] = "grid-v2"
+    with pytest.raises(ValidationError, match="profile versions must match"):
+        ParsedDocumentV2.model_validate(mismatched)
+
+    nullable_v1 = copy.deepcopy(legacy_payload)
+    nullable_v1["tables"][0]["cells"][-1]["text"] = ""
+    nullable_v1["tables"][0]["cells"][-1]["bbox"] = None
+    with pytest.raises(ValidationError, match="v1 table cells must carry bounding boxes"):
+        ParsedDocumentV2.model_validate(nullable_v1)
 
 
 def test_cell_evidence_derives_location_and_rejects_every_forged_case() -> None:

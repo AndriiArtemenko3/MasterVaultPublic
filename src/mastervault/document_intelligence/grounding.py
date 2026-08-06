@@ -75,6 +75,9 @@ def evidence_errors(
                 continue
             table, cell = pair
             referenced_tables.add(table.table_id)
+            if cell.bbox is None:
+                errors.append(f"evidence {idx}: cell {target_id!r} has no visual bounding box")
+                continue
             text = cell.text
         try:
             pattern = _quote_pattern(quote)
@@ -138,6 +141,8 @@ def resolve_evidence(
             match = _quote_pattern(candidate.quote.strip()).search(cell.text)
             if match is None:
                 raise EvidenceGroundingError("validated evidence unexpectedly stopped resolving")
+            if cell.bbox is None:
+                raise EvidenceGroundingError("cell evidence has no visual bounding box")
             refs.append(
                 StructuralEvidenceRef(
                     target_type="cell",

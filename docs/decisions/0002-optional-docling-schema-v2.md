@@ -92,17 +92,35 @@ unquantized coordinates or text hashes. Parsed references freeze schema,
 normalization, parser/core and model-artifact identity while legacy references
 default to schema-v1/page-text identity.
 
+The current normalizer emits the paired `mv-clean-digital-v2` and `grid-v2`
+identity. The v2 table contract verifies that `grid` and `table_cells` agree on
+text, spans, header flags and bboxes; every grid slot must reference a canonical
+origin whose declared span covers it. Repeated grid entries for one spanned
+cell produce one stable cell ID. Docling may omit an explicitly empty cell from
+`table_cells` while retaining it in `grid`; v2 preserves that empty slot with a
+null bbox instead of fabricating coordinates. Non-empty cells must have bboxes.
+Previously persisted v1/v1 artifacts remain readable, v1/v2 identity pairing
+is rejected, and v1 documents cannot contain nullable cell bboxes.
+
+An item with multiple provenance regions is rejected even when every region is
+on one page. A single enclosing rectangle could cover unrelated column content
+and would overstate visual grounding. Persisting ordered exact regions is a
+future schema change, not an implicit approximation in this profile.
+
 Models may propose exactly one block ID or cell ID plus a verbatim quote.
 MasterVault derives the page, table, row, column, bbox and offsets. Unknown,
 duplicate, mixed-table and forged persisted evidence fails closed. Evidence
 remains canonical in source-note frontmatter; this slice adds no database
-evidence table.
+evidence table. Empty bbox-less cells cannot be selected as evidence.
 
 MasterVault renders canonical Markdown from schema-v2. Header/footer furniture
 is retained in JSON and omitted from the default body. Rectangular tables use
 stable GitHub Markdown with neutral column labels. Spanned tables use an
 explicit `table-grid` fenced representation; lossless spans remain in JSON.
-Vendor Markdown is never authoritative.
+Vendor Markdown is never authoritative. The non-authoritative table-block text
+view joins cells with ` | ` and rows with ` |\n`; the structured grid remains
+the source of truth while the text view retains deterministic row boundaries
+for compatibility consumers.
 
 The ingest plan freezes parser/component/model/profile/schema/artifact/resource-limit identity.
 A fresh run memoizes each PDF parse between planning and execution. Resume
