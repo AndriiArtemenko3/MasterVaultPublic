@@ -158,6 +158,10 @@ CDLA-Permissive-2.0. No weights are vendored by MasterVault.
   rejected; image tables, charts, formulas and cross-page tables are out.
 - There is no structural storage/FTS/vector channel, retrieval improvement
   claim, final benchmark, or performance threshold in this change.
+- Development results show that exact table-detection scoring is still coupled
+  to serialized table-block text. That coupling must be removed or explicitly
+  justified before any public table-detection metric is claimed; evaluator and
+  gold contracts are intentionally unchanged in this hardening slice.
 - Fresh PDF parsing and dry-run planning can be keyless. Fresh claim extraction
   still needs a real configured LLM provider; the mock provider is not a
   universal keyless ingest implementation.

@@ -19,6 +19,8 @@ from rich.console import Console
 from rich.table import Table
 
 from mastervault.config import load_settings
+from mastervault.core.errors import MasterVaultError
+from mastervault.document_intelligence.benchmark import BenchmarkSplit
 from mastervault.evals import (
     ALL_CONFIGS,
     NEGATIVE_CLASS,
@@ -35,6 +37,7 @@ from mastervault.evals import (
     run_config,
     write_resolved_yaml,
 )
+from mastervault.evals.pdf_layout_harness import PdfLayoutEvalError, run_pdf_layout_benchmark
 from mastervault.evals.provenance import (
     BASELINE_SCHEMA_VERSION,
     collect_reproducibility_metadata,
@@ -60,6 +63,69 @@ PROCESSED_DIR = REPO_ROOT / "datasets" / "larkstead" / "processed"
 _CONFIG_NAMES = [c.name for c in ALL_CONFIGS]
 _METRIC_COLS = ("recall_at_5", "recall_at_10", "ndcg_at_10", "mrr")
 _METRIC_LABELS = ("recall@5", "recall@10", "nDCG@10", "MRR")
+
+
+@eval_app.command("pdf-eval")
+def pdf_eval_cmd(
+    parser: str = typer.Option("pypdf", "--parser", help="Parser: pypdf or docling."),
+    split: str = typer.Option(
+        BenchmarkSplit.DEVELOPMENT.value,
+        "--split",
+        help="Benchmark split: development (default) or held-out.",
+    ),
+    allow_held_out: bool = typer.Option(
+        False,
+        "--allow-held-out",
+        help="Explicitly authorize evaluation of the held-out family split.",
+    ),
+    docling_artifacts: str | None = typer.Option(
+        None,
+        "--docling-artifacts",
+        help="Verified offline Docling artifact directory (required for docling).",
+    ),
+    json_out: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit the byte-stable JSON projection (wall-clock latency excluded).",
+    ),
+) -> None:
+    """Measure deterministic PDF layout and page-grounded evidence recovery."""
+    if parser not in {"pypdf", "docling"}:
+        typer.echo("error: --parser must be one of: pypdf, docling", err=True)
+        raise typer.Exit(code=2)
+    try:
+        selected_split = BenchmarkSplit(split)
+    except ValueError:
+        typer.echo("error: --split must be one of: development, held-out", err=True)
+        raise typer.Exit(code=2) from None
+    try:
+        report = run_pdf_layout_benchmark(
+            repo_root=REPO_ROOT,
+            parser_name=parser,  # type: ignore[arg-type]
+            split=selected_split,
+            allow_held_out=allow_held_out,
+            docling_artifacts_path=docling_artifacts,
+        )
+    except (PdfLayoutEvalError, MasterVaultError, OSError, ValueError) as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_out:
+        typer.echo(report.stable_json_bytes().decode("utf-8"), nl=False)
+        return
+
+    aggregate = report.stable_dict()["aggregates"]["parser"][report.parser]
+    typer.echo(
+        f"pdf-eval: parser={report.parser} split={report.split} "
+        f"renditions={aggregate['renditions']} successes={aggregate['successes']} "
+        f"failures={aggregate['failures']}"
+    )
+    for name, metric in aggregate["metrics"].items():
+        value = metric["value"]
+        formatted = "n/a" if value is None else f"{value:.3f}"
+        typer.echo(
+            f"  {name}: {metric['numerator']}/{metric['denominator']} ({formatted})"
+        )
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
