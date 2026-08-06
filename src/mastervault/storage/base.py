@@ -32,6 +32,10 @@ class SchemaMismatchError(StorageError):
     """
 
 
+class UnsupportedSchemaVersionError(SchemaMismatchError):
+    """The on-disk schema is outside the explicitly supported upgrade range."""
+
+
 # ---------------------------------------------------------------------------
 # Row dataclasses (mirror the logical schema)
 # ---------------------------------------------------------------------------
@@ -118,11 +122,63 @@ class EmbeddingRow:
 # Shared query policy
 # ---------------------------------------------------------------------------
 
-SCHEMA_VERSION = 1
+MIN_SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 META_KEY_MODEL = "embedding_model"
 META_KEY_DIM = "dimensions"
 META_KEY_SCHEMA = "schema_version"
+
+
+def validate_schema_meta(
+    meta: dict[str, Any] | None,
+    *,
+    dim: int,
+    model_version: str,
+) -> int:
+    """Validate index identity and return its schema version (0 for a new index).
+
+    Existing metadata is never repaired by guessing. Version 1 is the only
+    supported historical state; version 0/corrupt metadata and versions newer
+    than this build are refused with an explicit rebuild/upgrade message.
+    """
+    if meta is None:
+        return 0
+
+    missing = [key for key in (META_KEY_MODEL, META_KEY_DIM, META_KEY_SCHEMA) if key not in meta]
+    if missing:
+        raise SchemaMismatchError(
+            "index metadata is incomplete (missing "
+            f"{', '.join(missing)}); refusing to infer or overwrite schema identity. "
+            "Rebuild the index explicitly."
+        )
+
+    stored_dim = meta[META_KEY_DIM]
+    stored_model = meta[META_KEY_MODEL]
+    if stored_dim != dim or stored_model != model_version:
+        raise SchemaMismatchError(
+            f"index was built with model={stored_model!r} dim={stored_dim}, "
+            f"requested model={model_version!r} dim={dim}. "
+            "Re-index explicitly (drop + rebuild) before changing either."
+        )
+
+    version = meta[META_KEY_SCHEMA]
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise SchemaMismatchError(
+            f"index schema_version must be an integer, found {version!r}; "
+            "refusing to overwrite ambiguous metadata."
+        )
+    if version > SCHEMA_VERSION:
+        raise UnsupportedSchemaVersionError(
+            f"index schema_version={version} is newer than this build supports "
+            f"({SCHEMA_VERSION}); upgrade MasterVault before opening it."
+        )
+    if version < MIN_SCHEMA_VERSION:
+        raise UnsupportedSchemaVersionError(
+            f"index schema_version={version} is older than the supported upgrade floor "
+            f"({MIN_SCHEMA_VERSION}); rebuild the index explicitly."
+        )
+    return version
 
 
 def normalized_vector(vector: Sequence[float]) -> np.ndarray:
@@ -225,9 +281,7 @@ class StorageBackend(Protocol):
         """
         ...
 
-    def needs_embedding(
-        self, items: list[tuple[str, str]], model_version: str
-    ) -> list[str]:
+    def needs_embedding(self, items: list[tuple[str, str]], model_version: str) -> list[str]:
         """Idempotency gate for paid embedding calls.
 
         items are (record_id, content_hash) pairs; returns only the record_ids

@@ -6,13 +6,19 @@ backends; postgres tests skip only when DATABASE_URL is unset or unreachable.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from mastervault.models import content_hash
 from mastervault.storage.base import (
+    META_KEY_SCHEMA,
+    SCHEMA_VERSION,
     AliasRow,
     ChunkRow,
     ClaimRow,
@@ -64,8 +70,14 @@ def doc_row(
     )
 
 
-def claim_row(claim_id: str, doc_id: str, ordinal: int, statement: str,
-              confidence: str = "medium", affects: list[str] | None = None) -> ClaimRow:
+def claim_row(
+    claim_id: str,
+    doc_id: str,
+    ordinal: int,
+    statement: str,
+    confidence: str = "medium",
+    affects: list[str] | None = None,
+) -> ClaimRow:
     return ClaimRow(
         claim_id=claim_id,
         doc_id=doc_id,
@@ -87,9 +99,16 @@ def chunk_row(chunk_id: str, doc_id: str, ordinal: int, text: str) -> ChunkRow:
     )
 
 
-def emb_row(record_id: str, vector: list[float], *, record_type: str = "claim",
-            doc_id: str | None = None, domain: str | None = "operations",
-            model: str = "test-embed-v1", text: str = "") -> EmbeddingRow:
+def emb_row(
+    record_id: str,
+    vector: list[float],
+    *,
+    record_type: str = "claim",
+    doc_id: str | None = None,
+    domain: str | None = "operations",
+    model: str = "test-embed-v1",
+    text: str = "",
+) -> EmbeddingRow:
     return EmbeddingRow(
         record_id=record_id,
         record_type=record_type,
@@ -110,13 +129,22 @@ def seed_zebra_doc(backend) -> tuple[DocumentRow, list[ClaimRow], list[ChunkRow]
         body="The zebra migration corridor mapping must be refreshed after every wet season.",
     )
     claims = [
-        claim_row("zebra-note-01", doc.doc_id, 0,
-                  "The zebra migration corridor mapping is refreshed quarterly.",
-                  confidence="high", affects=["migration-corridor"]),
-        claim_row("zebra-note-02", doc.doc_id, 1,
-                  "Field teams reported broken fences along the northern corridor.",
-                  confidence="medium",
-                  affects=["migration-corridor", "fence-maintenance"]),
+        claim_row(
+            "zebra-note-01",
+            doc.doc_id,
+            0,
+            "The zebra migration corridor mapping is refreshed quarterly.",
+            confidence="high",
+            affects=["migration-corridor"],
+        ),
+        claim_row(
+            "zebra-note-02",
+            doc.doc_id,
+            1,
+            "Field teams reported broken fences along the northern corridor.",
+            confidence="medium",
+            affects=["migration-corridor", "fence-maintenance"],
+        ),
     ]
     chunks = [chunk_row(f"chunk:{doc.doc_id}#0", doc.doc_id, 0, doc.body)]
     backend.upsert_document(doc, claims, chunks, [])
@@ -132,9 +160,14 @@ def seed_refund_doc(backend) -> tuple[DocumentRow, list[ClaimRow]]:
         body="Our refund policy window is thirty days from delivery confirmation.",
     )
     claims = [
-        claim_row("refund-faq-01", doc.doc_id, 0,
-                  "The refund policy window is thirty days from delivery.",
-                  confidence="high", affects=["refund-policy"]),
+        claim_row(
+            "refund-faq-01",
+            doc.doc_id,
+            0,
+            "The refund policy window is thirty days from delivery.",
+            confidence="high",
+            affects=["refund-policy"],
+        ),
     ]
     backend.upsert_document(doc, claims, [], [])
     return doc, claims
@@ -150,8 +183,7 @@ def seed_wiki_doc(backend) -> DocumentRow:
         body="Canonical entry for the seasonal migration corridor.",
     )
     aliases = [
-        AliasRow(alias="Migration Corridor", wiki_slug="migration-corridor",
-                 domain="operations"),
+        AliasRow(alias="Migration Corridor", wiki_slug="migration-corridor", domain="operations"),
         AliasRow(alias="Corridor Map", wiki_slug="migration-corridor", domain="operations"),
     ]
     backend.upsert_document(doc, [], [], aliases)
@@ -185,6 +217,131 @@ def test_init_schema_refuses_model_mismatch(backend, dim, model_version):
         backend.init_schema(dim, "some-other-model-v9")
 
 
+def test_current_schema_refuses_a_missing_migration_ledger(backend, dim, model_version):
+    backend.conn.execute("DROP TABLE schema_migrations")
+    with pytest.raises(SchemaMismatchError, match="schema_migrations is missing"):
+        backend.init_schema(dim, model_version)
+
+
+@pytest.mark.parametrize("tamper", ["name", "checksum", "extra"])
+def test_current_schema_refuses_tampered_migration_history_without_repair(
+    backend, dim, model_version, tamper
+):
+    before_meta = backend._read_meta()
+    if backend.name == "sqlite":
+        with backend.conn:
+            if tamper == "name":
+                backend.conn.execute(
+                    "UPDATE schema_migrations SET name = ? WHERE version = 1",
+                    ("001_tampered",),
+                )
+            elif tamper == "checksum":
+                backend.conn.execute(
+                    "UPDATE schema_migrations SET checksum_sha256 = ? WHERE version = 1",
+                    ("0" * 64,),
+                )
+            else:
+                backend.conn.execute(
+                    "INSERT INTO schema_migrations "
+                    "(version, name, checksum_sha256, applied_at) VALUES (?, ?, ?, ?)",
+                    (99, "099_extra", "0" * 64, "2026-08-06T00:00:00+00:00"),
+                )
+    else:
+        with backend.conn.transaction():
+            if tamper == "name":
+                backend.conn.execute(
+                    "UPDATE schema_migrations SET name = %s WHERE version = 1",
+                    ("001_tampered",),
+                )
+            elif tamper == "checksum":
+                backend.conn.execute(
+                    "UPDATE schema_migrations SET checksum_sha256 = %s WHERE version = 1",
+                    ("0" * 64,),
+                )
+            else:
+                backend.conn.execute(
+                    "INSERT INTO schema_migrations "
+                    "(version, name, checksum_sha256) VALUES (%s, %s, %s)",
+                    (99, "099_extra", "0" * 64),
+                )
+
+    with pytest.raises(SchemaMismatchError, match="exactly match"):
+        backend.init_schema(dim, model_version)
+    assert backend._read_meta() == before_meta
+    assert backend.conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == (
+        3 if tamper == "extra" else 2
+    )
+
+
+def test_upgrade_from_schema_v1_preserves_rows_and_records_ordered_migrations(
+    backend, dim, model_version
+):
+    doc, _claims, _chunks = seed_zebra_doc(backend)
+    if backend.name == "sqlite":
+        with backend.conn:
+            backend.conn.execute("DROP TABLE schema_migrations")
+            backend.conn.execute(
+                "UPDATE meta SET value = ? WHERE key = ?",
+                (json.dumps(1), META_KEY_SCHEMA),
+            )
+    else:
+        with backend.conn.transaction():
+            backend.conn.execute("DROP TABLE schema_migrations")
+            backend.conn.execute(
+                "UPDATE meta SET value = %s WHERE key = %s",
+                (Jsonb(1), META_KEY_SCHEMA),
+            )
+
+    backend.init_schema(dim, model_version)
+
+    assert backend.stats()["schema_version"] == SCHEMA_VERSION
+    assert backend.get_documents([doc.doc_id])[0].body == doc.body
+    rows = backend.conn.execute(
+        "SELECT version, name FROM schema_migrations ORDER BY version"
+    ).fetchall()
+    assert [int(row[0]) for row in rows] == [1, 2]
+
+
+def test_two_postgres_connections_serialize_fresh_initialization(pg_test_url, dim, model_version):
+    from mastervault.storage.postgres import PostgresBackend
+
+    schema = f"concurrent_{uuid.uuid4().hex[:12]}"
+    owner = PostgresBackend(pg_test_url)
+    owner.conn.execute(f'CREATE SCHEMA "{schema}"')
+    owner.close()
+
+    def initialize() -> None:
+        backend = PostgresBackend(pg_test_url)
+        try:
+            backend.conn.execute(f'SET search_path TO "{schema}", public')
+            backend.init_schema(dim, model_version)
+        finally:
+            backend.close()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(initialize) for _ in range(2)]
+            for future in futures:
+                future.result(timeout=30)
+
+        inspector = PostgresBackend(pg_test_url)
+        try:
+            inspector.conn.execute(f'SET search_path TO "{schema}", public')
+            rows = inspector.conn.execute(
+                "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
+            ).fetchall()
+            assert [int(row[0]) for row in rows] == [1, 2]
+            assert all(len(str(row[2])) == 64 for row in rows)
+        finally:
+            inspector.close()
+    finally:
+        cleanup = PostgresBackend(pg_test_url)
+        try:
+            cleanup.conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        finally:
+            cleanup.close()
+
+
 # ---------------------------------------------------------------------------
 # needs_embedding — idempotency crown jewel
 # ---------------------------------------------------------------------------
@@ -195,11 +352,18 @@ def test_needs_embedding_full_lifecycle(backend, model_version):
     items = claim_items(claims)
     assert backend.needs_embedding(items, model_version) == [rid for rid, _ in items]
 
-    backend.upsert_embeddings([
-        emb_row(rid, basis(i), doc_id=claims[0].doc_id, model=model_version,
-                text=claims[i].statement)
-        for i, (rid, _) in enumerate(items)
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                rid,
+                basis(i),
+                doc_id=claims[0].doc_id,
+                model=model_version,
+                text=claims[i].statement,
+            )
+            for i, (rid, _) in enumerate(items)
+        ]
+    )
     # re-fetch with the stored hashes: nothing to embed
     items = claim_items(claims)
     assert backend.needs_embedding(items, model_version) == []
@@ -210,11 +374,18 @@ def test_needs_embedding_full_lifecycle(backend, model_version):
 def test_needs_embedding_returns_exactly_the_changed_record(backend, model_version):
     _, claims, _ = seed_zebra_doc(backend)
     items = claim_items(claims)
-    backend.upsert_embeddings([
-        emb_row(rid, basis(i), doc_id=claims[0].doc_id, model=model_version,
-                text=claims[i].statement)
-        for i, (rid, _) in enumerate(items)
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                rid,
+                basis(i),
+                doc_id=claims[0].doc_id,
+                model=model_version,
+                text=claims[i].statement,
+            )
+            for i, (rid, _) in enumerate(items)
+        ]
+    )
     changed = [(items[0][0], content_hash("an edited statement")), items[1]]
     assert backend.needs_embedding(changed, model_version) == [items[0][0]]
 
@@ -227,12 +398,22 @@ def test_needs_embedding_returns_exactly_the_changed_record(backend, model_versi
 def test_document_replace_removes_stale_claims(backend):
     doc, claims, _ = seed_zebra_doc(backend)
     replacement = [
-        claim_row("zebra-note-02", doc.doc_id, 0,
-                  "Field teams reported broken fences along the northern corridor.",
-                  confidence="medium", affects=["fence-maintenance"]),
-        claim_row("zebra-note-03", doc.doc_id, 1,
-                  "Ranger patrols now photograph every waypoint on the loop.",
-                  confidence="low", affects=["migration-corridor"]),
+        claim_row(
+            "zebra-note-02",
+            doc.doc_id,
+            0,
+            "Field teams reported broken fences along the northern corridor.",
+            confidence="medium",
+            affects=["fence-maintenance"],
+        ),
+        claim_row(
+            "zebra-note-03",
+            doc.doc_id,
+            1,
+            "Ranger patrols now photograph every waypoint on the loop.",
+            confidence="low",
+            affects=["migration-corridor"],
+        ),
     ]
     backend.upsert_document(doc, replacement, [], [])
 
@@ -250,9 +431,10 @@ def test_document_replace_removes_stale_aliases(backend):
     wiki = seed_wiki_doc(backend)
     assert "corridor map" in backend.alias_index()
     backend.upsert_document(
-        wiki, [], [],
-        [AliasRow(alias="Migration Corridor", wiki_slug="migration-corridor",
-                  domain="operations")],
+        wiki,
+        [],
+        [],
+        [AliasRow(alias="Migration Corridor", wiki_slug="migration-corridor", domain="operations")],
     )
     idx = backend.alias_index()
     assert "corridor map" not in idx
@@ -263,10 +445,17 @@ def test_delete_documents_not_in_cascades(backend, model_version):
     zebra_doc, zebra_claims, zebra_chunks = seed_zebra_doc(backend)
     refund_doc, refund_claims = seed_refund_doc(backend)
     wiki_doc = seed_wiki_doc(backend)
-    backend.upsert_embeddings([
-        emb_row(f"claim:{refund_claims[0].claim_id}", basis(3), doc_id=refund_doc.doc_id,
-                domain="customer-support", model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                f"claim:{refund_claims[0].claim_id}",
+                basis(3),
+                doc_id=refund_doc.doc_id,
+                domain="customer-support",
+                model=model_version,
+            ),
+        ]
+    )
 
     removed = backend.delete_documents_not_in({zebra_doc.rel_path, wiki_doc.rel_path})
 
@@ -302,15 +491,24 @@ def test_delete_documents_not_in_with_empty_set_removes_all(backend):
 
 def test_knn_exact_match_first(backend, model_version):
     doc, claims, _ = seed_zebra_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-        emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
-        emb_row(f"chunk:{doc.doc_id}#0", [0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                record_type="chunk", doc_id=doc.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+            emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
+            emb_row(
+                f"chunk:{doc.doc_id}#0",
+                [0.9, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                record_type="chunk",
+                doc_id=doc.doc_id,
+                model=model_version,
+            ),
+        ]
+    )
     hits = backend.knn(basis(0), k=3)
     assert [rid for rid, _ in hits] == [
-        "claim:zebra-note-01", f"chunk:{doc.doc_id}#0", "claim:zebra-note-02",
+        "claim:zebra-note-01",
+        f"chunk:{doc.doc_id}#0",
+        "claim:zebra-note-02",
     ]
     sims = [s for _, s in hits]
     assert sims[0] == pytest.approx(1.0, abs=1e-3)
@@ -322,17 +520,36 @@ def test_knn_filters_by_domain_and_record_type(backend, model_version):
     zebra_doc, _, _ = seed_zebra_doc(backend)
     refund_doc, _ = seed_refund_doc(backend)
     wiki_doc = seed_wiki_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=zebra_doc.doc_id,
-                domain="operations", model=model_version),
-        emb_row("claim:refund-faq-01", basis(0), doc_id=refund_doc.doc_id,
-                domain="customer-support", model=model_version),
-        emb_row("wiki:operations:migration-corridor", basis(0), record_type="wiki",
-                doc_id=wiki_doc.doc_id, domain="operations", model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                "claim:zebra-note-01",
+                basis(0),
+                doc_id=zebra_doc.doc_id,
+                domain="operations",
+                model=model_version,
+            ),
+            emb_row(
+                "claim:refund-faq-01",
+                basis(0),
+                doc_id=refund_doc.doc_id,
+                domain="customer-support",
+                model=model_version,
+            ),
+            emb_row(
+                "wiki:operations:migration-corridor",
+                basis(0),
+                record_type="wiki",
+                doc_id=wiki_doc.doc_id,
+                domain="operations",
+                model=model_version,
+            ),
+        ]
+    )
     ops_hits = backend.knn(basis(0), k=5, domain="operations")
     assert {rid for rid, _ in ops_hits} == {
-        "claim:zebra-note-01", "wiki:operations:migration-corridor",
+        "claim:zebra-note-01",
+        "wiki:operations:migration-corridor",
     }
     wiki_hits = backend.knn(basis(0), k=5, record_types=["wiki"])
     assert [rid for rid, _ in wiki_hits] == ["wiki:operations:migration-corridor"]
@@ -430,9 +647,11 @@ def test_hydration_returns_full_rows(backend):
 def test_wipe_truncates_everything_but_stays_usable(backend, dim, model_version):
     doc, claims, _ = seed_zebra_doc(backend)
     seed_wiki_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        ]
+    )
 
     backend.wipe()
 
@@ -456,9 +675,11 @@ def test_wipe_truncates_everything_but_stays_usable(backend, dim, model_version)
 
 def test_drop_schema_removes_the_index_and_its_identity(backend, dim, model_version):
     doc, _, _ = seed_zebra_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        ]
+    )
 
     backend.drop_schema()
 
@@ -496,13 +717,18 @@ def test_upsert_document_rolls_back_every_table_on_failure(backend, model_versio
     """
     doc, claims, chunks = seed_zebra_doc(backend)
     seed_wiki_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        ]
+    )
 
     poisoned = doc_row(
-        doc.doc_id, doc.rel_path, domain="operations",
-        title="Rewritten title", body="Rewritten body that must never be persisted.",
+        doc.doc_id,
+        doc.rel_path,
+        domain="operations",
+        title="Rewritten title",
+        body="Rewritten body that must never be persisted.",
     )
     duplicate_claims = [
         claim_row("dupe-claim", doc.doc_id, 0, "First insert of the duplicated id."),
@@ -522,7 +748,8 @@ def test_upsert_document_rolls_back_every_table_on_failure(backend, model_versio
     ]
     assert backend.get_claims(["dupe-claim"]) == []
     assert backend.claims_for_wiki(["migration-corridor"], k=10) == [
-        "zebra-note-01", "zebra-note-02",
+        "zebra-note-01",
+        "zebra-note-02",
     ]
     assert len(backend.get_chunks([chunks[0].chunk_id])) == 1
     assert backend.lexical_claims("refreshed quarterly", k=5) == ["zebra-note-01"]
@@ -534,14 +761,21 @@ def test_upsert_document_rolls_back_every_table_on_failure(backend, model_versio
 def test_upsert_embeddings_leaves_no_partial_batch_on_failure(backend, model_version):
     """A rejected row in a batch must not half-apply the batch."""
     doc, _, _ = seed_zebra_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        ]
+    )
 
     batch = [
         emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
-        emb_row(f"chunk:{doc.doc_id}#0", [0.0] * DIM, record_type="chunk",
-                doc_id=doc.doc_id, model=model_version),
+        emb_row(
+            f"chunk:{doc.doc_id}#0",
+            [0.0] * DIM,
+            record_type="chunk",
+            doc_id=doc.doc_id,
+            model=model_version,
+        ),
     ]
     with pytest.raises(StorageError):
         backend.upsert_embeddings(batch)
@@ -572,10 +806,11 @@ def test_zero_vector_is_refused_on_write_and_query(backend, model_version):
     """
     doc, _, _ = seed_zebra_doc(backend)
     with pytest.raises(StorageError, match="zero vector"):
-        backend.upsert_embeddings([
-            emb_row("claim:zebra-note-01", [0.0] * DIM, doc_id=doc.doc_id,
-                    model=model_version),
-        ])
+        backend.upsert_embeddings(
+            [
+                emb_row("claim:zebra-note-01", [0.0] * DIM, doc_id=doc.doc_id, model=model_version),
+            ]
+        )
     with pytest.raises(StorageError, match="zero vector"):
         backend.knn([0.0] * DIM, k=3)
 
@@ -583,13 +818,22 @@ def test_zero_vector_is_refused_on_write_and_query(backend, model_version):
 def test_reupserting_an_embedding_replaces_it_rather_than_duplicating(backend, model_version):
     """Re-embedding the same record_id moves it in the ANN index, once."""
     doc, _, _ = seed_zebra_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-    ])
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(1), doc_id=doc.doc_id, model=model_version,
-                text="an edited statement"),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+        ]
+    )
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                "claim:zebra-note-01",
+                basis(1),
+                doc_id=doc.doc_id,
+                model=model_version,
+                text="an edited statement",
+            ),
+        ]
+    )
 
     assert backend.stats()["counts"]["embeddings"] == 1
     # the old position no longer matches, the new one does, and only once
@@ -598,9 +842,12 @@ def test_reupserting_an_embedding_replaces_it_rather_than_duplicating(backend, m
     assert [rid for rid, _ in old_hits] == ["claim:zebra-note-01"]
     assert old_hits[0][1] == pytest.approx(0.0, abs=1e-3)  # now orthogonal
     # and the stored content hash moved with it
-    assert backend.needs_embedding(
-        [("claim:zebra-note-01", content_hash("an edited statement"))], model_version
-    ) == []
+    assert (
+        backend.needs_embedding(
+            [("claim:zebra-note-01", content_hash("an edited statement"))], model_version
+        )
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -620,9 +867,11 @@ def test_a_vector_whose_float32_norm_underflows_is_refused(backend, model_versio
     assert any(tiny), "the fixture must be non-zero in Python, or it tests nothing"
 
     with pytest.raises(StorageError, match="zero vector"):
-        backend.upsert_embeddings([
-            emb_row("claim:zebra-note-01", tiny, doc_id=doc.doc_id, model=model_version),
-        ])
+        backend.upsert_embeddings(
+            [
+                emb_row("claim:zebra-note-01", tiny, doc_id=doc.doc_id, model=model_version),
+            ]
+        )
     with pytest.raises(StorageError, match="zero vector"):
         backend.knn(tiny, k=3)
 
@@ -633,9 +882,11 @@ def test_a_vector_containing_nan_or_infinity_is_refused(backend, model_version, 
     vector = basis(0)
     vector[1] = float(bad)
     with pytest.raises(StorageError, match="NaN or infinity"):
-        backend.upsert_embeddings([
-            emb_row("claim:zebra-note-01", vector, doc_id=doc.doc_id, model=model_version),
-        ])
+        backend.upsert_embeddings(
+            [
+                emb_row("claim:zebra-note-01", vector, doc_id=doc.doc_id, model=model_version),
+            ]
+        )
     with pytest.raises(StorageError, match="NaN or infinity"):
         backend.knn(vector, k=3)
 
@@ -649,12 +900,19 @@ def test_shrinking_a_document_removes_its_dropped_records_vectors(backend, model
     silent recall decay on every edit, unrepairable by a later sync.
     """
     doc, claims, chunks = seed_zebra_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
-        emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
-        emb_row(chunks[0].chunk_id, basis(2), record_type="chunk", doc_id=doc.doc_id,
-                model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row("claim:zebra-note-01", basis(0), doc_id=doc.doc_id, model=model_version),
+            emb_row("claim:zebra-note-02", basis(1), doc_id=doc.doc_id, model=model_version),
+            emb_row(
+                chunks[0].chunk_id,
+                basis(2),
+                record_type="chunk",
+                doc_id=doc.doc_id,
+                model=model_version,
+            ),
+        ]
+    )
     assert backend.stats()["counts"]["embeddings"] == 3
 
     # Re-upsert the document with only the first claim and no chunks.
@@ -672,11 +930,16 @@ def test_shrinking_a_document_removes_its_dropped_records_vectors(backend, model
 def test_shrinking_a_wiki_document_keeps_its_own_wiki_vector(backend, model_version):
     """The cleanup must target claim:/chunk: records, not the document's own."""
     wiki = seed_wiki_doc(backend)
-    backend.upsert_embeddings([
-        emb_row("wiki:operations:migration-corridor", basis(0), record_type="wiki",
-                doc_id=wiki.doc_id, model=model_version),
-    ])
+    backend.upsert_embeddings(
+        [
+            emb_row(
+                "wiki:operations:migration-corridor",
+                basis(0),
+                record_type="wiki",
+                doc_id=wiki.doc_id,
+                model=model_version,
+            ),
+        ]
+    )
     backend.upsert_document(wiki, [], [], [])
-    assert [rid for rid, _ in backend.knn(basis(0), k=3)] == [
-        "wiki:operations:migration-corridor"
-    ]
+    assert [rid for rid, _ in backend.knn(basis(0), k=3)] == ["wiki:operations:migration-corridor"]

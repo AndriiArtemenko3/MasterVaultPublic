@@ -142,11 +142,12 @@ double-queues the same proposal.
 
 Both backends implement the same `StorageBackend` protocol
 (`src/mastervault/storage/base.py`) over the same logical schema
-(`src/mastervault/storage/migrations/pg/001_init.sql` for Postgres; the SQLite
-backend mirrors it by
-hand, using `sqlite-vec`'s `vec0` virtual table for vectors and FTS5 for
+(`src/mastervault/storage/migrations/{pg,sqlite}/001_init.sql`; the SQLite
+backend uses `sqlite-vec`'s `vec0` virtual table for vectors and FTS5 for
 lexical search in place of pgvector's HNSW index and Postgres's generated
-`tsvector` columns). `storage.backend = "auto"` (the default) picks Postgres
+`tsvector` columns). Both apply ordered versions and record them in
+`schema_migrations`; v1 upgrades in place to v2, while corrupt/pre-v1 and
+future schema metadata is refused without overwriting it. `storage.backend = "auto"` (the default) picks Postgres
 when `DATABASE_URL` is set and reachable, otherwise SQLite at
 `<workspace>/index.db`.
 

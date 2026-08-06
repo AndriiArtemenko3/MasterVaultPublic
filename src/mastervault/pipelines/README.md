@@ -7,7 +7,7 @@ This folder holds the three top-level runs a user triggers: `ingest`, `ask`, and
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | Re-exports the three entry points and their outcome dataclasses (`run_ingest`/`IngestOutcome`, `run_ask`/`AskOutcome`, `run_lint`/`LintOutcome`). |
-| `ingest.py` | Six-stage raw→routed pipeline: PLAN (enumerate + provenance-hash dedupe + freeze) → EXTRACT+WRITE per unit → INDEX (one `sync_vault`) → CONCEPT MATCH + CORPUS CHECK + ROUTE over every completed unit's claims → SUMMARY. Handles resume, budget-skip retry, wikilink auto-apply, and tiered review enqueue. |
+| `ingest.py` | Raw→routed pipeline: PLAN → EXTRACT+WRITE → initial INDEX → CONCEPT MATCH/CORPUS CHECK/ROUTE → final index convergence → SUMMARY. Tier-2 auto-approval synchronizes before archive; tier-1 links and reconciliation converge in the final pass. |
 | `ask.py` | Agentic multi-round retrieval under a sufficiency judge, then grounded LLM synthesis behind a citation gate, with a deterministic extractive fallback. Enforces three mechanical stop guards the judge never controls. |
 | `lint.py` | Mechanical vault-health scan (frontmatter validity, broken `affects`, duplicate claim ids, orphan wikis, drifted review items) plus an optional semantic contradiction pass that double-confirms every flag before queuing it. |
 
@@ -17,7 +17,7 @@ Ingest reads raw files via [../ingest](../ingest) (`discover_units`, `extract_cl
 
 ## Key concepts / entry points
 
-- `run_ingest` (`ingest.py:394`) — the full raw→routed run; note the INDEX step is a single `sync_vault` call (`ingest.py:573`) and the ROUTE phase re-runs idempotently over every completed unit rather than tracking its own resume state.
+- `run_ingest` — the full raw→routed run. The initial sync supplies the index used for concept matching; a final sync captures route-time source changes. The ROUTE phase re-runs idempotently over every completed unit rather than tracking its own resume state.
 - `_route_claim` (`ingest.py:210`) — dispatches one claim by match kind: auto-insert a wikilink, or enqueue a tier-2 cross-ref/extend, a tier-3 contradiction, or tally it toward a new concept (drafted only when ≥2 claims support the same label, see `_draft_new_concepts`, `ingest.py:334`).
 - `run_ask` (`ask.py:160`) — the round loop; stops on the judge's `sufficient` verdict, the `max_rounds` cap, the novelty floor (a round adding zero new `record_id`s, `ask.py:239`), the followup-dedup pass (`_dedupe_followups`, `ask.py:91`), or a judge hard-fail treated as sufficient.
 - `_apply_citation_gate` (`ask.py:120`) — strips any `[<record-id>]` not in the evidence pool; zero surviving citations forces the extractive fallback (`_extractive_answer`, `ask.py:137`), which is also the path a mock LLM naturally lands on.

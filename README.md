@@ -7,7 +7,8 @@
 
 > Status: `0.2.0`, alpha. A single-user CLI you run locally. The default path
 > (SQLite + local embeddings + a mock LLM) runs with no API keys and no
-> network after first install.
+> service dependency. `demo load` is offline; the local embedding model is
+> downloaded on the first command that embeds new text or a query.
 
 **Contents:** [Why this shape](#why-this-shape) · [Quickstart](#quickstart) ·
 [Architecture](#architecture-at-a-glance) · [The 10-minute tour](#the-10-minute-tour) ·
@@ -56,26 +57,14 @@ clone:
 git clone https://github.com/AndriiArtemenko3/MasterVaultPublic
 cd MasterVaultPublic
 uv sync                        # installs mastervault + local embeddings (fastembed, keyless)
-mvault init                    # creates the workspace + index schema
-mvault demo load                # loads the Larkstead Goods Co. dataset (seconds, no network)
-mvault search "refund window"   # hybrid search, fully keyless
+uv run mvault init             # creates the workspace + index schema
+uv run mvault demo load        # loads Larkstead (seconds, no model/network call)
+uv run mvault search "refund window"   # first query may download the local model
 ```
 
-### From the installed package
-
-The PyPI wheel ships the code, not the demo corpus — `mvault demo load` from an
-installed package will tell you the dataset is missing. Point MasterVault at
-your own material instead:
-
-```bash
-pip install mastervault         # or: uv tool install mastervault
-mvault init                     # creates the workspace + index schema
-mvault ingest ./my-docs --domain operations   # or drop notes in the vault and run `mvault sync`
-mvault search "refund window"
-```
-
-Clone the repository if you specifically want the bundled Larkstead demo and
-the 10-minute tour below.
+MasterVault is not currently published on PyPI, so the repository checkout is
+the supported install path. Packaging metadata and release automation exist,
+but neither is a claim that a public distribution is available.
 
 Postgres + pgvector is available as a swap-in for the index, not a
 requirement:
@@ -83,14 +72,16 @@ requirement:
 ```bash
 docker compose up -d           # starts Postgres+pgvector on :5433
 export DATABASE_URL=postgresql://mastervault:mastervault@localhost:5433/mastervault
-mvault init                    # same commands, now backed by Postgres
+uv run mvault init             # same commands, now backed by Postgres
 ```
 
-`mvault ask`, `mvault ingest`, and the semantic half of `mvault lint` call an
-LLM. Set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for real generative
-synthesis, or export `MV_LLM__PROVIDER=mock` to see the same commands run
-keyless against a deterministic extractive fallback. The tour below uses the
-mock path so every command works with zero setup.
+`uv run mvault ask`, `uv run mvault ingest`, and the semantic half of
+`uv run mvault lint` call an
+LLM. The shipped provider is `mock`: it gives `ask` a deterministic extractive
+fallback, but it cannot perform schema-valid claim extraction for a real
+ingest. For generated synthesis or ingestion, set `MV_LLM__PROVIDER=anthropic`
+with `ANTHROPIC_API_KEY`, or `MV_LLM__PROVIDER=openai` with `OPENAI_API_KEY`.
+The tour below uses the keyless mock path.
 
 ## Architecture at a glance
 
@@ -165,14 +156,14 @@ Everything below ran against the shipped demo dataset on a fresh workspace,
 SQLite backend, local embeddings, mock LLM. Load it first:
 
 ```bash
-mvault init
-mvault demo load
+uv run mvault init
+uv run mvault demo load
 ```
 
 ### 1. Plain search surfaces both sides of a contradiction
 
 ```bash
-mvault search "refund window"
+uv run mvault search "refund window"
 ```
 
 The demo corpus has a real contradiction seeded into it: a 2024 returns
@@ -192,7 +183,7 @@ number:
 ### 2. `ask` resolves the contradiction instead of just surfacing it
 
 ```bash
-mvault ask "how many days do customers have to return an item"
+uv run mvault ask "how many days do customers have to return an item"
 ```
 
 With `MV_LLM__PROVIDER=mock` the pipeline still runs its full retrieval loop
@@ -216,7 +207,7 @@ outside the retrieved evidence pool.
 ### 3. Cross-domain multi-hop: a support pattern traced to an operations root cause
 
 ```bash
-mvault ask "what caused the Alder desk mat warping complaints and how many units were affected"
+uv run mvault ask "what caused the Alder desk mat warping complaints and how many units were affected"
 ```
 
 Answering this needs two domains: a customer-support chat log where the
@@ -238,7 +229,7 @@ single retrieval pass over a two-domain question is not enough on its own.
 ### 4. The review queue already holds the confirmed contradictions
 
 ```bash
-mvault review list
+uv run mvault review list
 ```
 
 The demo ships with the 4 review items its own contradiction-detection pass
@@ -256,22 +247,23 @@ command (frontmatter, broken links, orphan wiki entries) without touching an
 LLM:
 
 ```bash
-mvault lint --mechanical-only
+uv run mvault lint --mechanical-only
 ```
 
-This corpus has one known, documented gap: 75 `affects:` entries that point
-at a wiki slug typo (`shipping` instead of `free-shipping`, and similar) with
-no fix applied yet, which is why this command exits 1. It is flagged rather
-than hidden; see [docs/DATASET.md](docs/DATASET.md) for the full account.
-The semantic contradiction pass itself needs an LLM (real key or mock) and
-is what produced the 4 items above at dataset build time; re-running it live
-against the shipped corpus reproduces the same 4 confirmations.
+The shipped corpus has zero broken `affects:` references and this command exits
+0. An earlier build had 75 dangling references; the pipeline reconciliation
+fix and exact repair are documented in
+[datasets/larkstead/processed/MANIFEST.md](datasets/larkstead/processed/MANIFEST.md).
+The semantic contradiction pass produced the 4 retained items at dataset
+build time with a real structured-output provider. The shipped mock provider
+can exercise the control flow keylessly, but it does not emit structured
+contradiction verdicts and therefore is not a reproduction of that adjudication.
 
 ### 5. A question the corpus has no answer for
 
 ```bash
-mvault search "does Larkstead accept cryptocurrency payments"
-mvault ask "does Larkstead accept cryptocurrency payments"
+uv run mvault search "does Larkstead accept cryptocurrency payments"
+uv run mvault ask "does Larkstead accept cryptocurrency payments"
 ```
 
 Larkstead never discusses cryptocurrency anywhere in its 352 source
@@ -286,7 +278,7 @@ golden set (abstention_rate 0.875).
 ### 6. The eval harness itself
 
 ```bash
-mvault eval
+uv run mvault eval
 ```
 
 Runs all 52 golden queries through lexical-only, vector-only, and hybrid
@@ -340,32 +332,36 @@ Three caveats, stated plainly rather than buried in a footnote:
 
 | Command | What it does |
 |---|---|
-| `mvault init` | Create the workspace and validate the index schema |
-| `mvault sync [--full]` | Sync the vault into the index; changed files only unless `--full` |
-| `mvault status` | Backend stats and active configuration |
-| `mvault reset` | Wipe the index and rebuild it with a full sync |
-| `mvault drop` | Delete the index entirely |
-| `mvault search <query>` | Hybrid search across claims, chunks, and wiki entries |
-| `mvault claims <query>` | Lexical search over the claims layer only |
-| `mvault wiki [show <slug>]` | List wiki entries, or render one |
-| `mvault ask <question>` | Agentic multi-round retrieval, judged, grounded, cited |
-| `mvault ingest <path> --domain <d>` | Raw files → source notes → indexed → concept-routed |
-| `mvault lint [--mechanical-only]` | Vault health check: mechanical always, semantic (LLM) optional |
-| `mvault review list \| show \| approve \| reject \| approve-pattern \| spot-check` | Triage the human-in-the-loop queue |
-| `mvault runs [show <run-id>]` | Inspect pipeline run directories: cost, status, failed units |
-| `mvault eval [--compare <baseline>]` | Retrieval eval harness against the golden query set |
-| `mvault demo load \| status \| reset \| delete` | Load, inspect, restore, or remove the shipped demo dataset |
+| `uv run mvault init` | Create the workspace and validate the index schema |
+| `uv run mvault sync [--full]` | Sync the vault into the index; changed files only unless `--full` |
+| `uv run mvault status` | Backend stats and active configuration |
+| `uv run mvault reset` | Wipe the index and rebuild it with a full sync |
+| `uv run mvault drop` | Delete the index entirely |
+| `uv run mvault search <query>` | Hybrid search across claims, chunks, and wiki entries |
+| `uv run mvault claims <query>` | Lexical search over the claims layer only |
+| `uv run mvault wiki [show <slug>]` | List wiki entries, or render one |
+| `uv run mvault ask <question>` | Agentic multi-round retrieval, judged, grounded, cited |
+| `uv run mvault ingest <path> --domain <d>` | Raw files → source notes → indexed → concept-routed |
+| `uv run mvault lint [--mechanical-only]` | Vault health check: mechanical always, semantic (LLM) optional |
+| `uv run mvault review list \| show \| approve \| reject \| approve-pattern \| spot-check` | Triage the human-in-the-loop queue |
+| `uv run mvault runs show <run-id>` | Inspect one pipeline run: cost, status, failed units |
+| `uv run mvault eval [--compare <baseline>]` | Retrieval eval harness against the golden query set |
+| `uv run mvault ask-eval [--compare <baseline>]` | Deterministic 14-case/97-check end-to-end ask gate |
+| `uv run mvault demo load \| status \| reset \| delete` | Load, inspect, restore, or remove the shipped demo dataset |
 
 ## The dataset
 
 Larkstead Goods Co. is a fictional Portland ergonomic-furniture company, and
 its 372 raw documents were not hand-written to look plausible: they were
 generated against a single bible file (staff voice cards, pricing history,
-SKUs, vendor contracts), checked by a mechanical consistency checker for
-arithmetic and ID errors, and then run through `mvault ingest` itself to
-produce the processed layer this demo loads. The dataset is the product's
-first real user. Five interlocking storylines, four seeded contradictions,
-and the full account of how the corpus was built and QC'd are in
+SKUs, vendor contracts) and checked by a mechanical consistency checker for
+arithmetic and ID errors. Ingestion produced 352 source notes; the other 20
+raw files have immutable historical no-output observations with verified raw
+hashes. The lost
+per-unit run log means their exact original failure or skip cause is unknown. The
+deterministic corpus ledger accounts for all 372. Five interlocking storylines,
+five narrative contradictions, and the actual four-item review result (one
+price-match pair plus three return-window variants) are documented in
 [docs/DATASET.md](docs/DATASET.md).
 
 ## FAQ and troubleshooting
@@ -373,52 +369,53 @@ and the full account of how the corpus was built and QC'd are in
 **Do I actually need an API key?**
 Not for `search`, `eval`, `demo`, `status`, or `lint --mechanical-only`. Those
 run on the default keyless path (SQLite, local `bge-small` embeddings, mock
-LLM). You need `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` only for generated `ask`
-answers, real `ingest` extraction, and the semantic half of `lint`.
+LLM). Generated `ask` answers, real `ingest` extraction, and the semantic half
+of `lint` require selecting `anthropic` or `openai` and setting its matching
+API key.
 
 **Why does `ask` print bullet points instead of a written answer?**
 Because `llm.provider` is `mock` (the default). The retrieval is real and every
 bullet is a cited piece of evidence, but the prose is stitched, not generated.
-Set an API key and the same evidence goes through grounded synthesis. The
-command prints a one-line note when it is running in mock mode.
+Set the matching provider and API key and the same evidence goes through
+grounded synthesis. The command prints a one-line note in mock mode.
 
 **`mvault status` says "index not initialized".**
-Run `mvault init` first, then `mvault demo load` (for the demo) or `mvault sync`
+Run `uv run mvault init` first, then `uv run mvault demo load` (for the demo) or
+`uv run mvault sync`
 (for your own vault). `status` only reports; it does not create the index.
 
-**`mvault lint --mechanical-only` exits with code 1.**
-That is expected on the shipped demo. The corpus has 75 `affects:` entries
-pointing at a wiki slug typo that has not been fixed, so the mechanical check
-reports it rather than hiding it. See [docs/DATASET.md](docs/DATASET.md) for the
-full account.
+**Did the shipped demo once fail `lint --mechanical-only`?**
+Yes. An earlier build had 75 dangling `affects:` references. The current
+corpus has zero and the mechanical lint command exits 0; the processed
+manifest preserves the cause and repair rather than erasing the history.
 
 **`hybrid+rerank: N/A` in the eval output.**
 Cross-encoder reranking needs a key. Set `COHERE_API_KEY` (or a real
-`reranker.backend`) and run `mvault eval --config all` to add that row. The
+`reranker.backend`) and run `uv run mvault eval --config all` to add that row. The
 headline hybrid numbers do not depend on it.
 
 **Is `demo load` calling the network?**
 No. It imports the precomputed embeddings sidecar shipped in the repo, so it
-never embeds anything. The first time you run `mvault eval` (or a real `sync`),
-the local `bge-small` model downloads once to embed queries; after that it is
-offline.
+never embeds anything. The first query-bearing command such as `search`, `ask`,
+or `eval` (or a real `sync`) downloads the local `bge-small` model once; after
+that it can run from the local model cache.
 
 **How do I point it at my own documents?**
 Drop `.md`, `.txt`, or `.pdf` files in a folder and run
-`mvault ingest ./my-docs --domain operations` (domains: `customer-support`,
+`uv run mvault ingest ./my-docs --domain operations` (domains: `customer-support`,
 `sales-crm`, `operations`, `internal-admin`). Use `--dry-run` first to see the
 plan and cost estimate. PDF ingestion is raw text extraction, with no OCR.
 
 **How do I use Postgres instead of SQLite?**
 `docker compose up -d`, then export the `DATABASE_URL` shown in the Quickstart
-and run `mvault init`. The backend is `auto`: it picks Postgres when
+and run `uv run mvault init`. The backend is `auto`: it picks Postgres when
 `DATABASE_URL` is reachable, else SQLite. Note the compose file uses port 5433,
 not the default 5432.
 
 **How do I reset or remove the demo?**
-`mvault demo reset` restores the pristine demo (wipes the index, clears the
-review queue, re-imports). `mvault demo delete` removes the whole workspace.
-`mvault drop` deletes the index but leaves the vault files.
+`uv run mvault demo reset` restores the pristine demo (wipes the index, clears the
+review queue, re-imports). `uv run mvault demo delete` removes the whole workspace.
+`uv run mvault drop` deletes the index but leaves the vault files.
 
 **Which model does it use, and how do I change it?**
 Defaults live in `mastervault.toml`; every key is overridable by an `MV_`
@@ -449,6 +446,7 @@ also carries its own `README.md`.
 
 ## License
 
-Code is Apache-2.0 (see [LICENSE](LICENSE)). The `datasets/larkstead/`
-synthetic dataset is CC BY 4.0. Full detail, including a note on why every
-entity in the dataset is fictional, is in [NOTICE](NOTICE).
+Code is Apache-2.0 (see [LICENSE](LICENSE)). Larkstead's synthetic content and
+data assets are CC BY 4.0 under the scoped
+[dataset licence](datasets/larkstead/LICENSE.md); code stored alongside the
+dataset remains Apache-2.0. Full detail is in [NOTICE](NOTICE).

@@ -2,8 +2,9 @@
 
 Stages (see module docstrings in `mastervault.ingest` for the per-stage
 contracts): PLAN (enumerate + dedupe + freeze) -> EXTRACT+WRITE per unit ->
-INDEX (one `sync_vault` call) -> CONCEPT MATCH + CORPUS CHECK + ROUTE over
-every completed unit's claims -> SUMMARY.
+INDEX -> CONCEPT MATCH + CORPUS CHECK + ROUTE over every completed unit's
+claims -> FINAL INDEX CONVERGENCE -> SUMMARY. Auto-approved tier-2 review
+changes also synchronize before they are archived as applied.
 
 Budget-exhaustion special case: a unit skipped with `reason="budget"` is
 NOT treated as permanently terminal by this pipeline's own resume logic (see
@@ -56,8 +57,10 @@ from mastervault.providers.embedding import EmbeddingProvider
 from mastervault.providers.llm import LLMProvider
 from mastervault.providers.prices import cost as price_cost
 from mastervault.providers.prices import estimate_tokens
+from mastervault.review.apply import ConflictResult
 from mastervault.review.apply import apply as apply_review_item
 from mastervault.review.queue import ReviewQueue
+from mastervault.review.reindex import sync_review_target
 from mastervault.storage.base import DocumentRow, StorageBackend
 from mastervault.sync import sync_vault
 from mastervault.sync.indexer import wiki_definition_text
@@ -140,7 +143,11 @@ def _pending_units(
     pending = []
     for u in units:
         ev = completed.get(u["unit_id"])
-        if ev is None or ev.event == EventName.UNIT_SKIPPED and ev.payload.get("reason") == "budget":
+        if (
+            ev is None
+            or ev.event == EventName.UNIT_SKIPPED
+            and ev.payload.get("reason") == "budget"
+        ):
             pending.append(u)
     return pending
 
@@ -177,6 +184,8 @@ def _enqueue(
     auto_approve: bool,
     vault_dir: Path,
     announce: Callable[[str], None],
+    reindex_hook: Callable[[Path], None] | None = None,
+    counters: dict[str, int] | None = None,
 ) -> None:
     item = ReviewItem(
         id=_next_item_id(ctx, counter),
@@ -194,7 +203,12 @@ def _enqueue(
     )
     path = review_queue.enqueue(item, proposal, kind)  # type: ignore[arg-type]
     if path is None:
-        ctx.emit(EventName.REVIEW_DEDUPED, stage="route", unit=unit_id, payload={"pattern_key": pattern_key})
+        ctx.emit(
+            EventName.REVIEW_DEDUPED,
+            stage="route",
+            unit=unit_id,
+            payload={"pattern_key": pattern_key},
+        )
         return
     ctx.emit(
         EventName.REVIEW_ENQUEUED,
@@ -203,10 +217,34 @@ def _enqueue(
         payload={"id": item.id, "pattern_key": pattern_key, "tier": tier},
     )
     if auto_approve and tier == 2:
-        result = apply_review_item(path, vault_root=vault_dir, queue=review_queue, clock=tick)
+        if reindex_hook is None:
+            raise RuntimeError("tier-2 auto-approval requires a derived-index synchronization hook")
+        result = apply_review_item(
+            path,
+            vault_root=vault_dir,
+            reindex_hook=reindex_hook,
+            queue=review_queue,
+            clock=tick,
+        )
+        if isinstance(result, ConflictResult):
+            if counters is not None:
+                counters["auto_approve_conflicts"] = counters.get("auto_approve_conflicts", 0) + 1
+            announce(f"auto-approval CONFLICT {item.id}: {result.reason}")
+            ctx.emit(
+                EventName.REVIEW_CONFLICT,
+                stage="route",
+                unit=unit_id,
+                level="error",
+                payload={"id": item.id, "target": target, "reason": result.reason},
+            )
+            return
         announce(f"auto-approved {item.id} -> {target}")
-        ctx.emit(EventName.AUTO_APPLIED, stage="route", unit=unit_id, payload={"id": item.id, "target": target})
-        _ = result  # ConflictResult is logged via the queue's own conflict marker
+        ctx.emit(
+            EventName.AUTO_APPLIED,
+            stage="route",
+            unit=unit_id,
+            payload={"id": item.id, "target": target},
+        )
 
 
 def _wiki_doc(backend: StorageBackend, domain: str, slug: str) -> DocumentRow | None:
@@ -234,6 +272,7 @@ def _route_claim(
     vault_dir: Path,
     announce: Callable[[str], None],
     counters: dict[str, int],
+    reindex_hook: Callable[[Path], None] | None = None,
 ) -> str:
     """Route one claim's concept match. Returns the (possibly wikilinked) body."""
     if match.kind == "exists" and match.matched_alias is not None:
@@ -260,15 +299,27 @@ def _route_claim(
         doc = _wiki_doc(backend, match.domain or "", match.wiki_slug or "")
         if doc is not None:
             _enqueue(
-                review_queue, ctx, counter, tick=tick, unit_id=unit_id, tier=2,
-                target=doc.rel_path, change_type=ChangeType.ADD_CROSS_REF,
-                pattern_key=f"ingest-cross-ref::{unit_id}", importance="normal",
+                review_queue,
+                ctx,
+                counter,
+                tick=tick,
+                unit_id=unit_id,
+                tier=2,
+                target=doc.rel_path,
+                change_type=ChangeType.ADD_CROSS_REF,
+                pattern_key=f"ingest-cross-ref::{unit_id}",
+                importance="normal",
                 rationale=f"Claim {claim_id!r} matches {match.wiki_slug!r} at similarity "
                 f"{match.similarity:.2f} with no literal alias text to auto-link.",
                 base_hash=doc.content_hash,
                 proposal=f"*Also supported by [[{unit_id}]]: {statement}*",
-                kind="replace", payload={"mode": "append_section"},
-                auto_approve=auto_approve, vault_dir=vault_dir, announce=announce,
+                kind="replace",
+                payload={"mode": "append_section"},
+                auto_approve=auto_approve,
+                vault_dir=vault_dir,
+                announce=announce,
+                reindex_hook=reindex_hook,
+                counters=counters,
             )
             counters["tier2"] += 1
         return current_body
@@ -290,44 +341,84 @@ def _route_claim(
             return current_body
         if pair.relation == "supports":
             _enqueue(
-                review_queue, ctx, counter, tick=tick, unit_id=unit_id, tier=2,
-                target=doc.rel_path, change_type=ChangeType.ADD_CROSS_REF,
-                pattern_key=f"ingest-cross-ref::{unit_id}", importance="normal",
-                rationale=pair.rationale, base_hash=doc.content_hash,
+                review_queue,
+                ctx,
+                counter,
+                tick=tick,
+                unit_id=unit_id,
+                tier=2,
+                target=doc.rel_path,
+                change_type=ChangeType.ADD_CROSS_REF,
+                pattern_key=f"ingest-cross-ref::{unit_id}",
+                importance="normal",
+                rationale=pair.rationale,
+                base_hash=doc.content_hash,
                 proposal=f"*Also supported by [[{unit_id}]]: {statement}*",
-                kind="replace", payload={"mode": "append_section"},
-                auto_approve=auto_approve, vault_dir=vault_dir, announce=announce,
+                kind="replace",
+                payload={"mode": "append_section"},
+                auto_approve=auto_approve,
+                vault_dir=vault_dir,
+                announce=announce,
+                reindex_hook=reindex_hook,
+                counters=counters,
             )
             counters["tier2"] += 1
         elif pair.relation == "extends":
             drafted = draft_extend(
-                llm, concept_name=_title_from_slug(match.wiki_slug or ""),
-                domain=match.domain or "", evidence=statement,
-                ledger=ctx.ledger, emit=_emit_adapter(ctx, "wiki_draft", unit_id),
+                llm,
+                concept_name=_title_from_slug(match.wiki_slug or ""),
+                domain=match.domain or "",
+                evidence=statement,
+                ledger=ctx.ledger,
+                emit=_emit_adapter(ctx, "wiki_draft", unit_id),
             )
             if drafted.ok:
                 _enqueue(
-                    review_queue, ctx, counter, tick=tick, unit_id=unit_id, tier=2,
-                    target=doc.rel_path, change_type=ChangeType.EDIT_WIKI_BODY,
-                    pattern_key=f"ingest-extend::{unit_id}", importance="normal",
-                    rationale=pair.rationale, base_hash=doc.content_hash,
-                    proposal=drafted.body_markdown, kind="replace",
+                    review_queue,
+                    ctx,
+                    counter,
+                    tick=tick,
+                    unit_id=unit_id,
+                    tier=2,
+                    target=doc.rel_path,
+                    change_type=ChangeType.EDIT_WIKI_BODY,
+                    pattern_key=f"ingest-extend::{unit_id}",
+                    importance="normal",
+                    rationale=pair.rationale,
+                    base_hash=doc.content_hash,
+                    proposal=drafted.body_markdown,
+                    kind="replace",
                     payload={"mode": "append_section"},
-                    auto_approve=auto_approve, vault_dir=vault_dir, announce=announce,
+                    auto_approve=auto_approve,
+                    vault_dir=vault_dir,
+                    announce=announce,
+                    reindex_hook=reindex_hook,
+                    counters=counters,
                 )
                 counters["tier2"] += 1
         elif pair.relation == "challenges":
             _enqueue(
-                review_queue, ctx, counter, tick=tick, unit_id=unit_id, tier=3,
-                target=doc.rel_path, change_type=ChangeType.ADD_OPEN_CONTRADICTION,
-                pattern_key=f"ingest-contradiction::{unit_id}", importance="high",
-                rationale=pair.rationale, base_hash=doc.content_hash,
+                review_queue,
+                ctx,
+                counter,
+                tick=tick,
+                unit_id=unit_id,
+                tier=3,
+                target=doc.rel_path,
+                change_type=ChangeType.ADD_OPEN_CONTRADICTION,
+                pattern_key=f"ingest-contradiction::{unit_id}",
+                importance="high",
+                rationale=pair.rationale,
+                base_hash=doc.content_hash,
                 proposal=(
                     "## Open Contradictions\n\n"
-                    f"- New source [[{unit_id}]] states: \"{statement}\" — {pair.rationale}"
+                    f'- New source [[{unit_id}]] states: "{statement}" — {pair.rationale}'
                 ),
-                kind="replace", payload={"mode": "append_section"},
-                auto_approve=False, vault_dir=vault_dir, announce=announce,
+                kind="replace",
+                payload={"mode": "append_section"},
+                auto_approve=False,
+                vault_dir=vault_dir,
+                announce=announce,
             )
             counters["tier3"] += 1
         return current_body
@@ -359,8 +450,12 @@ def _draft_new_concepts(
         concept_name = _title_from_slug(slug)
         evidence = "\n".join(f"- {stmt}" for _cid, stmt in occurrences)
         drafted = draft_new_entry(
-            llm, concept_name=concept_name, domain=domain.value, evidence=evidence,
-            ledger=ctx.ledger, emit=_emit_adapter(ctx, "wiki_draft", f"new::{slug}"),
+            llm,
+            concept_name=concept_name,
+            domain=domain.value,
+            evidence=evidence,
+            ledger=ctx.ledger,
+            emit=_emit_adapter(ctx, "wiki_draft", f"new::{slug}"),
         )
         if not drafted.ok:
             continue
@@ -386,14 +481,25 @@ def _draft_new_concepts(
         base_hash = content_hash(stub_text)
 
         _enqueue(
-            review_queue, ctx, counter, tick=tick, unit_id=f"new::{slug}", tier=3,
-            target=rel_path, change_type=ChangeType.NEW_WIKI_PAGE,
-            pattern_key=f"ingest-new-wiki::{slug}", importance="normal",
+            review_queue,
+            ctx,
+            counter,
+            tick=tick,
+            unit_id=f"new::{slug}",
+            tier=3,
+            target=rel_path,
+            change_type=ChangeType.NEW_WIKI_PAGE,
+            pattern_key=f"ingest-new-wiki::{slug}",
+            importance="normal",
             rationale=f"{len(occurrences)} claims this run bear on {concept_name!r} "
             "with no existing wiki concept close enough to attach to.",
-            base_hash=base_hash, proposal=drafted.body_markdown, kind="replace",
-            payload={"mode": "full_file"}, auto_approve=False,
-            vault_dir=vault_dir, announce=announce,
+            base_hash=base_hash,
+            proposal=drafted.body_markdown,
+            kind="replace",
+            payload={"mode": "full_file"},
+            auto_approve=False,
+            vault_dir=vault_dir,
+            announce=announce,
         )
         counters["new_concepts"] += 1
 
@@ -511,7 +617,9 @@ def run_ingest(
             if not src.is_file():
                 reason = f"unit {u['unit_id']}: source file missing: {src}"
                 ctx.write_summary({"error": reason})
-                return IngestOutcome(EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason})
+                return IngestOutcome(
+                    EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+                )
             try:
                 current_sha = content_hash(read_raw_text(src))
             except UnreadableDocument as exc:
@@ -529,7 +637,9 @@ def run_ingest(
                     f"(expected sha {u['sha']}, now {current_sha})"
                 )
                 ctx.write_summary({"error": reason})
-                return IngestOutcome(EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason})
+                return IngestOutcome(
+                    EXIT_CODES["resume-conflict"], ctx.run_id, ctx.run_dir, {"error": reason}
+                )
 
     max_claims = settings.ingestion.max_claims_per_doc
     any_hard_fail = False
@@ -549,7 +659,9 @@ def run_ingest(
             # UnreadableDocument, which is NOT an OSError; a source that was
             # readable at plan time and is not now (deleted, unmounted,
             # truncated) must still fail this unit rather than the whole run.
-            ctx.emit(EventName.UNIT_FAILED, stage="extract", unit=unit_id, payload={"reason": str(exc)})
+            ctx.emit(
+                EventName.UNIT_FAILED, stage="extract", unit=unit_id, payload={"reason": str(exc)}
+            )
             any_hard_fail = True
             if fail_fast:
                 break
@@ -560,19 +672,35 @@ def run_ingest(
 
         try:
             extraction = extract_claims(
-                llm, unit_slug=unit_id, title=title, source_type=source_type,
-                domain=domain.value, body=raw_text, max_claims=max_claims,
-                ledger=ctx.ledger, emit=_emit_adapter(ctx, "extract", unit_id),
+                llm,
+                unit_slug=unit_id,
+                title=title,
+                source_type=source_type,
+                domain=domain.value,
+                body=raw_text,
+                max_claims=max_claims,
+                ledger=ctx.ledger,
+                emit=_emit_adapter(ctx, "extract", unit_id),
             )
         except BudgetExceeded:
             for rest in pending[idx:]:
-                ctx.emit(EventName.UNIT_SKIPPED, stage="extract", unit=rest["unit_id"], payload={"reason": "budget"})
+                ctx.emit(
+                    EventName.UNIT_SKIPPED,
+                    stage="extract",
+                    unit=rest["unit_id"],
+                    payload={"reason": "budget"},
+                )
             ctx.emit(EventName.BUDGET_EXHAUSTED, stage="extract", payload=ctx.ledger.snapshot())
             budget_exhausted = True
             break
 
         if not extraction.ok:
-            ctx.emit(EventName.UNIT_FAILED, stage="extract", unit=unit_id, payload={"reasons": extraction.hard_fails})
+            ctx.emit(
+                EventName.UNIT_FAILED,
+                stage="extract",
+                unit=unit_id,
+                payload={"reasons": extraction.hard_fails},
+            )
             any_hard_fail = True
             if fail_fast:
                 break
@@ -590,11 +718,18 @@ def run_ingest(
             key_claims=extraction.claims,
             provenance=str(src),
         )
-        _write_source_note(note_path, model, _render_source_body(title, raw_text), provenance_hash=u["sha"])
+        _write_source_note(
+            note_path, model, _render_source_body(title, raw_text), provenance_hash=u["sha"]
+        )
 
         report = validate_source_note(note_path, fix=True, settings=settings)
         if report.status == "hard_fail":
-            ctx.emit(EventName.UNIT_FAILED, stage="validate", unit=unit_id, payload={"reasons": report.hard_fails})
+            ctx.emit(
+                EventName.UNIT_FAILED,
+                stage="validate",
+                unit=unit_id,
+                payload={"reasons": report.hard_fails},
+            )
             any_hard_fail = True
             if fail_fast:
                 break
@@ -602,7 +737,9 @@ def run_ingest(
 
         note_rel = note_path.relative_to(vault_dir).as_posix()
         ctx.emit(
-            EventName.UNIT_COMPLETED, stage="write", unit=unit_id,
+            EventName.UNIT_COMPLETED,
+            stage="write",
+            unit=unit_id,
             payload={"note": note_rel, "n_claims": len(extraction.claims)},
         )
         newly_completed[unit_id] = note_rel
@@ -610,17 +747,34 @@ def run_ingest(
     # -- INDEX: one sync call, regardless of how the loop above ended ----------
     sync_report = sync_vault(vault_dir, backend, embedder)
     ctx.emit(
-        EventName.STAGE_COMPLETED, stage="index",
-        payload={"docs_upserted": sync_report.docs_upserted, "records_embedded": sync_report.records_embedded},
+        EventName.STAGE_COMPLETED,
+        stage="index",
+        payload={
+            "docs_upserted": sync_report.docs_upserted,
+            "records_embedded": sync_report.records_embedded,
+        },
     )
 
     # -- CONCEPT MATCH + CORPUS CHECK + ROUTE, over every completed unit --------
     counters = {
-        "linked": 0, "tier2": 0, "tier3": 0, "new_concepts": 0, "claims": 0,
+        "linked": 0,
+        "tier2": 0,
+        "tier3": 0,
+        "new_concepts": 0,
+        "claims": 0,
         "affects_dropped": 0,
+        "auto_approve_conflicts": 0,
     }
     new_concept_tally: dict[str, list[tuple[str, str]]] = {}
     review_counter = [0]
+
+    def reindex_review(target: Path) -> None:
+        sync_review_target(
+            target,
+            vault_root=vault_dir,
+            backend=backend,
+            embedder=embedder,
+        )
 
     # Replayed from the event log, so `note` is whatever JSON was written --
     # only a non-empty string names a note we can reopen.
@@ -640,7 +794,9 @@ def run_ingest(
             note_path = resolve_within(vault_dir, note_rel)
         except PathBoundaryError as exc:
             ctx.emit(
-                EventName.UNIT_SKIPPED, stage="route", unit=unit_id,
+                EventName.UNIT_SKIPPED,
+                stage="route",
+                unit=unit_id,
                 payload={"reason": "unsafe-note-path", "note": note_rel, "error": str(exc)},
             )
             continue
@@ -665,12 +821,25 @@ def run_ingest(
             try:
                 match = match_claim(statement, affects, backend, embedder, settings.ingestion)
                 current_body = _route_claim(
-                    claim_id=claim.get("id", ""), statement=statement, match=match, llm=llm,
-                    backend=backend, ctx=ctx, review_queue=review_queue, counter=review_counter,
-                    tick=tick, unit_id=unit_id, source_rel_path=source_rel_path,
-                    current_body=current_body, new_concept_tally=new_concept_tally,
-                    affects_candidates=affects, auto_approve=auto_approve, vault_dir=vault_dir,
-                    announce=announce, counters=counters,
+                    claim_id=claim.get("id", ""),
+                    statement=statement,
+                    match=match,
+                    llm=llm,
+                    backend=backend,
+                    ctx=ctx,
+                    review_queue=review_queue,
+                    counter=review_counter,
+                    tick=tick,
+                    unit_id=unit_id,
+                    source_rel_path=source_rel_path,
+                    current_body=current_body,
+                    new_concept_tally=new_concept_tally,
+                    affects_candidates=affects,
+                    auto_approve=auto_approve,
+                    vault_dir=vault_dir,
+                    announce=announce,
+                    counters=counters,
+                    reindex_hook=reindex_review,
                 )
             except BudgetExceeded:
                 budget_exhausted = True
@@ -681,9 +850,17 @@ def run_ingest(
     if not budget_exhausted:
         try:
             _draft_new_concepts(
-                new_concept_tally, llm=llm, domain=domain, vault_dir=vault_dir, ctx=ctx,
-                review_queue=review_queue, counter=review_counter, tick=tick,
-                auto_approve=auto_approve, announce=announce, counters=counters,
+                new_concept_tally,
+                llm=llm,
+                domain=domain,
+                vault_dir=vault_dir,
+                ctx=ctx,
+                review_queue=review_queue,
+                counter=review_counter,
+                tick=tick,
+                auto_approve=auto_approve,
+                announce=announce,
+                counters=counters,
             )
         except BudgetExceeded:
             budget_exhausted = True
@@ -716,16 +893,26 @@ def run_ingest(
             payload={
                 "target": note_rel,
                 "kind": "affects-prune",
-                "dropped": [
-                    {"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped
-                ],
+                "dropped": [{"claim_id": d.claim_id, "slug": d.slug} for d in repair.dropped],
             },
         )
         note_path.write_text(repair.text, encoding="utf-8")
 
+    # Routing mutates source-note bodies/frontmatter after the first sync. A
+    # second pass converges tier-1 links, reconciliation, and any draft stubs;
+    # auto-approved review targets were already synchronized atomically by
+    # their apply hook above.
+    final_sync_report = sync_vault(vault_dir, backend, embedder)
+    sync_report.docs_upserted += final_sync_report.docs_upserted
+    sync_report.docs_deleted += final_sync_report.docs_deleted
+    sync_report.records_embedded += final_sync_report.records_embedded
+    sync_report.records_reused = final_sync_report.records_reused
+
     exit_code = (
-        EXIT_CODES["budget-exhausted"] if budget_exhausted
-        else EXIT_CODES["completed-with-failures"] if any_hard_fail
+        EXIT_CODES["budget-exhausted"]
+        if budget_exhausted
+        else EXIT_CODES["completed-with-failures"]
+        if any_hard_fail or counters["auto_approve_conflicts"]
         else EXIT_CODES["ok"]
     )
     summary = {
@@ -738,6 +925,7 @@ def run_ingest(
         "tier3_enqueued": counters["new_concepts"] + counters["tier3"],
         "new_concepts_drafted": counters["new_concepts"],
         "affects_dropped": counters["affects_dropped"],
+        "auto_approve_conflicts": counters["auto_approve_conflicts"],
         "unreadable_inputs": len(plan.get("unreadable") or []),
         "docs_upserted": sync_report.docs_upserted,
         "records_embedded": sync_report.records_embedded,

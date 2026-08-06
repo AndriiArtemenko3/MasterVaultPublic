@@ -6,6 +6,37 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Ordered schema-v2 migrations for SQLite and PostgreSQL, with an explicit
+  `schema_migrations` ledger and upgrade coverage from a representative v0.2
+  schema-v1 workspace.
+- A deterministic Larkstead corpus ledger: all 372 raw files are now exactly
+  accounted for as 352 processed, 0 excluded, and 20 retained historical
+  no-output observations of unknown cause, without inventing the lost
+  per-unit stage or failure mechanism.
+- Machine-readable retrieval/ask baseline provenance covering the source tree,
+  corpus ledger and eval input, dependency lock, config, prompts, schema
+  migrations, models, runtime/platform, Git state, and exact reproduction
+  commands.
+- A dataset-local CC BY 4.0 scope and attribution file, while repository code
+  (including dataset QA programs) remains Apache-2.0.
+
+### Fixed
+
+- Approving a Markdown review change now synchronizes the derived index before
+  reporting success. On handled reindex/archive exceptions it rolls back only
+  when the proposal is still live; a concurrent human edit is preserved,
+  reindexed best-effort, and left as a visible conflict. This does not claim
+  process-crash atomicity.
+- Public setup and dataset documentation now reflects the source-only install,
+  shipped mock provider, first local-model download, zero current broken
+  `affects:` links, actual four-item contradiction queue, current eval suite,
+  and the 352 processed / 20 historical-no-output split.
+
+These are v0.3 foundation changes in progress; this entry does not claim a
+v0.3 release, tag, package publication, or deployment.
+
 ## [0.2.0] - 2026-07-22
 
 A reliability and engineering release. No new product features: the work went
@@ -66,8 +97,8 @@ evaluation, security boundaries, and the release path.
   now runs at the end of the ingest route phase and drops unresolvable slugs
   (it never remaps: guessing the target of an invented label would fabricate a
   link). The corpus was repaired with that same function. Counts, the
-  embeddings sidecar, the four seeded contradictions and every retrieval metric
-  are unchanged.
+  embeddings sidecar, the four pending semantic-lint review items, and every
+  retrieval metric are unchanged.
 - **Review application could write outside the workspace.** A review item's
   `target:` is produced by an LLM-driven pipeline but was joined to the vault
   root directly, so `../..` or an absolute path could overwrite any file the

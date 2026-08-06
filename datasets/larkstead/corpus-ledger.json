@@ -1,0 +1,2991 @@
+{
+  "schema_version": 1,
+  "dataset": "larkstead",
+  "hash_algorithm": "sha256",
+  "summary": {
+    "raw": 372,
+    "processed": 352,
+    "excluded": 0,
+    "historical_no_output": 20,
+    "historical_no_output_observations": 20
+  },
+  "entries_sha256": "94c0f2ada9fa2119dcabdaa1336a4654fb51bfa85a3b032973efab51b7fd8104",
+  "entries": [
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-ana-priya-refund-batch-hold.md",
+      "raw_sha256": "3bda7fc0b38f1bfe32ea3cf2c729d204f2c33e1b7cd9d9693e761cba5416ed8f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-ana-priya-refund-batch-hold.md",
+      "processed_sha256": "d52f3d0870660dff736a0e619fec0ed41cb7eca914b2fccadc709088c89f3e2d",
+      "provenance_hash": "3bda7fc0b38f1bfe"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-celeste-jonah-wis01-macro-question.md",
+      "raw_sha256": "38816b49da1be2970a5c701ab7be0985239576ed4139eee1b4e4196cfa1b4659",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-celeste-jonah-wis01-macro-question.md",
+      "processed_sha256": "35dc87c2e168d21e1f019dda56e9f39f1e0a2012925216c5681c4e111bf6978d",
+      "provenance_hash": "38816b49da1be297"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-hank-dmitri-cascadia-dock-schedule.md",
+      "raw_sha256": "adf40f030f8e175ad53045892791a9ee683a171f678ff627841cc8223ddd56f3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-hank-dmitri-cascadia-dock-schedule.md",
+      "processed_sha256": "81de71547d1255b80c93bda13ddeb0577158aab3e65c5026ec4137a5d6950134",
+      "provenance_hash": "adf40f030f8e175a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-jonah-priya-shift-handoff-gift-order.md",
+      "raw_sha256": "5b7bbfb18b164b91a0df60f05e15f04ed5dce0426d81b0cc5c6af03a1738bffa",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-jonah-priya-shift-handoff-gift-order.md",
+      "processed_sha256": "4c263e863a588f74607e5986dd7711655fcc1c100a4cb85e6535bc83378ea1ec",
+      "provenance_hash": "5b7bbfb18b164b91"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-mara-holiday-coverage-schedule.md",
+      "raw_sha256": "8b62eaebb0bb678df19401ac2e327112d2b5635c1d9b6f77a1f409538fe61b49",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-mara-holiday-coverage-schedule.md",
+      "processed_sha256": "b70823e80613d3c1eb8df2d23aa2604a8864d73ff35850be4c12e98c7a74541e",
+      "provenance_hash": "8b62eaebb0bb678d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-priya-dmitri-mat-curl-pattern.md",
+      "raw_sha256": "a02c1a50c15ac4cc5e579b02befd8662fc64dfc281f4b308987ac2b05ff81dc2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-priya-dmitri-mat-curl-pattern.md",
+      "processed_sha256": "d2a82ba7267af4684e0cc890fa8cd3e836488d783d85f4a001ac9d8773b60274",
+      "provenance_hash": "a02c1a50c15ac4cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-ray-priya-wa-tax-rounding.md",
+      "raw_sha256": "d3c7f20c3b3a8eee24e3a5d304ad34b1bfd12616781ac5754146b203a88e0fd2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-ray-priya-wa-tax-rounding.md",
+      "processed_sha256": "048c058f0826c46ff1588057e1618c14aaf878f5dd7b64f98f82dad3178aea6b",
+      "provenance_hash": "d3c7f20c3b3a8eee"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-sofia-priya-drizzle-wismo-warning.md",
+      "raw_sha256": "14a0b0fe6693895ba1a080cba6f710139e4d3cc6828d083f69d30863ffffaa0a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-sofia-priya-drizzle-wismo-warning.md",
+      "processed_sha256": "ac8f8edcca620fe8d997dc1e5e080b8048c9478c475288118367fb61d77e72a9",
+      "provenance_hash": "14a0b0fe6693895b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/chat-tom-priya-b2b-escalation-etiquette.md",
+      "raw_sha256": "f892e2ce762d8afd31541117f7307fd98f83076d7eb0d044bca00ed02464b104",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-chat-tom-priya-b2b-escalation-etiquette.md",
+      "processed_sha256": "b461defbb62fee3805cdccfc27c8806c4786fab71ce42e85726ccfe35ebf4ffa",
+      "provenance_hash": "f892e2ce762d8afd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/chat-log/vireo-flicker-escalation-chat.md",
+      "raw_sha256": "be8258d992c11ff1e8e98caaa629746907505f7c87157dd10d61fdb4bf525558",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/chat-log-vireo-flicker-escalation-chat.md",
+      "processed_sha256": "f69af945af7237bc40aade33a4358e7013424cf544818f4119283476d782aaee",
+      "provenance_hash": "be8258d992c11ff1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2024-q3-61200-jonah-followthrough.md",
+      "raw_sha256": "9276683ecd934e7fe4cb31c9826d33600bbe52a96e1525a7f590d10a518b74b5",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2024-q3-61200-jonah-followthrough.md",
+      "processed_sha256": "58895301a46cd1c6ec0c1ef227020846a7a749ae0c958f650429f38af95c0c51",
+      "provenance_hash": "9276683ecd934e7f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2024-q4-61209-holiday-slowdown.md",
+      "raw_sha256": "9f61567aa3e339aa05ce8ebf32bbac44519d746a0322ba2b59e468ebf96eb639",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2024-q4-61209-holiday-slowdown.md",
+      "processed_sha256": "b064f016e1b9a6f0f7aa14d667699643a08cbd96666ced6b8c9a1055c5d91f98",
+      "provenance_hash": "9f61567aa3e339aa"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-01-61218-priya-showroom.md",
+      "raw_sha256": "4109d8e8c36eb0682a97822f791dbbf6393a9665c0551f63da61f1edd5ac0ec6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-01-61218-priya-showroom.md",
+      "processed_sha256": "bd31b1e96ed49fc38c603a71e9a2dbf76b0a05fe68da022e071b603bbf42ad23",
+      "provenance_hash": "4109d8e8c36eb068"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-04-61227-celeste-policy-links.md",
+      "raw_sha256": "0af25a5d522e770b1e0d31a23f8ce6e1219d8eefb0f9724de00b33459df7ab55",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-04-61227-celeste-policy-links.md",
+      "processed_sha256": "4031eaed832d66311ad7d2df872b00ff149c912cb178e00283b8539211634cfd",
+      "provenance_hash": "0af25a5d522e770b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-07-61236-replacement-parts.md",
+      "raw_sha256": "bb11f9d4492305d3a39ac92d3633d7fad7b3ef6a1b3c5f1c2f881fba9ac74877",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-07-61236-replacement-parts.md",
+      "processed_sha256": "928d9f799f2ed588af289fcafc214a0930a49fb93e8d49ae0dc2841d48cb80ea",
+      "provenance_hash": "bb11f9d4492305d3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-08-61245-11hr-response.md",
+      "raw_sha256": "f116dd97938637cb9e493f91299d2eae6ffecb466dd45c1c6638080bc9353087",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-08-61245-11hr-response.md",
+      "processed_sha256": "836f9304fdecc282a9065ef475c6b09f252b79892cab8adebb8bc58e1c2d54e1",
+      "provenance_hash": "f116dd97938637cb"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-10-61254-summit-physio-b2b.md",
+      "raw_sha256": "b0329372a204bf1912bfdebed90f926dc064f76ec415b616d96be8d98b17e753",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-10-61254-summit-physio-b2b.md",
+      "processed_sha256": "899cc065df7c5124cb8505d02e4a18782cd634795f5267169b338d43cf0e2ba4",
+      "provenance_hash": "b0329372a204bf19"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2025-12-61263-gift-order-mixups.md",
+      "raw_sha256": "b0e5d48a2b87da8ef0441cd3de5fd3fffa24735f0fb449a84f133a889030e30f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2025-12-61263-gift-order-mixups.md",
+      "processed_sha256": "d44f0f897f24928b5dc4e1a2143fc9804a443892e9bc6c0691970a174d8b0147",
+      "provenance_hash": "b0e5d48a2b87da8e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2026-02-61273-delay-updates.md",
+      "raw_sha256": "1b68f5481f162b944fcec621d24fe4d3daa9fc536ae2f599ef403716764d0edc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2026-02-61273-delay-updates.md",
+      "processed_sha256": "e0ec88b8b26ae05ae7351e829165cd0872f52a3589f84d70e3bbe05954411d1a",
+      "provenance_hash": "1b68f5481f162b94"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/csat-batch/csat-2026-04-61282-troubleshooting-guides.md",
+      "raw_sha256": "b36170f64efb87607e4ab87b14b9027fd683b0b760e284cd960e017945596a93",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/csat-batch-csat-2026-04-61282-troubleshooting-guides.md",
+      "processed_sha256": "c5040587584927bea78e44df919568ee93107595115bfdd71de4d1bb4f3f0ab5",
+      "provenance_hash": "b36170f64efb8760"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq/sl2-faq-returns.md",
+      "raw_sha256": "1212f2552da6910849644f8d95a0936ae27e6577105d84410994d360e465dd75",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-sl2-faq-returns.md",
+      "processed_sha256": "4a3bdcb4736414bb02c832b4a109664df6173a2bb0a58230a8b5bacb6bdffd6d",
+      "provenance_hash": "1212f2552da69108"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq/sl5-shipping-faq-2024.md",
+      "raw_sha256": "0ba859f6dadfe52a09b87d6334909f7318bc9b6a44c917489687bbdf1d386a30",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-sl5-shipping-faq-2024.md",
+      "processed_sha256": "2c5a6c763208d525fc287e6a1df6d3af45833fdca4fca39002b5252e079898d7",
+      "provenance_hash": "0ba859f6dadfe52a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq/vireo-flicker-troubleshooting-guide.md",
+      "raw_sha256": "2e439bd4691001b32bacfc3b22f35a09f57fa3656406358af75920f8e59b2e25",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-vireo-flicker-troubleshooting-guide.md",
+      "processed_sha256": "58d021f7c68fbe7bbd2f751218ad1c57d5018184b4e2a7ba441e4a51f38789b8",
+      "provenance_hash": "2e439bd4691001b3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq/vireo-help-doc-2024.md",
+      "raw_sha256": "f5bc6562195658d053f248e26ab751a6a90434046689abc5606a433307db082e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-vireo-help-doc-2024.md",
+      "processed_sha256": "fc5cc11d90d908e5c1073cf1a7efd700adc8b95a8976afda8f657c20bfce12c0",
+      "provenance_hash": "f5bc6562195658d0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-accessibility-setup-hub.md",
+      "raw_sha256": "c39b89a1d5fb923b207f5d4818e4384568d4a7d5db36a6aee501f13baac4c7b7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-accessibility-setup-hub.md",
+      "processed_sha256": "0ee79ebc7d2880bcc65c06854454bd560e8473890032f25de47f090631a604e3",
+      "provenance_hash": "c39b89a1d5fb923b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-alder-mat-care.md",
+      "raw_sha256": "c7d8b7fc04aeea594c78ab608b03be5b5b73e42b612f1a81ad20c18b1b846819",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-alder-mat-care.md",
+      "processed_sha256": "518a7543c9eb50632033887909716bfc6db8cdab7e0a8b4e2e41edc3a93e647c",
+      "provenance_hash": "c7d8b7fc04aeea59"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-b2b-ordering-guide.md",
+      "raw_sha256": "1b42510cd4b99d7920c875bfc613d13821f0dd8c19eab4282a7f310f1d3cd600",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-b2b-ordering-guide.md",
+      "processed_sha256": "f36e943c6b777a43080ab698c107f34313c13fd8be6bab6d5dce2919f9178f17",
+      "provenance_hash": "1b42510cd4b99d79"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-birch-desk-assembly.md",
+      "raw_sha256": "c695fc768746bafaa03ccba114e814efb8d2e981113e2c55ee2186c6320fb693",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-birch-desk-assembly.md",
+      "processed_sha256": "545f5014a7443635790e8a03d60061bb76932e97c0ffa0d70067195b1c3a923a",
+      "provenance_hash": "c695fc768746bafa"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-cable-management.md",
+      "raw_sha256": "918e15a93856159ad18eeb39e8914571b6d10a65bd7bd7f67d509fcfcef7da77",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-cable-management.md",
+      "processed_sha256": "50dc15fe884459390ca69eea87a53484e7ab248c904906f364ce3406a701cdf5",
+      "provenance_hash": "918e15a93856159a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-caster-floor-protection-guide.md",
+      "raw_sha256": "4220f4ea66e3c0a5fc76bf62afc5c6702260f7f2e6820672143ecaaba2d4a02a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-caster-floor-protection-guide.md",
+      "processed_sha256": "cf899c4fd1c0b50d2702d219f2fd26eb7abdbff402106555df5da6a2329357c9",
+      "provenance_hash": "4220f4ea66e3c0a5"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-desk-weight-capacity.md",
+      "raw_sha256": "4ea739892aa68e703db328311d997c3b9d51ebe76878646f2342cf1a1eee371b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-desk-weight-capacity.md",
+      "processed_sha256": "2b5f87254e075f3864ae548dafc712dec1932a88ba4bc26e69406cc56fed2b87",
+      "provenance_hash": "4ea739892aa68e70"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-grommet-cover-install.md",
+      "raw_sha256": "f18dabd52b568f1fb992a95305b2fa1419fe91c04bd4e4fe7f7ba4bd9880fcbd",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-grommet-cover-install.md",
+      "processed_sha256": "2ebce526036ffe4bc1aba47172c8cf1e36c7f0663cb0820165093ee624d1978d",
+      "provenance_hash": "f18dabd52b568f1f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-hazel-drawer-install.md",
+      "raw_sha256": "d8355cd4a362dcd05e22501a0bbd3c7060c2be559dc773146c37652f02100b39",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-hazel-drawer-install.md",
+      "processed_sha256": "abf3b5a6bfdda431deda806e7ef6c2cb01205b75d2487a90ba0eeeee8c8f483d",
+      "provenance_hash": "d8355cd4a362dcd0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-motor-control-box-error-codes.md",
+      "raw_sha256": "1bb084782ccfe282ad4ab6ac61ecdac175d3d6ae7c91bf22f45c4dfb029b4cc0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-motor-control-box-error-codes.md",
+      "processed_sha256": "868edce41718a12eb07ade0cdb429d0a50f075489c74447b23c653cbe1f44be3",
+      "provenance_hash": "1bb084782ccfe282"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-moving-with-your-desk.md",
+      "raw_sha256": "7bf205af7c0caa6fd9c50334e325ef05a23203c6927189f738943523201a49f1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-moving-with-your-desk.md",
+      "processed_sha256": "93dd03e267562a29cc9c4ea1f448d057d1bbf41c119ff7342625d90683404d86",
+      "provenance_hash": "7bf205af7c0caa6f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-replacement-parts-overview.md",
+      "raw_sha256": "64055b1400248bbedc6d6eddb399bea254b4392dd3ab3d6f717ad287cf4af483",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-replacement-parts-overview.md",
+      "processed_sha256": "8c8741daf651017b01830066af5ff5250e7c0c94ad889a336885f983e994e2bb",
+      "provenance_hash": "64055b1400248bbe"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-rowan-chair-adjustment.md",
+      "raw_sha256": "d44230f2383e258feb954da260589a1dd88809a191ffd49c50396c4399880e78",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-rowan-chair-adjustment.md",
+      "processed_sha256": "9602c74d82309886689aba41069087cf50107b900671b5562276cf58ecb59037",
+      "provenance_hash": "d44230f2383e258f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-rowan-chair-fit-guide.md",
+      "raw_sha256": "d9b0c96fe6e524d4e40e6ce34a78800ef58a94e573b2a6bf07e06576bdc22edb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-rowan-chair-fit-guide.md",
+      "processed_sha256": "f1d318d1b5b8cdca3c78e1997b6507a16eb7fc88b0484708167e30db43484517",
+      "provenance_hash": "d9b0c96fe6e524d4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-showroom-pickup.md",
+      "raw_sha256": "b5308c78e47a7a48e8f29fee0b5019c3c7492cfd774d7de5a775c78426a95e75",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-showroom-pickup.md",
+      "processed_sha256": "cf83c2e2938b1d97873b616919ea7e078e3dfb3b71af79758c4bbbc0e4be284b",
+      "provenance_hash": "b5308c78e47a7a48"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-sparrow-cable-kit-contents.md",
+      "raw_sha256": "55fde35eb82ff6f755ced859ac93aafc82a464bc0a67018be2591c6b2f2cc0f0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-sparrow-cable-kit-contents.md",
+      "processed_sha256": "1e45ec3fab25b18c4485489126a84d33e5e8ff86850867471e4ba9972a974109",
+      "provenance_hash": "55fde35eb82ff6f7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-standing-desk-habits.md",
+      "raw_sha256": "aa5b88155354acacf76f90121140d20dedac971ef427299dcfbeddddc6f50f56",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-standing-desk-habits.md",
+      "processed_sha256": "40d0cfb8c84d869ad3f9be9525e52191a226913c43e49a087631e7e278c50f6a",
+      "provenance_hash": "aa5b88155354acac"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-vireo-app-setup.md",
+      "raw_sha256": "92fd10d7062b4d04d3c238f8d210f48e201357826e812ea8446f7e2e3ff05865",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-vireo-app-setup.md",
+      "processed_sha256": "784b4a34d2e20d40b359a070616afd7b7e1c75794ff5372b256827caf417d7d6",
+      "provenance_hash": "92fd10d7062b4d04"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/faq-help/faq-wren-laptop-stand-compatibility.md",
+      "raw_sha256": "fd21791adb4a340e91486ccf2092df1056701a23df79e60cad580050db4291b6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/faq-help-faq-wren-laptop-stand-compatibility.md",
+      "processed_sha256": "755883474ebab9e09062456ef6fd6021d9c3b849c8e4d4ba865837e75d5f16b2",
+      "provenance_hash": "fd21791adb4a340e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/macro/macro-b2b-01-routing.md",
+      "raw_sha256": "ad7bfef678209f8ac2d0981a01ec99f4d533ca6abae1fe8620090cfb55476d87",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/macro-macro-b2b-01-routing.md",
+      "processed_sha256": "d05e50a8e2b808beb383a4eadc9cb5bc67f81c20570510544ff56ea5b024647d",
+      "provenance_hash": "ad7bfef678209f8a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/macro/macro-dmg-01-damaged-in-transit.md",
+      "raw_sha256": "589da6bac8163fd87ed0314bacb0291c71837f6f83183ceebc8f109fb89c1d93",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/macro-macro-dmg-01-damaged-in-transit.md",
+      "processed_sha256": "b3d7eda982d7434afd87105ca792cf0994f58278cb4336a9dad242b0a6bd50b8",
+      "provenance_hash": "589da6bac8163fd8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/macro/macro-pkp-01-showroom-pickup-ready.md",
+      "raw_sha256": "59574848eb7f238b9334cd1d94a2b6e34fde98f3c2316fca05cc659ff8889208",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/macro-macro-pkp-01-showroom-pickup-ready.md",
+      "processed_sha256": "fdbc0cabcacdaece4f618e069922d6be290c4d6181d60b672f057e58ef87123f",
+      "provenance_hash": "59574848eb7f238b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/macro/macro-wis-01-where-is-my-order.md",
+      "raw_sha256": "0e2f19b7a7577665369b0c5c4d50b62999956c1da8f2d3e7d3ed94da1fa94189",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/macro-macro-wis-01-where-is-my-order.md",
+      "processed_sha256": "0577db12b002a3c6e6be15f4b143ca51666014cd8efe845056d6af1d2fbd2fe3",
+      "provenance_hash": "0e2f19b7a7577665"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/policy-price-match-v1.md",
+      "raw_sha256": "8815a37b00fb7213184e396cae1f51b2e2f0ee499ba7ad610f6516d6cb4b0468",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-policy-price-match-v1.md",
+      "processed_sha256": "c33ae954f2ab554f5d779c72760715927d9023689464a3e38da039087f345731",
+      "provenance_hash": "8815a37b00fb7213"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/policy-price-match-v2.md",
+      "raw_sha256": "086f89ff63be6838c8c9ffd0a460b3f25a1d80f2b2f8a57ebf0e4ad12ac23c5f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-policy-price-match-v2.md",
+      "processed_sha256": "1e8972c61208c7dfa770936ec33ec5843e6c085d8fe25fa50042e0ccd7449b45",
+      "provenance_hash": "086f89ff63be6838"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/policy-support-data-handling-v1.md",
+      "raw_sha256": "8b77d8dab12feda30d7cbee95042a84496a9379f21353f525a254840985f7fe4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-policy-support-data-handling-v1.md",
+      "processed_sha256": "ecdde67414815a078ee1486ed2cc4477799b5fa87b1134bc1a59b0f0d85a99a0",
+      "provenance_hash": "8b77d8dab12feda3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v1.md",
+      "raw_sha256": "9ab9d48a1f42a0bb16e998b6d12ebc3353c31794fad2e57545a975f0269ccdce",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-sl2-policy-returns-v1.md",
+      "processed_sha256": "1bed198d580623229cd9a2ca581ed9305a1333754a8923cb1cc5c843e9d5bec9",
+      "provenance_hash": "9ab9d48a1f42a0bb"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md",
+      "raw_sha256": "d9ee838873469234faa0e5e435ab61cfda1b1cff32daf7d792f7b1e8d673bb6d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-sl2-policy-returns-v2.md",
+      "processed_sha256": "8788c42e9d74a47ba44d9d37cd6557751994220c9c9596ff02da4d084dc89bd1",
+      "provenance_hash": "d9ee838873469234"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/policy/sl5-shipping-policy-2026-01.md",
+      "raw_sha256": "d8c96e53ea6b7ba070c53019b80def5648081e6b9b3aea6bdab2cdfcc972f570",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/policy-sl5-shipping-policy-2026-01.md",
+      "processed_sha256": "af680190bb4be09dc6d17dc5218872c71c7f441bfe860b9396111a1e432980a1",
+      "provenance_hash": "d8c96e53ea6b7ba0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/process/macro-lot-2025-14-mat-warp.md",
+      "raw_sha256": "ccf6a7b336c0f5dd586ad475bf42833af8c96115da82f31884d2554abc494de2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/process-macro-lot-2025-14-mat-warp.md",
+      "processed_sha256": "3af89f17ce650a3173ebcfa854596f83881c0c381e88d6dbefe6e72aa8b3c009",
+      "provenance_hash": "ccf6a7b336c0f5dd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/sop/sl2-macros-returns-helprise.md",
+      "raw_sha256": "d9faa2254df5a5916a44b233b396a3ba1ee2c576828e1dffbf98bf7063156a8e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/sop-sl2-macros-returns-helprise.md",
+      "processed_sha256": "b6bd61bfcb56a0c44c0c001f697656337f6acdbbe32bb4c30a13b1b5d6a608b7",
+      "provenance_hash": "d9faa2254df5a591"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05402-whitfield-flicker.md",
+      "raw_sha256": "de5fdc1f3f43d10f07fff37d8165b652504a6389caf72ee54483d963e978b6dc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05402-whitfield-flicker.md",
+      "processed_sha256": "848bd9557acfac8c66cde3a971ceb7fcd8f04308a9d17713a2eaf5a6d190fae8",
+      "provenance_hash": "de5fdc1f3f43d10f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05417-mwangi-flicker.md",
+      "raw_sha256": "cd56e9beea2fb2c571e9adc143c8d08c101a7bab8fb48a114e7a21712c112095",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05417-mwangi-flicker.md",
+      "processed_sha256": "fdf9b50fd788142b6eda9d7175f7053875f39bcdadbf38a762a9f5f80638ad07",
+      "provenance_hash": "cd56e9beea2fb2c5"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05433-mercer-flicker.md",
+      "raw_sha256": "86b8bcceec34f02f22a849a381f77cd223fff504a376b052249591b541d238f1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05433-mercer-flicker.md",
+      "processed_sha256": "7cbed07ad1da0547cdee0f3d0e607bbe362450f7aea56bd35debca79dc14f992",
+      "provenance_hash": "86b8bcceec34f02f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05461-donovan-flicker.md",
+      "raw_sha256": "74509e81f5b51923608a30483ad4da80aa397bce16c08b6343a6da4245599ad6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05461-donovan-flicker.md",
+      "processed_sha256": "0b7c7ea5d8b10c604fc3d5df3d88e531a86b6a546f2834f9f8559f851cb80b70",
+      "provenance_hash": "74509e81f5b51923"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05478-kwan-flicker.md",
+      "raw_sha256": "3822f38fbc3a63200542930ac87e5cc92c4d18a9992766283cadfa6434b918df",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05478-kwan-flicker.md",
+      "processed_sha256": "485b24b8c13e3eb3c491963d5bc1b9a48c0bec4502940922932be01fe66124b4",
+      "provenance_hash": "3822f38fbc3a6320"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05490-reyes-flicker.md",
+      "raw_sha256": "3aa9809f3312781158852b5dec0d8ef6b43d5df038abdcf02d8abab461f1dfa3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05490-reyes-flicker.md",
+      "processed_sha256": "25a59404719e44416707be38cfefc58cbc5e88391e8e904a29d319b772665d23",
+      "provenance_hash": "3aa9809f33127811"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-05511-cobalt-flicker.md",
+      "raw_sha256": "bad72413c02f4c632954b37bc9768ebbeed22228d81f6bde28c186d6e21c0cd0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-05511-cobalt-flicker.md",
+      "processed_sha256": "ed402edd775810ee65dbab56f8157fd160f65c8f2b7bc486ddc472e7a9b5e73a",
+      "provenance_hash": "bad72413c02f4c63"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-60200-kestrel-showroom-floor-model.md",
+      "raw_sha256": "4fc67b0a110cf700c8924d58bc5596930ee1db08f9d2af25d0009d57397fefb2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-60200-kestrel-showroom-floor-model.md",
+      "processed_sha256": "cbef39436d4594cff8f089f56c0c8a214f36c7d066dff2f75c765d11bb3166f9",
+      "provenance_hash": "4fc67b0a110cf700"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2025-60201-donovan-magpie-screws.md",
+      "raw_sha256": "4e61493d1eedacbd2feebcf6c92449424258c9148854e30d96df359620eadf54",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2025-60201-donovan-magpie-screws.md",
+      "processed_sha256": "271e63263e6686e865a59dfe1c2b16743a94f7c7b06bc0f972c2657b225a6c9c",
+      "provenance_hash": "4e61493d1eedacbd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-00041-feld-flicker.md",
+      "raw_sha256": "97cf5d771b6274dedab9901b363c4e3120e82ab7bb78a6ab8aad938370a0c7f3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-00041-feld-flicker.md",
+      "processed_sha256": "433a8e740570f94e5c0b50017246ae1e716a8bbd43e4168eae57940246d48f25",
+      "provenance_hash": "97cf5d771b6274de"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-00057-hutchins-flicker.md",
+      "raw_sha256": "eedae0d55cf312758a5f642a3aef472e97524475b0cb2bab3ed19ce71d39954a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-00057-hutchins-flicker.md",
+      "processed_sha256": "aef9b208cf900226ac5cc5ba3575a57915b217e3ab53fe3f3b3f3db889f0f321",
+      "provenance_hash": "eedae0d55cf31275"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-00089-cole-flicker.md",
+      "raw_sha256": "5eba8c5cdb27c776d8e17940c76f34c34c5d10e8943b11a7faca1df12e262160",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-00089-cole-flicker.md",
+      "processed_sha256": "088a63e4cef68a82498faaa00a854b24832a998732bf37e84ee78197d7bd40f8",
+      "provenance_hash": "5eba8c5cdb27c776"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-00112-nakamura-flicker.md",
+      "raw_sha256": "a393546ccfbcac0d92f58e309a3e85c21f31e459fc3f9e8afa77b73d188d8dc1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-00112-nakamura-flicker.md",
+      "processed_sha256": "e1f6b238cc452a219f0d37d8ada27fdd030123efdf8e7a65fa192d062155ab3d",
+      "provenance_hash": "a393546ccfbcac0d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-00136-silva-flicker.md",
+      "raw_sha256": "7f1f004f9e3fa0fa23ac935feb561337ef3550622fc40be73edf646cb8c17b42",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-00136-silva-flicker.md",
+      "processed_sha256": "4b56a8071730c049dbbe4ed0b9cd76709245b39bb21de072ad040474081b94f8",
+      "provenance_hash": "7f1f004f9e3fa0fa"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60202-bell-price-change.md",
+      "raw_sha256": "0547f312c7722fd3f5ede7b5402efa834e1fb52bef032dbb50477eacbfe19068",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60202-bell-price-change.md",
+      "processed_sha256": "621042ec26e094142c4745e1700ed92c38ff48be06f2ce8e454b0fcf53eebed6",
+      "provenance_hash": "0547f312c7722fd3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60203-cobalt-clinic2-leveling-feet.md",
+      "raw_sha256": "fc575722a7b6f8ccc85c448356c08b74ba0428419fec0b27dd9b0c294101c4b1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60203-cobalt-clinic2-leveling-feet.md",
+      "processed_sha256": "7d894077803eb7796041830d6c6d9cc888cac4842fd4f610680f1f3605256238",
+      "provenance_hash": "fc575722a7b6f8cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60204-feld-motor-control-box-install.md",
+      "raw_sha256": "3069be8a947d44af7b6d231af1b12b76d56cb2cc9c19d6030b4e67e1704eb953",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60204-feld-motor-control-box-install.md",
+      "processed_sha256": "2938103d336d565ab433f6b9cc3788ced8de0acb0f9035044fc2d6174f98200d",
+      "provenance_hash": "3069be8a947d44af"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60205-chen-desk-disassembly.md",
+      "raw_sha256": "a5a29fc01b7ec590510bab591e9d0ed1fadaf248c8fd66fa580f0eab1c41be56",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60205-chen-desk-disassembly.md",
+      "processed_sha256": "77f434f9cc54d096453d1ffeea0f13b2007647b25029fc8e8aca60834e3cde3b",
+      "provenance_hash": "a5a29fc01b7ec590"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60206-whitfield-spare-adapter.md",
+      "raw_sha256": "b3885afed4edd6c91a6594969a89dc8a96bc25efadfa22f52d29769259ec93fe",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60206-whitfield-spare-adapter.md",
+      "processed_sha256": "7a4bb3f54a2a4d283d143c4771b67bc8219e6705deaaac3eb88a8814ee035a98",
+      "provenance_hash": "b3885afed4edd6c9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/hd-2026-60207-silva-canada-shipping-quote.md",
+      "raw_sha256": "ab93cb196e17275a933ff2b79845112a83d7285a35b241a51758fc832227c056",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-hd-2026-60207-silva-canada-shipping-quote.md",
+      "processed_sha256": "e8e926d498cdbbbdd95f15e1f828c54c7cedb7dd6963ef6fd3545befe537259c",
+      "provenance_hash": "ab93cb196e17275a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl2-ticket-hd-2024-02311.md",
+      "raw_sha256": "870bb91ca715ad282a20a8fd7136c9d37831c21dc6a16998b01e8f99ba3d86ee",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl2-ticket-hd-2024-02311.md",
+      "processed_sha256": "fa78fa9f836145b377c0a96e62960b598b39229f9c4cbbf1803e292244e288ee",
+      "provenance_hash": "870bb91ca715ad28"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl2-ticket-hd-2025-01592.md",
+      "raw_sha256": "e36a6a4abf1183bdff4559f5ea2acd1ffa502bf1df08e0988d031c5d4cb87591",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl2-ticket-hd-2025-01592.md",
+      "processed_sha256": "5f052563e4eaa8dd25162a7107db7117232c94c252569383f3a9d57ac9600559",
+      "provenance_hash": "e36a6a4abf1183bd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl2-ticket-hd-2026-00187.md",
+      "raw_sha256": "cd764d73cd1e9ba92a088538dbacf121a2f2acc25b4118c94e8014f7e7838bac",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl2-ticket-hd-2026-00187.md",
+      "processed_sha256": "9aacc5db56edb76062c9aa8b77aaccf5041b4cacb7bcf2258c7b5ac3b1bf75bf",
+      "provenance_hash": "cd764d73cd1e9ba9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl2-ticket-hd-2026-00214.md",
+      "raw_sha256": "4e2aad2bd17916682ac33fd7fbedac0920f49f26e96a968cff5c8471725d5a16",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl2-ticket-hd-2026-00214.md",
+      "processed_sha256": "507aa3359ee0e8e9367d618df2fcbc7d5150eb9809821b03b0578f78dd65d707",
+      "provenance_hash": "4e2aad2bd1791668"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00118.md",
+      "raw_sha256": "28bb6771afbb50ad11bc4ea7d246dfb05f759a4246cd87f4d510abbb6a45da55",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00118.md",
+      "processed_sha256": "46e0d267728bd47712bb71a68dfa5c9e8c7af0556db596ef98ad345105a3d589",
+      "provenance_hash": "28bb6771afbb50ad"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00123.md",
+      "raw_sha256": "9be693d0d80ada5dd209d10e928c1972c609a0fdcc6a4713166aa6bbf4061f6b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00123.md",
+      "processed_sha256": "63bf9c757b0d85fbe11604cc7f2e1587464c47a68089c9deb5f3e8a2c88beb1d",
+      "provenance_hash": "9be693d0d80ada5d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00141.md",
+      "raw_sha256": "1173491d4ab3a132d0c71061619f75f582a7ff99003f07912754f8c94db4e6e3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00141.md",
+      "processed_sha256": "b43bf0fb56a4a76994ce6ebabe99d2b38147f53d46376fb2dbdda79c58b2a111",
+      "provenance_hash": "1173491d4ab3a132"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00196.md",
+      "raw_sha256": "7d534fc9aa57d8cc1fc3a83a7c647b36dd35eb3b947237291d2e0a25374b58a4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00196.md",
+      "processed_sha256": "97fdf08f18fd7cb7d34b3c7aaf87e940b3159fe0b05c941c9b1562be38fc2c06",
+      "provenance_hash": "7d534fc9aa57d8cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00203.md",
+      "raw_sha256": "e0b7f18b3ba3fdb128b107a0ade5e61a1eb0a3fbcb934cef3bcc8668bda932de",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00203.md",
+      "processed_sha256": "d66b605e714f38225e3f3ec562b8c58a801edc02aea8e83250c58fa30e0af47a",
+      "provenance_hash": "e0b7f18b3ba3fdb1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/sl5-ticket-hd-2026-00219.md",
+      "raw_sha256": "96eb26b7c61dec0b570795e6f2e8b7d488ffa28676813f9faa8e6bdee46889e4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-sl5-ticket-hd-2026-00219.md",
+      "processed_sha256": "711b0fc1b4843cffa1766ae22f27ca37b392faae652d1c5b9b1ab2a1ad83a13f",
+      "provenance_hash": "96eb26b7c61dec0b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-alma-reyes-mat-warp.md",
+      "raw_sha256": "17bbd3bec525e1638eed5c4914eb34b50213e81842b1d3ade5792412b3cd3a1c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-alma-reyes-mat-warp.md",
+      "processed_sha256": "00da011e5b27019d5a84baa569131f74f0dd3c8b08aaa880aa4497bbfce5f506",
+      "provenance_hash": "17bbd3bec525e163"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-alma-reyes-rowan-squeak-armrests.md",
+      "raw_sha256": "6b0ccdd09dd1cd68201f29f81ef7a950cf8d6242e45e8bae558a0ed40cd6c006",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-alma-reyes-rowan-squeak-armrests.md",
+      "processed_sha256": "8d8a4c4d0939539e31c765831c2702d7344a9a5277dbc3c6cf4edbb0a96dcab5",
+      "provenance_hash": "6b0ccdd09dd1cd68"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-beatrix-mwangi-mat-warp.md",
+      "raw_sha256": "16821c27fc22141cd1d76ff9b14070f7e0d37665c4b5eeefc612ab7f4dc64024",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-beatrix-mwangi-mat-warp.md",
+      "processed_sha256": "c3aeef432266cfee3dc31abc37ed07736a84df3894b6e64d9823c9d24a40aa0b",
+      "provenance_hash": "16821c27fc22141c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-beatrix-mwangi-sage-vs-sand-swatches.md",
+      "raw_sha256": "190b923af4906e8be6a10285cf230e7a3757d4f19d525d35b63647defbb5648f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-beatrix-mwangi-sage-vs-sand-swatches.md",
+      "processed_sha256": "75e99da9aaa0c709d2dff99135da9ed5822e85936593c93579d4e81f73ac14ec",
+      "provenance_hash": "190b923af4906e8b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-derek-holt-sparrow-clips.md",
+      "raw_sha256": "f2b4197d6992e8b280c67231bf3ea2f212d9221c52256879198afe415dbec076",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-derek-holt-sparrow-clips.md",
+      "processed_sha256": "f6e1e387049907f49e7454d33ccd3bcd390970fc1855945c193fec6004e53167",
+      "provenance_hash": "f2b4197d6992e8b2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-desmond-cole-gift-packing-slip.md",
+      "raw_sha256": "a6706fd6d1a790bc1ff73c8c5dbd1b510702d2382304a00f0ec10a83966f515d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-desmond-cole-gift-packing-slip.md",
+      "processed_sha256": "0d4f4d828543b1ed8bb264a9f33bd8c70cbde01c8bf40dff6a756f43c146369e",
+      "provenance_hash": "a6706fd6d1a790bc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-desmond-cole-mat-warp-gift.md",
+      "raw_sha256": "c9986759eef4a54bc10ad74a91d797766ff93f208f632ba9ba35a17b40c197dc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-desmond-cole-mat-warp-gift.md",
+      "processed_sha256": "35f1b4832aa31940fa70b3bf12c0895d1164f1d638b6b9bcee1ad7f44db1f8b5",
+      "provenance_hash": "c9986759eef4a54b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-freya-lindholm-heron-arm-ultrawide.md",
+      "raw_sha256": "f533f8d7aecd6d29739cb49d53f5b28e4f066e2fb6332ef0c674536058b2913a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-freya-lindholm-heron-arm-ultrawide.md",
+      "processed_sha256": "fb9bc0d7ee2e57ba14e6d1fd1a826718ec75af7c01e1afc9114419e261a8c4b5",
+      "provenance_hash": "f533f8d7aecd6d29"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-freya-lindholm-mat-warp.md",
+      "raw_sha256": "b1f46f3cd92b1aeaf09dec685d24649bdac579924530a095e3602040267cd4d1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-freya-lindholm-mat-warp.md",
+      "processed_sha256": "0150e3a29cb5e6acfbaf1e96ad6a7fcbaa96b8fe59e3ee7b1dbb3e26ff5acee3",
+      "provenance_hash": "b1f46f3cd92b1aea"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-gwen-harada-mat-curl-policy-quote.md",
+      "raw_sha256": "5cb568462e814894751f7cd2ffd27fbfb46a5dd94e41c3eb10231623edee7ec2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-gwen-harada-mat-curl-policy-quote.md",
+      "processed_sha256": "906ca438645ce11021fd626e94a68b4d5ec1c5926413fecd69176779f412f51b",
+      "provenance_hash": "5cb568462e814894"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-ivy-chen-gas-lift-sink.md",
+      "raw_sha256": "b5ba079522780756693437e022b0497ec383e7a0802b688ec4feedf64b1e0e93",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-ivy-chen-gas-lift-sink.md",
+      "processed_sha256": "216ddfc4f656fce4c80409ef2cef252bca959376a0f1ec5cc96336df043a170b",
+      "provenance_hash": "b5ba079522780756"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-ivy-chen-mat-warp-repeat.md",
+      "raw_sha256": "f04515aa358679b35fe6d8617d8beda651b894ee73550cf88c9ca9263f7002cb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-ivy-chen-mat-warp-repeat.md",
+      "processed_sha256": "e170c81f623dcfb87a5981ab6c2263e4bb67ce18a05cb16b0310d4766343fc8f",
+      "provenance_hash": "f04515aa358679b3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-kit-donovan-mat-warp.md",
+      "raw_sha256": "d0c2cbc145331ca758250db4f0916b4c31fba5f88c9b642d28a3f36c9ec65f0d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-kit-donovan-mat-warp.md",
+      "processed_sha256": "cac50fcec9ce1a997f22e7132fc87746689b76fcd4d6599104fc698ac3258f94",
+      "provenance_hash": "d0c2cbc145331ca7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-kit-donovan-vireo-wifi-band.md",
+      "raw_sha256": "6307084f4a793b2ab7f79b13c7dddb44b28bb85e70fc9c1a7aee3a04369dd730",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-kit-donovan-vireo-wifi-band.md",
+      "processed_sha256": "fdce374b22b8d654dd11ebf33536d821ed6bdbbe001eb8477a9d5ae2d1fe95d3",
+      "provenance_hash": "6307084f4a793b2a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-leo-vance-mat-warp.md",
+      "raw_sha256": "6c03e16a6a4e44c8e3ce2ac939c1214b9c7ad6a7d720181d4ca18ed291a03909",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-leo-vance-mat-warp.md",
+      "processed_sha256": "b8b82e14f0ed9fe287d42a638335dcc77d05f57c2d524a65c64aa56d5e83ae31",
+      "provenance_hash": "6c03e16a6a4e44c8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-marcus-bell-desk-motor-hum.md",
+      "raw_sha256": "7694608b02519d70ffac1732a1964323744566606d0f10d45ab65320ae84c37f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-marcus-bell-desk-motor-hum.md",
+      "processed_sha256": "478f580d92b9f43bc5d8d86b8bbda0a3e9468c64684fee6b3bd3e1c68f7daf03",
+      "provenance_hash": "7694608b02519d70"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-marcus-bell-hazel-drawer-rail.md",
+      "raw_sha256": "ab68faf398065aa92c126966182f4e26f34d61784c00adcdf1f81d931c70d9dd",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-marcus-bell-hazel-drawer-rail.md",
+      "processed_sha256": "bb5ec62494d045023f98e2d8f00a7cc12efb766892a8220f2534713739a6b416",
+      "provenance_hash": "ab68faf398065aa9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-marcus-bell-mat-warp-refund.md",
+      "raw_sha256": "631cf575237887a4d0021cf38f27d7155b74ea7abddeba6bd35817854b0e088b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-marcus-bell-mat-warp-refund.md",
+      "processed_sha256": "29f92773ef51bafbebfe631f49ca2730eb04090a32fc63d69d592233df6919c3",
+      "provenance_hash": "631cf575237887a4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-nora-feld-mat-edge-curl.md",
+      "raw_sha256": "cbef041c67515bc67721f267b4479231e03cfcbae212ae30694a9a8371005996",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-nora-feld-mat-edge-curl.md",
+      "processed_sha256": "450577434a0ab9b47bd213d58e5582a5861d31c7d06b3cfc287b5c7116b85953",
+      "provenance_hash": "cbef041c67515bc6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-nora-feld-stripped-hex-bolt.md",
+      "raw_sha256": "94fa960db38bfaad937018e272a0538b33394d014f60b93d71a4eb513b709efc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-nora-feld-stripped-hex-bolt.md",
+      "processed_sha256": "3f68c1ad4321dd2cf72c63a9f1ae190a3a9dc3213090d75944a6cc56d98b2322",
+      "provenance_hash": "94fa960db38bfaad"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-owen-gallagher-carton-split.md",
+      "raw_sha256": "962e6fe0777ae8a6d5f0c6c1beb246ab0a3f97197eace369bfa702ff30044f61",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-owen-gallagher-carton-split.md",
+      "processed_sha256": "a1626998d165f094b267a2eb5a75d0a323a744612202694720b67f447a10500b",
+      "provenance_hash": "962e6fe0777ae8a6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-owen-gallagher-mat-warp-refund.md",
+      "raw_sha256": "5123a20cce2f8f03bdad9577848eef6dc2518ed900619b26f814a4b5cc08df0e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-owen-gallagher-mat-warp-refund.md",
+      "processed_sha256": "d43120ea914f69a513c475f0d94bec56edeef753626f4b23e3539b77026db06e",
+      "provenance_hash": "5123a20cce2f8f03"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-owen-gallagher-wa-sales-tax.md",
+      "raw_sha256": "9381c3c059932a03908a6ab7574472f386cd49b111309d7b29beebebc931466f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-owen-gallagher-wa-sales-tax.md",
+      "processed_sha256": "1ca4d613e8227d67e97a9fc7eff226af21da4b97c52b1e3f068589b70ab6fdd6",
+      "provenance_hash": "9381c3c059932a03"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-ruben-silva-ergonest-price-match.md",
+      "raw_sha256": "94a996c9deef75c284b465518b2d84ef4a1b885a5bb1ecffa1f856371bca92f7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-ruben-silva-ergonest-price-match.md",
+      "processed_sha256": "395c3c0d6704d1c2502969ca58605cb59dca6528646b8ff19ef3853e546ee02f",
+      "provenance_hash": "94a996c9deef75c2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-ruben-silva-mat-corner-curl.md",
+      "raw_sha256": "33618c0a3837908e7c10ab0c6940f704b6858fc79f74db8d59aaa834bae7105d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-ruben-silva-mat-corner-curl.md",
+      "processed_sha256": "3715da69a6efd0f3371acae616b7e92408b99e0144fd0fba4e5bdc588581caf2",
+      "provenance_hash": "33618c0a3837908e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-ruben-silva-wren-stand-presale.md",
+      "raw_sha256": "4820e35b733c699868d4ef7d6d4812cd5527aaa8fcf5802c2cb92727a757bf4f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-ruben-silva-wren-stand-presale.md",
+      "processed_sha256": "ac21a8938e341d755a75161a40f0c7173147b2d2e9033053ab7d314246944447",
+      "provenance_hash": "4820e35b733c6998"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-stonebridge-mats-delaminated.md",
+      "raw_sha256": "e8df7f9bb67c965d2dffae40c790805093addc04914317d7f447734270b4be62",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-stonebridge-mats-delaminated.md",
+      "processed_sha256": "1ad5965cf8caba7920f8cb87532cd6ab876e0bfbafd03c787e649510753c8210",
+      "provenance_hash": "e8df7f9bb67c965d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-summit-physio-footrest-consolidation.md",
+      "raw_sha256": "917167bafb1649a77d86cc3c0fcacd98eeaffb9fa35bdc6968f858ac1d89ea47",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-summit-physio-footrest-consolidation.md",
+      "processed_sha256": "a1feb2493b4cb81b7d426173090f3a7c93de3055b485b9dfd21ee35f5763a8e5",
+      "provenance_hash": "917167bafb1649a7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-tessa-nakamura-mat-curl-caster.md",
+      "raw_sha256": "7f626b92b35165c40dc687530b031700120c665a58a6c834abcb3b8e369a2eb7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-tessa-nakamura-mat-curl-caster.md",
+      "processed_sha256": "94740df173abf421f82ce4ffce6f80756a604c8bf1c8696cf7e17848ee4d3bde",
+      "provenance_hash": "7f626b92b35165c4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/ticket/ticket-tessa-nakamura-onehand-assembly.md",
+      "raw_sha256": "3b0659e4c94009d3e06105bbb47df56a5c42c8a8e6640f922186202e926e9871",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/ticket-ticket-tessa-nakamura-onehand-assembly.md",
+      "processed_sha256": "fce32d1e5cc6040c4ebc57e764bea61ea7a182599f0be3aac6981aa8440c7f45",
+      "provenance_hash": "3b0659e4c94009d3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-72in-desk-wobble.md",
+      "raw_sha256": "0ec7ad85988a0609001e21c70c2cc721686a8cd812760627ee1110fa6e0e0fcd",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-72in-desk-wobble.md",
+      "processed_sha256": "50518bda311b59c0bceabddc7fdbdb577d5ce6ac7c553dd3d3ef1271eb02dbd6",
+      "provenance_hash": "0ec7ad85988a0609"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-birch-desk-wont-rise.md",
+      "raw_sha256": "ae5ada0ba438d1919619697fc43836ff2c5e92d811d93d7f906488e2030369ff",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-birch-desk-wont-rise.md",
+      "processed_sha256": "15dc76d817b7b6c19c3a5eb6161f4f87bfad3ce8da9d1572f283b21f8f382dde",
+      "provenance_hash": "ae5ada0ba438d191"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-heron-arm-drift.md",
+      "raw_sha256": "e0626999628e1adfb3b96b28290108d3692cb0c9d70270da044a5e4e30221e97",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-heron-arm-drift.md",
+      "processed_sha256": "e7ae591238faa548b97151258926553c269188cee79afa7c4dcc7391cc2422c4",
+      "provenance_hash": "e0626999628e1adf"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-rowan-chair-squeak.md",
+      "raw_sha256": "260c9a73b89703884f97e478287d7e0b091b3a189d2cc868cfa82231d43d4d5e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-rowan-chair-squeak.md",
+      "processed_sha256": "3c0df610837d9bee1ff3ed11f4bc6a6aa9381a3e1f958687084de657f92c6129",
+      "provenance_hash": "260c9a73b8970388"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-rowan-gas-lift-sinking.md",
+      "raw_sha256": "83233d3d27fcbab00c07f5d60bfacbbb7e9a895c78b57547e7e342e88e08dd18",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-rowan-gas-lift-sinking.md",
+      "processed_sha256": "42abd0e6c0b48ddf456b7d1027d66fa1ec2e2bc9749c54417f9964591cb73185",
+      "provenance_hash": "83233d3d27fcbab0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-vireo-wifi-dropout.md",
+      "raw_sha256": "199119a9a862167e3534c1eaddcb9c0f614fc55f8d9d1471247306552bfb05d8",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-vireo-wifi-dropout.md",
+      "processed_sha256": "b41b7c45965e465df3b83f431238ab39cf3801724bde177455fa75e0d72a3a5f",
+      "provenance_hash": "199119a9a862167e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/customer-support/troubleshooting/kb-wren-stand-hinge-tension.md",
+      "raw_sha256": "c4962094fe665365835c7f54d3dd2c0c87d49c5ab838f60fd6612ff460786e73",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/customer-support/sources/troubleshooting-kb-wren-stand-hinge-tension.md",
+      "processed_sha256": "422ba943a561fe94382559f3855aa0eeacd6c0e0ce2fbd9a9d29210c59c969c5",
+      "provenance_hash": "c4962094fe665365"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-desk-stability-testing.md",
+      "raw_sha256": "5f9bd58a7b2afde1501c83d3ace894f18125059f683b0549b3424ee7b88c7676",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-desk-stability-testing.md",
+      "processed_sha256": "ab945ff3c24d6a440fa1bfd3717e1cc7897091051698406f10b78f78871e3fee",
+      "provenance_hash": "5f9bd58a7b2afde1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-helprise-data-retention.md",
+      "raw_sha256": "5231e2bd5f8aa8418b3332671572f730dcef3f4ef133f2aa9860500c04705d7c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-helprise-data-retention.md",
+      "processed_sha256": "b4b2de799b9e78dab4db30bbeef7868c277a672fe9e1b39860606404f6549963",
+      "provenance_hash": "5231e2bd5f8aa841"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-oregon-llc-annual-report.md",
+      "raw_sha256": "acf4043f222a13cab09772e558f41ef422728209e882a35b4a3e1445ce00478d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-oregon-llc-annual-report.md",
+      "processed_sha256": "49f4f370b4fad84418aafef82304fe2784c0efe82e497132cebae23b50bbf460",
+      "provenance_hash": "acf4043f222a13ca"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-verdant-textile-disclosure.md",
+      "raw_sha256": "e8be980fa55c8842e9d7d8e05403acab20b83a02cbf5747e39576aec0efc157d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-verdant-textile-disclosure.md",
+      "processed_sha256": "5858f0a1fdd18cd154849c717a3720e8c72aa778c885415fade5ac3a56024435",
+      "provenance_hash": "e8be980fa55c8842"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-vireo-adapter-safety-cert.md",
+      "raw_sha256": "1b31a9b018133a4fa149c943ba5a79bea257c9940f3c1e172653c8481fa7c203",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-vireo-adapter-safety-cert.md",
+      "processed_sha256": "d0cd6f93a67588f7074fedba419c9f1e6070c84fe345c025ca3fdada7199abbd",
+      "provenance_hash": "1b31a9b018133a4f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/compliance-note/compliance-note-wa-sales-tax-registration.md",
+      "raw_sha256": "74c6acb88bd540ccc740a3c25f1b11dd670a6ef6edd45117b96aab3b58c65cae",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/compliance-note-compliance-note-wa-sales-tax-registration.md",
+      "processed_sha256": "36f98a6741ebd294bbe91f18310ba5c03299e40af4f2b2323505fea9210891f1",
+      "provenance_hash": "74c6acb88bd540cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/bitgrove-sow-amendment-2.md",
+      "raw_sha256": "c4d21d28f15e8792af299f03ea7982f5774aff97e53e9925bcec6ca3711e5e26",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-bitgrove-sow-amendment-2.md",
+      "processed_sha256": "40a48fa5f1fe61a64e645b06367bfc07e35e6365d0bdebd8bc9462a8094acc03",
+      "provenance_hash": "c4d21d28f15e8792"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/contract-addendum-verdant-qc.md",
+      "raw_sha256": "e3fff7be1b72cbbfb573681235dc4f254dad824d48afd334ce94957cdca1c25c",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-contract-addendum-verdant-qc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/contract-cascadia-freight-rate-schedule-2025.md",
+      "raw_sha256": "f60a263db75b19ccd2834e1d119adfb8240993b91eb94439fb0afeccdca16cb7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-contract-cascadia-freight-rate-schedule-2025.md",
+      "processed_sha256": "ed356c6dc2b28d8cf8b6074994a46955e98c558b4bc84abca68d7ef8e5b0eab6",
+      "provenance_hash": "f60a263db75b19cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/contract-colefield-tran-engagement-letter-2024.md",
+      "raw_sha256": "d832f0f2f3fea4d93909f91207e0a2a96e005f72970a962e76916361364b9a44",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-contract-colefield-tran-engagement-letter-2024.md",
+      "processed_sha256": "0326032daf1fc373b89da4f60ccdf5ab65718c6a21c9e592fc8fed0ee6a4b1cc",
+      "provenance_hash": "d832f0f2f3fea4d9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/contract-meridian-supply-agreement-2024.md",
+      "raw_sha256": "fcb3170656182adea40b0fc3af7d1fa5b2224bf7306835f365af34241564a58d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-contract-meridian-supply-agreement-2024.md",
+      "processed_sha256": "ea45ca3615213bcae2aa75ee76047f89035e01bd4c98ead16bfdcfc9f389eb19",
+      "provenance_hash": "fcb3170656182ade"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/sl5-parcelpoint-fulfillment-amendment-2025.md",
+      "raw_sha256": "b38e01d5e06f5848cfd16a7d6164a724000ec23daa566742b2170a1d289f63fb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-sl5-parcelpoint-fulfillment-amendment-2025.md",
+      "processed_sha256": "c2cbae877172955b395c33d4997dae21a8da01e121d2de0fd500075ea4d18d02",
+      "provenance_hash": "b38e01d5e06f5848"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/contract/sl5-parcelpoint-rate-amendment-2026.md",
+      "raw_sha256": "d74a08d5a7a079e7aad9125e3ff5310f21ceb91a21ec317bafd5c8b38b37b86f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/contract-sl5-parcelpoint-rate-amendment-2026.md",
+      "processed_sha256": "67ba856d0c0e21be75b1281095e9d6a23aa267b4de5f4303f8e7a302210e893b",
+      "provenance_hash": "d74a08d5a7a079e7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-ap-invoice-three-way-match.md",
+      "raw_sha256": "e3b85e8e29445b4326f18e2443599441a1a0ab10cd5edf16ec3309c4cb7c5b28",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-ap-invoice-three-way-match.md",
+      "processed_sha256": "4eb20aed1862b35330d3087cc39d59c5801866dfd0b6f231cd9ff9fa28bda234",
+      "provenance_hash": "e3b85e8e29445b43"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-capitalization-threshold.md",
+      "raw_sha256": "c18e6eb5f48c343bbef3ac98ab60a87eb6371d1d709096e308321aef1b4d834c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-capitalization-threshold.md",
+      "processed_sha256": "be4bd9b46f9b839460f793f05f91b2f8b356507d352aec154fe7c29d4d435a0c",
+      "provenance_hash": "c18e6eb5f48c343b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-corporate-card.md",
+      "raw_sha256": "6edb9162516e35717866f931bf1a4c403270424ea3a4648fb1ce87c5bb6c3852",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-corporate-card.md",
+      "processed_sha256": "8d96bf5ece7c5feff65a18f40f6110199cef5325b548239098aaa9cc47883de1",
+      "provenance_hash": "6edb9162516e3571"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-petty-cash-showroom-till.md",
+      "raw_sha256": "1e784fe7ba17e5d0bb6e2c4d6cf5e688ebaeb7016aae0b0c210c6631c5777194",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-petty-cash-showroom-till.md",
+      "processed_sha256": "63c84584a86c97bf679928475bed435bd949fea9ea14f0cc6fcb11f6402f8a74",
+      "provenance_hash": "1e784fe7ba17e5d0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-refund-contra-revenue-period.md",
+      "raw_sha256": "eb41a97f5dc5e29d7f08934e287bd4bdfc2a06051284e89b1b4c450e1651e7ab",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-refund-contra-revenue-period.md",
+      "processed_sha256": "0a5933854ac0a288444c020d9b82f8cfdffa0873c34fa5985d96be6dc9fa07a2",
+      "provenance_hash": "eb41a97f5dc5e29d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-sales-tax-collection.md",
+      "raw_sha256": "3d1417e5eafb5b4ffd571e421f7ffe6bcf81f749118258ecb0c35b658ff43eed",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-sales-tax-collection.md",
+      "processed_sha256": "bb8b946c15249fd34e0a54d1d16dd7e5ef8e4ed1810f6c6ee07a53d8a39f7da1",
+      "provenance_hash": "3d1417e5eafb5b4f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-staged-b2b-revenue-recognition.md",
+      "raw_sha256": "fe260e9492d3fe0558f31f01c6705b8abe2d4afd33be52d403a5694c33813de3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-staged-b2b-revenue-recognition.md",
+      "processed_sha256": "2638ed38057ecc34ec68d461244a9e7b0a4d65a594416b074d7862ae3741413b",
+      "provenance_hash": "fe260e9492d3fe05"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/finance-rule/finance-rule-vendor-payment-run.md",
+      "raw_sha256": "e696c52c3f1d1d656844f22b381d936d7cbb8823dc01769d9ee16b95c7f2d48f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/finance-rule-finance-rule-vendor-payment-run.md",
+      "processed_sha256": "8f90367cfa28c2cac8cc89bc7a97841013ff96e3a9ca960437153a476f288ae9",
+      "provenance_hash": "e696c52c3f1d1d65"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-anti-harassment-complaint-path.md",
+      "raw_sha256": "2796db26b7e542c256dfdddfc0de4965adc9f57f311bcff4dc5b01f80bf6d829",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-anti-harassment-complaint-path.md",
+      "processed_sha256": "6dce2d2b1ce82465daa0d4828f6806145b81f72156f3798ae1ecf9a1633c04f7",
+      "provenance_hash": "2796db26b7e542c2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-contractor-engagement.md",
+      "raw_sha256": "95d6436021d749529f0758b989d79ca63851c9be27ecf09643f38545d869298a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-contractor-engagement.md",
+      "processed_sha256": "cbeb87b284420236e89d3f279fef5c40a851f29ed2dbe0e6074c6ef1f83ee1d6",
+      "provenance_hash": "95d6436021d74952"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-employee-product-purchase.md",
+      "raw_sha256": "80fd649f194e177dc20431c8b32274419da795e9cc11d83077fde15fc972d72f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-employee-product-purchase.md",
+      "processed_sha256": "d340e4e6f4ec8ac169be7266e9e073195427a11c909d1944ebdf66ff0ceca129",
+      "provenance_hash": "80fd649f194e177d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-hiring-referral.md",
+      "raw_sha256": "4298442fe9affe589c647d25719bc6ffed72826d68c12236386750270e7420ab",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-hiring-referral.md",
+      "processed_sha256": "5f5a2d96edfee02edb39bfd211047a80337d1df30ba2b68906e7d354c4a74f85",
+      "provenance_hash": "4298442fe9affe58"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-home-office-equipment-stipend.md",
+      "raw_sha256": "235cc255676be8ddd25cae0078434b2f8f77f99e380631d171d3eb3a85de3319",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-home-office-equipment-stipend.md",
+      "processed_sha256": "95c4c6a2933929440cfaf645a991472914c02fcd025647320c856ded8fdd1069",
+      "provenance_hash": "235cc255676be8dd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-parental-leave.md",
+      "raw_sha256": "229157fc25d8c816df4088811b34c910ef8a18956764a46596ebf8df7aa8a20d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-parental-leave.md",
+      "processed_sha256": "e24025f37c80724496c75367a1cdeaaaad9d45dd32645b95c84206a75cad35dc",
+      "provenance_hash": "229157fc25d8c816"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-performance-review-cycle.md",
+      "raw_sha256": "1d30117d570415e0dedd45efa86a9558e008d6ab1d3a4b41ac819ab01dbed299",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-performance-review-cycle.md",
+      "processed_sha256": "377f03356ddf069af202d3068ec9d7adc0da56b340f1624e54c5dfa9ba40e4b0",
+      "provenance_hash": "1d30117d570415e0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-pto-v1.md",
+      "raw_sha256": "447e6b0e3b856fbd56cbf82266d1eb6063fad0a63126004ff961baa1965a70bb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-pto-v1.md",
+      "processed_sha256": "605c09a7912d9ad0a901e5b14207961ae1bea3781a86c92e438b9a1b629e8be2",
+      "provenance_hash": "447e6b0e3b856fbd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-pto-v2.md",
+      "raw_sha256": "bb4f19d6c0e2eba5e332ce76089befc13e117d5f7762123eaf6ae2bf2ce559e7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-pto-v2.md",
+      "processed_sha256": "012582c286524195d72d202a11fb48d5cc9432853b0fd74d323eb6bca7f1595b",
+      "provenance_hash": "bb4f19d6c0e2eba5"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-remote-hybrid-work.md",
+      "raw_sha256": "471abc2cd13c62496e3fb6707c9c6ae934a3cdeb4b3d08d36e4a450a55882b3f",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-hr-policy-remote-hybrid-work"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-timekeeping-payroll-calendar.md",
+      "raw_sha256": "cb243331408c89e9e1bc5145c621df99221c203928d7af4e05b04c0b0be40260",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-hr-policy-timekeeping-payroll-calendar"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/hr-policy/hr-policy-workplace-safety-warehouse-visits.md",
+      "raw_sha256": "078cbdc76dfb0af2acf6b537b06396b89c65a2c2cbabadc69f21d4bf6709ebc6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/hr-policy-hr-policy-workplace-safety-warehouse-visits.md",
+      "processed_sha256": "7750a614f397a8b82955e0aa388c0dab11960914f06c13b47b99b2ce26f1401e",
+      "provenance_hash": "078cbdc76dfb0af2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/credit-memo-vrd-2025-118-entry.md",
+      "raw_sha256": "b6355b37eaaa0edb8a0e419ed11811ca88bb6401d39b66da0bc483e5a75f8b5f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-credit-memo-vrd-2025-118-entry.md",
+      "processed_sha256": "9a55f74156d2ae868733c9b33fc0502351aeaa3d7e4b1cf880b4ca0a3df04e3b",
+      "provenance_hash": "b6355b37eaaa0edb"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-bgl-2024-003.md",
+      "raw_sha256": "c456a05ec448d1ba1f5382632f89505a14576660c2c0a2a9ec6dee7e03216ca8",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-bgl-2024-003.md",
+      "processed_sha256": "004624d48877df61419aadecc990b77d54aceafee72d6924d56e1806d8a7d2b2",
+      "provenance_hash": "c456a05ec448d1ba"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-bgl-2025-004.md",
+      "raw_sha256": "fdf2a0635a42ceb8ef5394f88d30c3dfa1eca755f1f503390038f1349eb96f34",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-bgl-2025-004.md",
+      "processed_sha256": "86327eab8a1c6069fe2e16c01c5547bb10c9281646f421f2a19ed74b756a75fd",
+      "provenance_hash": "fdf2a0635a42ceb8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-csf-2025-044.md",
+      "raw_sha256": "0bd5b542ef2208f511db8ba946c9edb97025f0f2fbb5414e038ea60202eb0ec1",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-invoice-inv-csf-2025-044"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-csf-2026-012.md",
+      "raw_sha256": "11f627b69f5a206c2355dcfb500e299ae87f48930f25c6c5cff89173117d9350",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-csf-2026-012.md",
+      "processed_sha256": "414f48e201e6779cc56db905988e940049f7774f791331794ce0881f181c09c4",
+      "provenance_hash": "11f627b69f5a206c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-ctl-2025-019.md",
+      "raw_sha256": "55f765edc57b7b4e8e39199608f71eeeca69480e4f710a6471d0ef838eaba549",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-invoice-inv-ctl-2025-019"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-gcp-2024-058.md",
+      "raw_sha256": "809a6c6a584924d61df0929ab97c2eeef0382ed611d1036417456d431ec963e3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-gcp-2024-058.md",
+      "processed_sha256": "9f426e7b2ca7769a1f23f111833089b85dd317b0bc350853111ab8bcde0e4f79",
+      "provenance_hash": "809a6c6a584924d6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-gcp-2025-104.md",
+      "raw_sha256": "287f1752bd6f72c012d7afef65435e52ef63029572a558225170c8174853e54a",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-invoice-inv-gcp-2025-104"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-lpp-2025-007.md",
+      "raw_sha256": "c5f39348f0af8b7fc71eb67673eb4ac9cf5bf0c66dfa4237363870d610173e00",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-lpp-2025-007.md",
+      "processed_sha256": "1b00acef623b055b69da7711074f393cb67d595364b0a66fd93717a9cfab9538",
+      "provenance_hash": "c5f39348f0af8b7f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-mrc-2025-021.md",
+      "raw_sha256": "fdb31fd4c48b45bb3ca776da52a61239ae5e70da59c20ee930d2d85fda76267c",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-invoice-inv-mrc-2025-021"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-mrc-2026-008.md",
+      "raw_sha256": "3a90645bed15f7253f59077f34bdd1e94adf4d978fa6d3eaf5d62f062d6d383e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-mrc-2026-008.md",
+      "processed_sha256": "73f9482e985d819c1135d1accd40bd9cef90225a280fa085d403548402d419f7",
+      "provenance_hash": "3a90645bed15f725"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-nmi-2025-002.md",
+      "raw_sha256": "8dda1d54a3ca4a3f3963f9fda2e02dc6d9a26f856a85f98c4751ee33cc346efd",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-invoice-inv-nmi-2025-002"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-osm-2024-031.md",
+      "raw_sha256": "5939881a42bea4cca389f90bfc4001ca676f55e22f14972c82daf46079951bb0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-osm-2024-031.md",
+      "processed_sha256": "525526ead27198f94c0721dd387a98606e34cf070acd1b718a9adef13e9d66f0",
+      "provenance_hash": "5939881a42bea4cc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-osm-2025-052.md",
+      "raw_sha256": "664a1db831d6c962de0d0e9a67ff501b119a32d86acde35d71adf34bd9acedbf",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-osm-2025-052.md",
+      "processed_sha256": "651ee976de9f03c9527a613e0c8334fbc9707bb8d8586e9fa772a37e892e7ab3",
+      "provenance_hash": "664a1db831d6c962"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-ppf-2025-011.md",
+      "raw_sha256": "b9d7dfaa1bbc610a8ab75a7443776e87ce188272c227c87d5918b58ff743f6f3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-ppf-2025-011.md",
+      "processed_sha256": "54959cefb37732ef16687fb2b6436148fa1eaf1767dd42632e4199104b48603f",
+      "provenance_hash": "b9d7dfaa1bbc610a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/invoice-inv-vrd-2024-072.md",
+      "raw_sha256": "0db252df406d66d0426bf3ba9a1cd517ccaae955238bea093ca01b1ad50aafd6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-invoice-inv-vrd-2024-072.md",
+      "processed_sha256": "0ec2582774ed38d387e8f5bd6b3dcb5ef5b3e7b2cbe7d06471cd66c2a31ba12a",
+      "provenance_hash": "0db252df406d66d0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/sl5-invoice-ppf-2026-002.md",
+      "raw_sha256": "c1a25c324b5aa7dbc7a71a1449911ab9c0f65da77103c8fcad9dc75a784b8551",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-sl5-invoice-ppf-2026-002"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/invoice/sl5-invoice-ppf-2026-003.md",
+      "raw_sha256": "d08b51a6a77f32c7d7eac88ba559ed4d6622dc89bc2348afea174190b3fb0746",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/invoice-sl5-invoice-ppf-2026-003.md",
+      "processed_sha256": "897af7aaf2f0d3cf9829de2daf77375e92731887813a86e1fa0592edead3db58",
+      "provenance_hash": "d08b51a6a77f32c7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/letter-larkstead-verdant-defect-claim.md",
+      "raw_sha256": "7c8db0747e7b57dce27e01e237a1059d9df9ed9fccef953c6c143e68f40c59fb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-letter-larkstead-verdant-defect-claim.md",
+      "processed_sha256": "4794de2dcf08a5b0bb080d59cfb5f5d6cec3925d831daf402512c775ccba6a23",
+      "provenance_hash": "7c8db0747e7b57dc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/letter-verdant-response-credit-offer.md",
+      "raw_sha256": "3cd428575190dc476b123ace4fef23ad7cdce04b9acb724a5dccfa1d04cc8367",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-letter-verdant-response-credit-offer.md",
+      "processed_sha256": "46ecb3edd086b9069fb9a2ff60c59d52c1ded10a8cb116aa7ea293af85c971f1",
+      "provenance_hash": "3cd428575190dc47"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/memo-finance-lot-2025-14-cost-tally.md",
+      "raw_sha256": "c331882b728135f63e4a3133b6298297a34e924a438696f681222247b4e01c2f",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-memo-finance-lot-2025-14-cost-tally"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/memo-refund-exception-lot-2025-14.md",
+      "raw_sha256": "363db0ad1b897a9b0958cb8d2b1e20eda841441f500bc9225631436e0966ff8c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-memo-refund-exception-lot-2025-14.md",
+      "processed_sha256": "16542acf4a832fb54ee309b9ef3ff0a7e64b70598b10d9296ca7d4725fde1965",
+      "provenance_hash": "363db0ad1b897a9b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/sl2-memo-finance-impact.md",
+      "raw_sha256": "150bb93147c00928b19ec8d2e7fbe57133b85ba95fabb71d227bed1cb2413b72",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-sl2-memo-finance-impact.md",
+      "processed_sha256": "a67bc12399bb18853ec21bb914a7479dc56c079eb67c8e6d74ffa3bdd8fb7326",
+      "provenance_hash": "150bb93147c00928"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/sl2-memo-holiday-exception.md",
+      "raw_sha256": "30990c4f2e6290079d632c767c48855c7e23a097bf0d004d3bd6ed8b16fc7f35",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-sl2-memo-holiday-exception.md",
+      "processed_sha256": "15f9384840735c04162ba70c9d5cfd5b5d128bc5da1bc0219e63091c981c908e",
+      "provenance_hash": "30990c4f2e629007"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/sl3-memo-pricing-exception.md",
+      "raw_sha256": "4576a030fc8d019f8508212497e4b287cfd18063975d991ce3abc7288598a1ce",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-sl3-memo-pricing-exception.md",
+      "processed_sha256": "f6009a6abc32e5d35359d7630e424f4365abef82f14bba80d3e0819ab905331b",
+      "provenance_hash": "4576a030fc8d019f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/sl5-dim-weight-dispute-memo.md",
+      "raw_sha256": "8cfdecae871be80467c966dbeebb509a54e9a6c3ee45bd512a6bdc42ab59003b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-sl5-dim-weight-dispute-memo.md",
+      "processed_sha256": "3d2f74c531098c8088b51aed1695b2e0bbffab738648cdd5a26b050cc3240cb9",
+      "provenance_hash": "8cfdecae871be804"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo/vireo-goodwill-warranty-memo.md",
+      "raw_sha256": "534672fa5a995702494ba4c05e5745a3eac2e177f928c4507d7c386f40dcdf2f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-vireo-goodwill-warranty-memo.md",
+      "processed_sha256": "6a75f9a9d76d6894297302551039a50ae4229fecddbfb84a8da04b054e10f465",
+      "provenance_hash": "534672fa5a995702"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo-org/memo-org-2026-planning-priorities.md",
+      "raw_sha256": "066bedfa2b59db94f18b9c23351fbf8f579227d1fa98c6928c5e955f43c13aba",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-org-memo-org-2026-planning-priorities.md",
+      "processed_sha256": "9edd0e3eddb5562d997db728b98b739ac11f89e0bd47a1eb430a0e32142ad67e",
+      "provenance_hash": "066bedfa2b59db94"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo-org/memo-org-building-access-keycard-2025.md",
+      "raw_sha256": "0007b9baea088043426decde1b9a4f01bf120cebd4f5652bf2d395afba8c6e31",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-org-memo-org-building-access-keycard-2025.md",
+      "processed_sha256": "cc415a291c3294092d46b9952a635506ef5c71c658e3f6d98e115bf36bce8a23",
+      "provenance_hash": "0007b9baea088043"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo-org/memo-org-org-chart-refresh-2025-09.md",
+      "raw_sha256": "b9dc464df55692d8a483e33c951661d853872ca172563dc84c5ca64ce99609db",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-org-memo-org-org-chart-refresh-2025-09.md",
+      "processed_sha256": "5f0e8fdbbeb67d7b525e58c1f8e488872343b13f93a80316d2c623472083cc54",
+      "provenance_hash": "b9dc464df55692d8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo-org/memo-org-showroom-saturday-hours-2024.md",
+      "raw_sha256": "fe8f9750d8358cfa28186482b9e166a7a5d1dec3b942c525ad5b9d49f91d6e10",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-org-memo-org-showroom-saturday-hours-2024.md",
+      "processed_sha256": "a8cacb3d7541bad7941e3c1fb0e13067150052770429af7d701b0d786c891351",
+      "provenance_hash": "fe8f9750d8358cfa"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/memo-org/memo-org-support-headcount-celeste-ae-role.md",
+      "raw_sha256": "9a4a0488db05160d3bb3b85fbe44a793ab9d25ef9c99a71e22d52508f7163f14",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/memo-org-memo-org-support-headcount-celeste-ae-role.md",
+      "processed_sha256": "453fb28ae6e726efca18f87e04f9ee719141408d48762bfe7f3c431d456d9f8d",
+      "provenance_hash": "9a4a0488db05160d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/vendor-contract/vendor-contract-greencrate-supply-renewal-2025.md",
+      "raw_sha256": "e0082544d4eae697f93870a7eb99ffaaac39a6060f5b9959cb27628b09228031",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/vendor-contract-vendor-contract-greencrate-supply-r-4b601364.md",
+      "processed_sha256": "4941502a03299ed0f35a50dc44890c59de477cffd63837ea1a461b3eb7a9ca09",
+      "provenance_hash": "e0082544d4eae697"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/vendor-contract/vendor-contract-lovejoy-lease-amendment-2025.md",
+      "raw_sha256": "cd6d9cfc96ef3986f5d921f07ee35896f21ac2f5e8331edbe0d4e9d5ba5f86ed",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/vendor-contract-vendor-contract-lovejoy-lease-amendment-2025.md",
+      "processed_sha256": "6014079870906079bdb14928c83f6dca6b6a4a3278cc66fd78829f68ff249079",
+      "provenance_hash": "cd6d9cfc96ef3986"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/internal-admin/vendor-contract/vendor-contract-nehalem-policy-renewal-2025.md",
+      "raw_sha256": "cad11def2f80c1a9e3f972851edac3cd8cabbd5da219f9c3b8ef16ce186892a2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/internal-admin/sources/vendor-contract-vendor-contract-nehalem-policy-renewal-2025.md",
+      "processed_sha256": "71bb12793b73b935182c1643810d9c3dc22f288155b7a42d3389c9ec486bd193",
+      "provenance_hash": "cad11def2f80c1a9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-qa-report/bug-qa-report-helprise-order-number-mistag.md",
+      "raw_sha256": "2e21095a0030ac440770cc1b20b9102d5767f418a285bfea130753ac44740658",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-qa-report-bug-qa-report-helprise-order-number-mistag.md",
+      "processed_sha256": "bbce2e0004ae7613e22b7e8a7a0639350fec13623a6cfd656cc8d9645140f5f0",
+      "provenance_hash": "2e21095a0030ac44"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-qa-report/bug-qa-report-parcelpoint-sandbox-duplicate-orders.md",
+      "raw_sha256": "bbcef7a77a147d1ff166e64f3537527e5c4008dd32aea3fa553a41d0a24d03e1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-qa-report-bug-qa-report-parcelpoint-sandbox-dup-0d303691.md",
+      "processed_sha256": "715126602104ce18c2ab5d6c88c8fcb274f27ec40a4a302b8fa98784b705d9d9",
+      "provenance_hash": "bbcef7a77a147d1f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-qa-report/bug-qa-report-shopstack-b2b-address-line2.md",
+      "raw_sha256": "ee8f6f25bb0129c379b9667df83eaa4eb7db81cda9c0e7e5831ca77cbf42ff32",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-qa-report-bug-qa-report-shopstack-b2b-address-line2.md",
+      "processed_sha256": "3f1645d8ca482f8233ebd950c1fd66bb2607aa4d5ad8f03ca16b512ffdeed85c",
+      "provenance_hash": "ee8f6f25bb0129c3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-qa-report/bug-qa-report-vireo-app-onboarding-crash.md",
+      "raw_sha256": "09ff746534f0d917514bd98790f506ea3b99583b4747c1400a0f7ec6e68a22bc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-qa-report-bug-qa-report-vireo-app-onboarding-crash.md",
+      "processed_sha256": "d68ca39b54b6b2c90636f2621ab263a1956deb563cd138491aa1d13fe747d13c",
+      "provenance_hash": "09ff746534f0d917"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bitgrove-bug-report-flicker-01.md",
+      "raw_sha256": "3f59d466985923dd0a639f3643090d14d0a2c6ed31b55beab8e4bafb0b763648",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bitgrove-bug-report-flicker-01.md",
+      "processed_sha256": "f858d42b083179e3b0974f5426c302f8b7f49a71bc8477a6a2686322190aa899",
+      "provenance_hash": "3f59d466985923dd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bitgrove-bug-report-flicker-02.md",
+      "raw_sha256": "15b7055e7f0e5e9604cd0b66b299ebfd3c35dc319dd5c2249cfe549dba77ad80",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bitgrove-bug-report-flicker-02.md",
+      "processed_sha256": "19d093f4ecc3d7ef64ee9b3a1de09ad8b1af1484db0b40e87770573797923291",
+      "provenance_hash": "15b7055e7f0e5e96"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-ledgerly-refund-export-drop.md",
+      "raw_sha256": "4389b98a6e957cb2beb0835bc783c08629db7096cddd0cf67768d05fed647b87",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-ledgerly-refund-export-drop.md",
+      "processed_sha256": "c973d7fa61f5fea6362325a93f6b69983b3a854cd0311d7e3edff94c730de0f7",
+      "provenance_hash": "4389b98a6e957cb2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-lot-2025-14-edge-stitch-delamination.md",
+      "raw_sha256": "f166b4fcfb9d4d2c548056fc596f917260b1c45211cc95e871c35e518ac1dc80",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-lot-2025-14-edge-stitch-delamination.md",
+      "processed_sha256": "f0f12ac8f0eac40ef26c436fe085b2bd02791370eea1882b9268eacbe6857d90",
+      "provenance_hash": "f166b4fcfb9d4d2c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-mailloft-unsubscribe-sync-lag.md",
+      "raw_sha256": "2466999e4a91c9e7721e12efa9bbe0533d84ad62c0159ad17b71d8ba5528ecf9",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-mailloft-unsubscribe-sync-lag.md",
+      "processed_sha256": "1cd2983c02e65360d1623f32d2b2abc51b9ee882e2433f6f8212ecadc485bf9e",
+      "provenance_hash": "2466999e4a91c9e7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-ostrava-hazel-drawer-rail-dimension-drift.md",
+      "raw_sha256": "532b1921883d759947dc4ae8d6153afe10e7ebb5c86fdd690dacb0d2f59a102e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-ostrava-hazel-drawer-rail-dim-002e4db4.md",
+      "processed_sha256": "7c548e6c20f5025c62b4b1028b9ca66e487de7685403263ea096e8621b6ecea3",
+      "provenance_hash": "532b1921883d7599"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-shopstack-price-cache-stale-prices-2026-01-15.md",
+      "raw_sha256": "4748e09d1280f87f32bb72db55558c5b33447f14582d315115044f8ba6c3fc53",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-shopstack-price-cache-stale-p-feacd720.md",
+      "processed_sha256": "6fcf0f8d78e99120322dc9c6e78e0d7311b00135758e2b4e4e5d8aa934a185df",
+      "provenance_hash": "4748e09d1280f87f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-shopstack-wa-tax-rounding.md",
+      "raw_sha256": "b8c2fff532abd641eda05c6efb082261b712c2f5c1dcd041167f24a39a08602a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-shopstack-wa-tax-rounding.md",
+      "processed_sha256": "860405b0a0903764c7565b462bf1536b161c8e239909a50daf7b42b7ec0c973f",
+      "provenance_hash": "b8c2fff532abd641"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-verdant-armrest-pad-stitch-tension-watch.md",
+      "raw_sha256": "e8ff4336902903146eb3ea24fd6493e25941b2f9e87fdf723b83cbc474394326",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-verdant-armrest-pad-stitch-te-3416f1fe.md",
+      "processed_sha256": "d8e117bd3f9d170d7fbc1d9c5bad088a22b08ca6efabbfb4433657ef62aa56db",
+      "provenance_hash": "e8ff433690290314"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/bug-report/bug-report-wren-hinge-friction-nov-batch.md",
+      "raw_sha256": "d5645c6b4f3eb1ab8128f17573d19ce39a568ef8e091ac4cc874ae05ef7d4eba",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/bug-report-bug-report-wren-hinge-friction-nov-batch.md",
+      "processed_sha256": "d22771c0a9eb2a335913a9fac75586e8fe27b4fb6f3f02474ed5a658b32d3683",
+      "provenance_hash": "d5645c6b4f3eb1ab"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/checklist-b2b-account-onboarding-template-harborview.md",
+      "raw_sha256": "318b4fcca305e52f825fa1d3a613a36ca1e2f518217f6f40f40a6289eb1bd3d2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-checklist-b2b-account-onboarding-template-94612f43.md",
+      "processed_sha256": "5d4b4b7ca720c24543a5986bd53567b23c96af3ba64f742b9e814a166b99c4d5",
+      "provenance_hash": "318b4fcca305e52f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/checklist-new-support-agent-onboarding-celeste-marin.md",
+      "raw_sha256": "4f869291a7a3fc3bbf5d6e28fa9de70101f02dac801565117f5ac52621f32e95",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-checklist-new-support-agent-onboarding-ce-cb6af1c1.md",
+      "processed_sha256": "9f8ba9c5bc4ce81586625c1caf8659cb295b2894f18f3e40d215e1219c32fcf8",
+      "provenance_hash": "4f869291a7a3fc3b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/checklist-new-vendor-setup-greencrate.md",
+      "raw_sha256": "fe449a2bdefa9f7b4b63e7b809bda56eb18d3bc1d597536f0c0e8f6e04842929",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-checklist-new-vendor-setup-greencrate.md",
+      "processed_sha256": "6808e0bd00192588a0c81fd8354209c68a8dc3df5c6d9e33c1766e31f9224f35",
+      "provenance_hash": "fe449a2bdefa9f7b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/checklist-new-warehouse-temp-onboarding-corey-danvers.md",
+      "raw_sha256": "43fc0f1d1d6950ba889afca5bbbb14daa499e13ccc0715a81ced7abe4ff230c9",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-checklist-new-warehouse-temp-onboarding-c-46ce97e9.md",
+      "processed_sha256": "255caa15980c6e17a6ec71fefcd5f434225e2e8bafe36ff17e8b35fa1dd48336",
+      "provenance_hash": "43fc0f1d1d6950ba"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/sl3-onboarding-checklist-cobalt.md",
+      "raw_sha256": "724544c9f82263420c3c1d9870b74f5a868ca2957f35e54bcfc2d172aa602216",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-sl3-onboarding-checklist-cobalt.md",
+      "processed_sha256": "ccc8266fe4044cd926831dc8f337e552a9967e1dc553477e2ad2ab3b06cf1bf1",
+      "provenance_hash": "724544c9f8226342"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/checklist/sl5-cutover-checklist.md",
+      "raw_sha256": "5242b176d1cd26285ce18aabb0fe4d5478114a25052f01b5669e8c98fc01b27f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/checklist-sl5-cutover-checklist.md",
+      "processed_sha256": "abaf77683fdc96e8ae2c67770278ca54a367fcc33a2dd74f2d2701af54a69e0d",
+      "provenance_hash": "5242b176d1cd2628"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-helprise-order-lookup-sidebar.md",
+      "raw_sha256": "d6efff81a4e10b4c4325c47d8304f11551cb4cc400ed32b78d1c43641c1bed62",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-helprise-order-d61e25e8.md",
+      "processed_sha256": "bb8b71e124a13cb2294fcb5ac4c4ab4568614ed6d9178aebafb95c56f6576585",
+      "provenance_hash": "d6efff81a4e10b4c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-mailloft-abandoned-cart.md",
+      "raw_sha256": "48d7d3ef6d18aa4bfec516608171405fb122de48d78f1d5f56896840bb74a20f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-mailloft-abandoned-cart.md",
+      "processed_sha256": "c06c50ecd046ad88df95d31f0d3b825b8c91e83cd28176a3dd67c9767752d821",
+      "provenance_hash": "48d7d3ef6d18aa4b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-parcelpoint-helprise-tracking-webhooks.md",
+      "raw_sha256": "ff69465909bc668cf87f6219a61aec49db08f372b3780ab9f777783367bd6c66",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-parcelpoint-hel-ef60db6f.md",
+      "processed_sha256": "d6c364b0bbc5e74a2bfd593bb545900ba2bbaa85711b8228b7a41cd1179d3b14",
+      "provenance_hash": "ff69465909bc668c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-parcelpoint-ledgerly-monthly-invoice-import.md",
+      "raw_sha256": "acb4f0521de5e05792b73f7e904896544088d6f6581675c86c9c8656167b8973",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-parcelpoint-led-482405e0.md",
+      "processed_sha256": "4c7753a434247da4840df625286f24b6834c8b8a83bb336e34b73331b1d894f2",
+      "provenance_hash": "acb4f0521de5e057"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-pipewell-b2b-lead-capture.md",
+      "raw_sha256": "d74bb7a9b7f9d18834de964207a81681e9c04f2ec8f99f02f77ce62c10b59a17",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-pipewell-b2b-le-27bc059e.md",
+      "processed_sha256": "d4d88fe52901500f945f3d910aa442f5931b228f24155a7e6b55749593ff8e77",
+      "provenance_hash": "d74bb7a9b7f9d188"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-shopstack-ledgerly-daily-export.md",
+      "raw_sha256": "5d01929c5142ad5abae749942538fb9bc807a49c3a9cac65d21d6c88d241c00e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-shopstack-ledge-fe42a249.md",
+      "processed_sha256": "8f226fa41be52c8dced631ae45ace1547356866af1027c2e92b2abddb0979558",
+      "provenance_hash": "5d01929c5142ad5a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-vireo-ota-telemetry-ops-dashboard.md",
+      "raw_sha256": "1078b46f365f08896b6c13a7a5655b5c38248a2d1da9127529f99cf6b3368983",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-integration-guide-vireo-ota-telem-389025c7.md",
+      "processed_sha256": "c4802e317686b07b2b57f39db1dde559eed33447a77f1fdbe500aa56855cafc2",
+      "provenance_hash": "1078b46f365f0889"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/integration-guide/sl5-shopstack-parcelpoint-integration-guide.md",
+      "raw_sha256": "c85cd80aa0a8298ec4a76c0c0a7aebfef8775c8373e1a7f2daa0088ebda21af9",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/integration-guide-sl5-shopstack-parcelpoint-integra-47159bf0.md",
+      "processed_sha256": "c144dd0aaac9fd3d25cbdeb8447ec2d18084261087cc74112b49ed21823faee1",
+      "provenance_hash": "c85cd80aa0a8298e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/log/log-parcelpoint-receiving-lot-2025-14.md",
+      "raw_sha256": "3253819451d7270ff867b5efb4991fab33bce5e8413bd30923149baf921ba67b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/log-log-parcelpoint-receiving-lot-2025-14.md",
+      "processed_sha256": "fe4f35274e9a670d20aec707f05ef9f0f0695a93aa0e2f5617ef6d9607df601e",
+      "provenance_hash": "3253819451d7270f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/log/vireo-fw-v12-release-notes.md",
+      "raw_sha256": "138a412dbbf4ae618e8d9c6b7b038e8b48fed260241322c5c7af610d9c49b36e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/log-vireo-fw-v12-release-notes.md",
+      "processed_sha256": "ab08529880bfb905cdf5995a2b10d35b1e452af1e778a0e45fd118e3a80c8df8",
+      "provenance_hash": "138a412dbbf4ae61"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/log/vireo-fw-v13-hotfix-release-notes.md",
+      "raw_sha256": "d45603c3ecb241411aec5a205132dfb695dfdcb1eb24438c06193a655858da4a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/log-vireo-fw-v13-hotfix-release-notes.md",
+      "processed_sha256": "e507a9dccc94adaed49cb3fa57d94a4752a404cd29afc3ffa04a1b0a67b893af",
+      "provenance_hash": "d45603c3ecb24141"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/holiday-backroom-capacity-postmortem.md",
+      "raw_sha256": "91661a0eab5f7dac7f46cb9483b5ee73d61fef62e8fdd3dc5a47df7511210645",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/postmortem-holiday-backroom-capacity-postmortem.md",
+      "processed_sha256": "c250112b95a469219ed92eb2eb45906bed2f51973e14a385f5a72afeae9d9120",
+      "provenance_hash": "91661a0eab5f7dac"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/mailloft-drizzle-segment-misfire-postmortem.md",
+      "raw_sha256": "e8525e3989c480b9dc8ea4c84b2cfa22b677bbd7de72c4802ec3ec95528c1e71",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-mailloft-drizzle-segment-misfire-postmortem"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/shopstack-checkout-timeout-postmortem.md",
+      "raw_sha256": "76c66222b0eeaaa83f942e0f388b708f6c3c5c1a95ee9cd932950bda99845055",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/postmortem-shopstack-checkout-timeout-postmortem.md",
+      "processed_sha256": "8893cf1314d90914328208bc3ed902fcfe0e7d7ca7c9fc191bc60ca51b006d5b",
+      "provenance_hash": "76c66222b0eeaaa8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/sl5-cutover-postmortem.md",
+      "raw_sha256": "8072099126fd28177e846d4e984901554294b729465b332b8eae2944c021018a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/postmortem-sl5-cutover-postmortem.md",
+      "processed_sha256": "a249dd7ca9c559afc5aa641e0385737bf17b81c880cd9edb8a7fd56b05cb18f5",
+      "provenance_hash": "8072099126fd2817"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/postmortem/vireo-v12-flicker-postmortem.md",
+      "raw_sha256": "e453562e3c96d3cafbc46689a646c676cafe600636d1f5ee4db4e8390bf626c5",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/postmortem-vireo-v12-flicker-postmortem.md",
+      "processed_sha256": "0df885f6282203cdeaeaed8c91ceba5a6111ac05be7b52ca623d7a9d9c9782a5",
+      "provenance_hash": "e453562e3c96d3ca"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-b2b-freight-quoting.md",
+      "raw_sha256": "1d138699efe03fd422d5dd85016ec4e0f94131d57bf40379e0c8be2e321c9857",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-b2b-freight-quoting.md",
+      "processed_sha256": "49a8165aabbecdc6430bcfa9b7417b44cef29fc612c4d14923bb9e233338e7d2",
+      "provenance_hash": "1d138699efe03fd4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-campaign-launch.md",
+      "raw_sha256": "061ce490fb8e859c3154ab4dec108a93e5c407101e44dee6bf333d6174eb0c9f",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-process-campaign-launch"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-friday-defect-count-reporting.md",
+      "raw_sha256": "6e24a38d6e5108efccd38ad79fba8463def15aa20ca0214e6bf2347a13e7156e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-friday-defect-count-reporting.md",
+      "processed_sha256": "a5c80492af9c0d4885acedf619b717e3588354c3ef74eb4392d61f7a34082436",
+      "provenance_hash": "6e24a38d6e5108ef"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-helprise-ticket-tagging-taxonomy.md",
+      "raw_sha256": "4add3cda26ad73ed244371fdf0280d49fd40ea23e1f2216b07ced52b8479dbaf",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-helprise-ticket-tagging-taxonomy.md",
+      "processed_sha256": "588ad7b445950d5d86c5400b7073bb184f7ec23224b907532282f92bb5425a58",
+      "provenance_hash": "4add3cda26ad73ed"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-list-price-rollout.md",
+      "raw_sha256": "19fd0c988fc65e1f9ab25ce73b9c98a82adbaa64af5081a162e7b95872d067b7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-list-price-rollout.md",
+      "processed_sha256": "f483d533fc52b1ce691201bc0814b76c2ba35d9b80c3cc91c1f6edd40a26a1d5",
+      "provenance_hash": "19fd0c988fc65e1f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-month-end-close.md",
+      "raw_sha256": "b72390d43bad5fd3bcd0f17afc866a3d7a96a09e8ab85cf1d39356ff631e7545",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-month-end-close.md",
+      "processed_sha256": "58c55886a592655ff183b26db63124d212deeb973456f96a515bafcbe20efa36",
+      "provenance_hash": "b72390d43bad5fd3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-purchase-order-issuance.md",
+      "raw_sha256": "62065b34908790fadad9ef219b3baa6ea95c074b1e0709355d076e49f2144434",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-process-purchase-order-issuance"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-shopstack-contractor-work-request-queue.md",
+      "raw_sha256": "b0d495a9290eb4aef5ed5542d817036e5323ca1732ea95999208f3a1bc236c89",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-shopstack-contractor-work-request-queue.md",
+      "processed_sha256": "c52deb16388095c5a4a7c484e41bf7e55963f71233f349ad3e7b592a114111f4",
+      "provenance_hash": "b0d495a9290eb4ae"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-showroom-demo-unit-rotation.md",
+      "raw_sha256": "9f97a5afafa097fa815f4cc521e520b71576fc68ad02c3bf721e1bd8db36437a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-showroom-demo-unit-rotation.md",
+      "processed_sha256": "922b537d2b53cddf9700dfa05ba28e2a3e919efb4f015dae0ae45234d674bf30",
+      "provenance_hash": "9f97a5afafa097fa"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/process/process-weekly-support-queue-triage.md",
+      "raw_sha256": "5b5c324e9e5cd589cb5f94736344a160674a4a46874a849e700db40a0f846b19",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/process-process-weekly-support-queue-triage.md",
+      "processed_sha256": "55de4d8e3d3da809db6a89fc122112fd6264686dd4c52f94817c9824f9067dd1",
+      "provenance_hash": "5b5c324e9e5cd589"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-desk-carton-redesign-greencrate.md",
+      "raw_sha256": "d9a341fb85e669309fd4ca38bfe7a665be78b9b9598379307217a308e8aa0cc4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-desk-carton-redesign-greencrate.md",
+      "processed_sha256": "22734536f353c233e9f3a2af1bc61834c6d8ff5247f87f71d07b882722ecb5a0",
+      "provenance_hash": "d9a341fb85e66930"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-hazel-drawer-launch-ls-acc-007.md",
+      "raw_sha256": "3e47ceb18b89e843a4189c11646d7dcd1c468560831da6643298170fa6c5e45a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-hazel-drawer-launch-ls-acc-007.md",
+      "processed_sha256": "0cfe5d2995903bf855832162b003297b6d2e7e5a176978f6df6eafde836bf30d",
+      "provenance_hash": "3e47ceb18b89e843"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-replacement-parts-catalog-buildout.md",
+      "raw_sha256": "103ad2f1ca40f84f81e0803f1ee3274720bf7f5bfc7ec3182c4c175444157f44",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-replacement-parts-catalog-buildout.md",
+      "processed_sha256": "5cd98a982f02d952434f072169257069389fdba5ab8906a4ac629a89efef561f",
+      "provenance_hash": "103ad2f1ca40f84f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-roost-bundle-launch-ls-bdl-003.md",
+      "raw_sha256": "9e53ad7313ed053b761742b4b3d45e2a95daa1887de7f8395b5deeaad8978b57",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-roost-bundle-launch-ls-bdl-003.md",
+      "processed_sha256": "0798de3e5e58b1ad0a037680df08c7019bd9b2f2f465e03001729760d2d9658f",
+      "provenance_hash": "9e53ad7313ed053b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-sage-mat-colorway-launch.md",
+      "raw_sha256": "1259b8ffbb0b254aec211b13a06e01b6a6835d4f2dfee4f1f54841fd946b5ba7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-sage-mat-colorway-launch.md",
+      "processed_sha256": "595cdb3e8e62ebe5a7c5de7b7706e53250c5a517b3b56a6486b03889689997bd",
+      "provenance_hash": "1259b8ffbb0b254a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-shopstack-checkout-tax-fix.md",
+      "raw_sha256": "ac4e4cff2b92e200b0bb2aa3e011b6a598e67d5fc9423441340486d4744c2933",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-shopstack-checkout-tax-fix.md",
+      "processed_sha256": "7be1be6a012545ba621b38f52f013c5fd53e6c0e5f6e7e932b97ad5cfcac5040",
+      "provenance_hash": "ac4e4cff2b92e200"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-showroom-refresh-2024.md",
+      "raw_sha256": "1c4efb7ac35f96483997099dc1af6adfc57be6f949fcf9d0ad8cf47f5db690f6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-showroom-refresh-2024.md",
+      "processed_sha256": "8be2f92b9fd383857393bec9c25198ec97b79a89c74bb21d9e67aa9b2490f6ca",
+      "provenance_hash": "1c4efb7ac35f9648"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/project-vireo-launch-readiness.md",
+      "raw_sha256": "7909edd49ab2a399e98e34a407d0eca4758e83116ac0fc5b580adf7f40323afb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-project-vireo-launch-readiness.md",
+      "processed_sha256": "ccdb28b68e8dbe943ebda14c0cde317178fbbb3924e6e9cc51590bea6165e001",
+      "provenance_hash": "7909edd49ab2a399"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/sl3-fulfillment-plan-cobalt.md",
+      "raw_sha256": "6590f82529a024afbb22d3546ce846d66233c5c85c8fddb47e3829b6b958123f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-sl3-fulfillment-plan-cobalt.md",
+      "processed_sha256": "95feefe7941e0af65af95acfcc1c4092b349b366af7f432976cbd01649acae75",
+      "provenance_hash": "6590f82529a024af"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/project/sl5-3pl-migration-project.md",
+      "raw_sha256": "c0543beb1cab01b18c70dabc5bf0fa94529a9651797fcad8d25c38bf65d9d466",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/project-sl5-3pl-migration-project.md",
+      "processed_sha256": "b35d27168249243a5c3ebe1c87376c074d47977103583ccd3a65a7c59a447402",
+      "provenance_hash": "c0543beb1cab01b1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-greencrate-carton-redesign-2025-05.md",
+      "raw_sha256": "9dd5e7d5aebdf2dbdb26cd978d286cf79cc13d3b2ed6319991b25a77db87a031",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-greencrate-carton-redes-7068ad69.md",
+      "processed_sha256": "ff5eab1c216937cac9a9a2ba10eda47c6256b1417a1e6a10c9d5bcaa6d5b772c",
+      "provenance_hash": "9dd5e7d5aebdf2db"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-meridian-lot-2025-06.md",
+      "raw_sha256": "be441a51c600a10f5985b1948679304db296497c4d45c15c28b6b5dc6201dc9a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-meridian-lot-2025-06.md",
+      "processed_sha256": "c82af5057c5aa4b1d31b1ec48a17aea89a8afa2d5994d787b44e475d45b4ac85",
+      "provenance_hash": "be441a51c600a10f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-meridian-lot-2026-09-rev-d.md",
+      "raw_sha256": "bde2cd2c901be976c4be84f365ce6d9a91859fd74099b8c2a912bc54e6c39c1f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-meridian-lot-2026-09-rev-d.md",
+      "processed_sha256": "a897c6d210d379dc76b4071d1dfc951f714ce3636447d3d7cbd71baf90657748",
+      "provenance_hash": "bde2cd2c901be976"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2024-07.md",
+      "raw_sha256": "96bf3589e69264eefb0a2de92283a74bc7e97a8daa5b26f6145ad8835394bd8e",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-receiving-log-ostrava-lot-2024-07"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2025-40.md",
+      "raw_sha256": "82b86d95c5f2917046ee0bb96bee45d30e4594df72cdf84124a8bc0359f301fc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-ostrava-lot-2025-40.md",
+      "processed_sha256": "58eee026be096a5876bd250d1e78c249dfa0ca9c05a873d6b66fc831ea2c2e99",
+      "provenance_hash": "82b86d95c5f29170"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2026-15.md",
+      "raw_sha256": "96d34bab3d47f0b19995f5933e833d2611b6d04ed82f91f2f0f5761175aaf763",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-ostrava-lot-2026-15.md",
+      "processed_sha256": "e7cb592d3fdf3c22167765755eb1659a7965e7c711c2c9bbde6292b03e4078ec",
+      "provenance_hash": "96d34bab3d47f0b1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-verdant-lot-2024-19.md",
+      "raw_sha256": "9c1e53719c267ffe62da202d59db258b20541714ce7481893dd4c2d86f6d3592",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/receiving-log-receiving-log-verdant-lot-2024-19.md",
+      "processed_sha256": "2545a450632a006d390e4bb26cf0dcd2a47881e5498d5d1af3d110f1ef33d635",
+      "provenance_hash": "9c1e53719c267ffe"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-all-hands-2025-01.md",
+      "raw_sha256": "c13f4aa505e257ac9608e710e2ad88f7927874aed913e3c074af0caea5976ecc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-all-hands-2025-01.md",
+      "processed_sha256": "431bf1edd3eb8eea2903a093f8c12ae29a986a8364d1a47f53f6d3c18de0d4bf",
+      "provenance_hash": "c13f4aa505e257ac"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-all-hands-2026-01.md",
+      "raw_sha256": "783dd435fe2af030cf703a6469c24670c9cacbff0b44392c9534dccbe36e6947",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-all-hands-2026-01.md",
+      "processed_sha256": "45a4101e1d0ce3d54498f3ba6d97e22166f4d856e7cbb6ed4a35cbea2352a71e",
+      "provenance_hash": "783dd435fe2af030"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-ops-review-2024-11.md",
+      "raw_sha256": "1a14231c0747dae6d77290a90a1e21a2fec5fe3d1c8d1e2a8fdf1cb8f4570fe3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-ops-review-2024-11.md",
+      "processed_sha256": "4a9b54729c5a93455b25dc0ad024b5d9eaf056417066390045883fe0a9ebc23f",
+      "provenance_hash": "1a14231c0747dae6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-ops-review-2025-05.md",
+      "raw_sha256": "6dfc9450a4367552e2a321f51e685f1f7f5af01338126bdce1bad4947bae3613",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-ops-review-2025-05.md",
+      "processed_sha256": "9540147697aabb7b06b1d7e8d5118b0702b38b58bdf990dad2a3de41d6513836",
+      "provenance_hash": "6dfc9450a4367552"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-shopstack-storefront-redesign-2025-04.md",
+      "raw_sha256": "86546ae9a70abc113742566a0ac43e1866375da9cb00487709ea51779afdd7ed",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-shopstack-storefront-r-8ee94781.md",
+      "processed_sha256": "e10de0dbb2d52e9d87baeb5feafe1f8a504baaef0c5e7fdc3451773d50553782",
+      "provenance_hash": "86546ae9a70abc11"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-vireo-app-v20.md",
+      "raw_sha256": "10ae1d41ad836a5639853e2cd52c3eccb5fcfeb3b2b0a61366888ef84fffe829",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-vireo-app-v20.md",
+      "processed_sha256": "b3a6c91a325cafc312eb1d483b18e61e89b8cf16b85eeff20bc9e7217eb77d75",
+      "provenance_hash": "10ae1d41ad836a56"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-vireo-fw-v10-launch.md",
+      "raw_sha256": "3a307ed40c5b703c08c2f604947209ae038f699f958771cf8ad2e01ebb20c396",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-vireo-fw-v10-launch.md",
+      "processed_sha256": "43a899300b112f9e4cfd1712f3b2338195d9698191889eb193f46fb9098c0b9e",
+      "provenance_hash": "3a307ed40c5b703c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-vireo-fw-v11.md",
+      "raw_sha256": "715af38e2a188b63ee9b3ae88d06cad6d8399ddaa8dc06b9b944ca9b44fd64f0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/release-meeting-note-relnote-vireo-fw-v11.md",
+      "processed_sha256": "1efaccd8d388f4bee69ba8bb90fb43eec0b12c01c18f72872adc3793b414176f",
+      "provenance_hash": "715af38e2a188b63"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/release-meeting-note/relnote-warehouse-safety-2025-09.md",
+      "raw_sha256": "a765a0de9e224d7c0d81e251ea3ec781bbd4f7167289bf0ed584c05857d0bb48",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-relnote-warehouse-safety-2025-09"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-backorder-communication-cadence.md",
+      "raw_sha256": "67ab218a59d54bb02ef8a0b0e7e20c2ec12488bdb390acf09f91ce55c629f199",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-backorder-communication-cadence.md",
+      "processed_sha256": "87bd9020feaeebaf8322f1daa39521de0f0be6a7453ee00314c9097b2857435f",
+      "provenance_hash": "67ab218a59d54bb0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-backroom-visitor-contractor-safety.md",
+      "raw_sha256": "e0b7c6cae40c5306cb4ab9c8dad5748e0c957e7d7145facc13e9099c2f976f47",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-backroom-visitor-contractor-safety.md",
+      "processed_sha256": "c36a2cdaa1feab7142a06c6c8420a202d1d804031eb762298b4d7653782e72ba",
+      "provenance_hash": "e0b7c6cae40c5306"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-bundle-kitting-work-order.md",
+      "raw_sha256": "b3851508254455471f78f1d1def36da06ccafd0671587d6bca5118952cb7edab",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-bundle-kitting-work-order.md",
+      "processed_sha256": "2130e3c091c2db1f2433c86ee6c524f4cc0254cdb799d8b03a504929ca0fe4b0",
+      "provenance_hash": "b385150825445547"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-carrier-claim-filing.md",
+      "raw_sha256": "324c3a3b0f78e792ed7f643356cea3115d65343cbb07c830f9a55743559b1969",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-carrier-claim-filing.md",
+      "processed_sha256": "1bbcf81e376016f926d7a3701731cfbe68db0ac95e3072f5520a1ac0bec784a7",
+      "provenance_hash": "324c3a3b0f78e792"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-carton-damage-claim.md",
+      "raw_sha256": "99ef8a572928bf5eef9cccd29ec04967c179f8e1f42e3ce1f9f5a31696fcb9e8",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-carton-damage-claim.md",
+      "processed_sha256": "9356dc52a3325d947b2806c767d4918654d117ebd3aa289a507be8c1e03c5584",
+      "provenance_hash": "99ef8a572928bf5e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-defective-lot-recall-handling.md",
+      "raw_sha256": "637e2d7575d2b0069398550d650bfd0ff3a9fea7f629959b0bbdba542905d4c4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-defective-lot-recall-handling.md",
+      "processed_sha256": "a1f421aacf1a5351799b861a8f1ce6870bbc0651029b338236589a9ecb75a300",
+      "provenance_hash": "637e2d7575d2b006"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-desk-qc-preship-inspection.md",
+      "raw_sha256": "a78fc1a9ab3060ff6c4b205267d577d5e34a2f386aab071b4a5d751116714fb0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-desk-qc-preship-inspection.md",
+      "processed_sha256": "5f8cf0f015a32267d405b983c0d2d2dcd24d6d6b6ebafcc7478ade069c547144",
+      "provenance_hash": "a78fc1a9ab3060ff"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-inbound-receiving-inspection.md",
+      "raw_sha256": "178a258d24d35e18c7962a686bcc0937d946513dceb0c54abdb7ff84e8f643ad",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-inbound-receiving-inspection.md",
+      "processed_sha256": "d59949c3e3755675e28c5bbbf18403525ad25f364cd127868b4abf50bd50555d",
+      "provenance_hash": "178a258d24d35e18"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-inventory-cycle-count.md",
+      "raw_sha256": "b6a0d0ba8c3c3c27b444ed61d08fefdae2380a1fa0f2152ed4cf3a1efb42670c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-inventory-cycle-count.md",
+      "processed_sha256": "22ccd809fae96b23a3c9e6713039957c16b7528433ee633d00d9185325a2c145",
+      "provenance_hash": "b6a0d0ba8c3c3c27"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-oversized-freight-cascadia-booking.md",
+      "raw_sha256": "dc7b364b3e1da1d99c988461698df3383a79cb368d2f03adbbdbb0fa0d7085cf",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-oversized-freight-cascadia-booking.md",
+      "processed_sha256": "e28700cc511fcd9ea58d448ba9c400e87fddc323d0803ddad7b09d2ebf904b4a",
+      "provenance_hash": "dc7b364b3e1da1d9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-pallet-build-and-wrap.md",
+      "raw_sha256": "561179912d87e89adf5801c63d8ed405cc42cbf64002b3cd941bb5bfdc5bc383",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-pallet-build-and-wrap.md",
+      "processed_sha256": "8f279d4ffff3316e5dcfd05650b9401769195f518bbe3953020dc750358c30c8",
+      "provenance_hash": "561179912d87e89a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-production-lot-assignment.md",
+      "raw_sha256": "5f8ff6b32e069cbc63d54bba2d03674eeb55d5bb1046cd36ba911ac2fc8e4a0b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-production-lot-assignment.md",
+      "processed_sha256": "854973f59ef3ad74587a29b122f0d5a36b09a5cfe2f51b6bf00959cbb1e42a21",
+      "provenance_hash": "5f8ff6b32e069cbc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-quarter-end-inventory-reconciliation.md",
+      "raw_sha256": "1d8aaa5fe891b11cd5529e806517a1972cfd79959a0d153c2d8ed8b98b00db98",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-quarter-end-inventory-reconciliation.md",
+      "processed_sha256": "8c617d826df80d4a3e073117f5708888feb6c25c7e5c0823d2b0c99da6c01530",
+      "provenance_hash": "1d8aaa5fe891b11c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-returns-receiving-restock-grading.md",
+      "raw_sha256": "adaf3437f6bf43c69c2cf49eb93db5f6240ce7fce001357b95dff7c109ca2c64",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-returns-receiving-restock-grading.md",
+      "processed_sha256": "6cc2b7b047e145df3348c838d666be5af86929395cc79a5eca0fa711ff442dc5",
+      "provenance_hash": "adaf3437f6bf43c6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-showroom-pickup-handoff.md",
+      "raw_sha256": "cf8ff4037038838b33960c2e70f01beb0d3ff8d9d4c583a58f071a90e16bfbe2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-showroom-pickup-handoff.md",
+      "processed_sha256": "1216939ee4073bee76bcbb0b2aae09d04b13de8ae11c6addada0c231a96d286f",
+      "provenance_hash": "cf8ff4037038838b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-vendor-onboarding-ledgerly-setup.md",
+      "raw_sha256": "e799f277ce08669b97ca0ce0e076c2f2e4f93322a67f57a039a6f25252722fda",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-vendor-onboarding-ledgerly-setup.md",
+      "processed_sha256": "f36d66110ecf2c18cd69f74bb37780c3625052db2ae5c94e7c016167bdb69f36",
+      "provenance_hash": "e799f277ce08669b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/sop-vireo-ota-release-hardware-matrix.md",
+      "raw_sha256": "3798e17c8863d52b1d93019d5214ad85fca712e40f8cfe479edbc86bd2dd4103",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-sop-vireo-ota-release-hardware-matrix.md",
+      "processed_sha256": "d0ffbf0f6c1bd7ed0c9da490de578126076a496c10cd8fa3af28375059d9a906",
+      "provenance_hash": "3798e17c8863d52b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/operations/sop/vireo-v11-rollback-sop.md",
+      "raw_sha256": "90d735b9c598f222f31d609605c2ba5bee82ffb6313e206c388b93b6aaac96df",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/operations/sources/sop-vireo-v11-rollback-sop.md",
+      "processed_sha256": "dca45e548f35f60062c07b0ffacd2d9a7673b62ac197d669f1d9dcb8eef44421",
+      "provenance_hash": "90d735b9c598f222"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-beacon-legal-msa-scoping-2026-01.md",
+      "raw_sha256": "536e80ff858605b861d586c18e04fdcf4cf6a89a279246cd7f0fa1dc813b5521",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-beacon-legal-msa-scoping-2026-01.md",
+      "processed_sha256": "bc205a1525fa1cab1f341998bcc3063bd228bf9912fb9841c7ab8758df0ff144",
+      "provenance_hash": "536e80ff858605b8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-bluebird-configuration-2025-12.md",
+      "raw_sha256": "819202e6ea208cb2af904d004b434c8e8dbf5f0fe2b383b9600cd69e8a755329",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-bluebird-configuration-2025-12.md",
+      "processed_sha256": "547ad26c6ab7a251b06bb4679a9af33a92281b4bd39ecafe88c5871e963db3bd",
+      "provenance_hash": "819202e6ea208cb2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-foxglove-renewal-2025-11.md",
+      "raw_sha256": "2f7c2bbd7ab6fbdec5eedbbf2640172f9abbfa67cb7a8e030e23758ec572f3ae",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-foxglove-renewal-2025-11.md",
+      "processed_sha256": "6a2e2384b88485e2bb1ecdd5cd339da4654f8ee9c86403c05239783d314245f6",
+      "provenance_hash": "2f7c2bbd7ab6fbde"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-harborview-discovery-2024-08.md",
+      "raw_sha256": "84b7003deaef05d32eed4eff83660d62f7bf6a15d0298134b7e65d12bd5f5439",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-harborview-discovery-2024-08.md",
+      "processed_sha256": "792aa251dd4266b9f6bf1e773df41b8b9eb2f56463cea6dedd6a47c27b775d05",
+      "provenance_hash": "84b7003deaef05d3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-harborview-elena-brandt-8seat-expansion.md",
+      "raw_sha256": "9707ad6e18fea65ca0c41befa4e7db441d4d0b7b82f0bf04624f0f01ea880ee7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-harborview-elena-br-6f547e5c.md",
+      "processed_sha256": "e007188349587842e4c54c0d49c2773871b9d5db2db7e99ccdaa7077738c7138",
+      "provenance_hash": "9707ad6e18fea65c"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-juniper-tour-debrief-2025-09.md",
+      "raw_sha256": "21464290966ccd03b0c1497deb9ed8155cb04811bba83eae9e079f3c589f16d7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-juniper-tour-debrief-2025-09.md",
+      "processed_sha256": "d461d7b7f64837e28f878195f6110110d3e123a09cd2b179a32f07fc43420091",
+      "provenance_hash": "21464290966ccd03"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-kestrel-grace-liu-lease-vs-buy.md",
+      "raw_sha256": "52bf20b710df3c5f95eb8ea703c320002cb70d337a70f5610637398b7c8b6d49",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-kestrel-grace-liu-l-7bd6dbc1.md",
+      "processed_sha256": "12b7714aac7b4dd5cf2cb0f2ac2e8b40a40eef9ef6df9ca0f95d49cd667342e1",
+      "provenance_hash": "52bf20b710df3c5f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-petrel-discovery-2025-06.md",
+      "raw_sha256": "6c98a26e0266ac853979c76f72c250e638ebf9de1a4ac0e1346de65c7f5829a2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-petrel-discovery-2025-06.md",
+      "processed_sha256": "5133ab559ed2a8f1a8c3837c2facead97ef538685c04567f51a6646eb5548300",
+      "provenance_hash": "6c98a26e0266ac85"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-summit-physio-intake-2024-10.md",
+      "raw_sha256": "fcec8beb1ef7efd280021192c31035c92914de3a624ef3d2d1fb9eda4f41df61",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-summit-physio-intake-2024-10.md",
+      "processed_sha256": "259e5138fa68417a4f9d3d55cf2f5ad3ae509b766c723a1c9143d9fecdba8125",
+      "provenance_hash": "fcec8beb1ef7efd2"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/call-transcript-tidewater-hal-jensen-dock-access.md",
+      "raw_sha256": "d42417ecca6b0ff0794850ab69376a372f12ee5e0addce50b70f6c4f226fe4df",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-call-transcript-tidewater-hal-jense-691ca01f.md",
+      "processed_sha256": "e8967651c2711ccaea1f4dad0e201881a2e655215c88257e95542f689d8ed69d",
+      "provenance_hash": "d42417ecca6b0ff0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/sl3-discovery-call-1-transcript.md",
+      "raw_sha256": "3385296738c72eb94fdfc29913e5e187b4a879a94cfb745c41ad0a48c7aad037",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-sl3-discovery-call-1-transcript.md",
+      "processed_sha256": "9d19c13cf20b8d90551203a8c4bf9f8f6f1577899ddae5e0daeff7336eab0d96",
+      "provenance_hash": "3385296738c72eb9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/call-transcript/sl3-discovery-call-2-transcript.md",
+      "raw_sha256": "30cc52d6783d42a158d1deb0394e53acf356dda0445923ee596108eedfca689b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/call-transcript-sl3-discovery-call-2-transcript.md",
+      "processed_sha256": "2639395d563d98a6c80e92b3b376226edc98b5753aa321b035a11bab1abf2ef3",
+      "provenance_hash": "30cc52d6783d42a1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/case-study/case-study-harborview-model-shop-2025.md",
+      "raw_sha256": "d5c2a21af67fe05889d20683b099bbce4c6b85d0b6ad962e9b035a13b0ee8291",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/case-study-case-study-harborview-model-shop-2025.md",
+      "processed_sha256": "5af13c8ba52e4e52a2ee5f887eb157bbdad1adc17dd6693649f50088c557d018",
+      "provenance_hash": "d5c2a21af67fe058"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/case-study/case-study-petrel-analytics-remote-2025.md",
+      "raw_sha256": "4c16254b39e5e088ad96f3f6a0be5279c746c7f79b9ffae95cb3e980c9b59e37",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/case-study-case-study-petrel-analytics-remote-2025.md",
+      "processed_sha256": "fa046fa0878e444b09a9480fb53af7946167fa5111b00f3da8eb4219c840cf9d",
+      "provenance_hash": "4c16254b39e5e088"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/case-study/case-study-summit-physio-footrests-2025.md",
+      "raw_sha256": "ac13ac603d173ca81014677a2f521c54608e1b2bd1ee54a8f74af1387f1f5877",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/case-study-case-study-summit-physio-footrests-2025.md",
+      "processed_sha256": "3d432434c10112f9aac7c3e0592fd62784de65d6a96611119da44ed1378507fc",
+      "provenance_hash": "ac13ac603d173ca8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/case-study/sl3-case-study-cobalt-dental.md",
+      "raw_sha256": "3235f32b77ada98bb797637ea9d941d1214739360ae26319fcd83c6092c9517d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/case-study-sl3-case-study-cobalt-dental.md",
+      "processed_sha256": "94de00cae187f0cea9f22904efff43799a838e8ebf54dfd861ed87594dfd1754",
+      "provenance_hash": "3235f32b77ada98b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/competitor-note-ergonest-chair-range-2024-11.md",
+      "raw_sha256": "e1f883eff7d681e16f6d884891feab2da01b520c718b0c579640f5ed8e51484f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/competitor-note-competitor-note-ergonest-chair-range-2024-11.md",
+      "processed_sha256": "2987e5c739401958024c4ce2bff681c41441860b5885263d91bb9f9c3a2094e5",
+      "provenance_hash": "e1f883eff7d681e1"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/competitor-note-ergonest-leasing-teardown-2025-12.md",
+      "raw_sha256": "aba2d6c8bebc3a19f2f7e97c64fae913548019f713bd219c35e7cb46752b50ab",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/competitor-note-competitor-note-ergonest-leasing-te-b4bfa6f0.md",
+      "processed_sha256": "14d73a52f900f90ec8f14376c768ade10ea7483c697b5e3a6a8f8ec249c4e81f",
+      "provenance_hash": "aba2d6c8bebc3a19"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/competitor-note-ergonest-returns-2024-08.md",
+      "raw_sha256": "5021b8f2f0755cf00680d78af42ef44b2b93c87b50feceebbe74cc79adde78b1",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-competitor-note-ergonest-returns-2024-08"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/competitor-note-ergonest-support-escalation-2025-04.md",
+      "raw_sha256": "96208fa09831f3f9f8e6dcec369f1507d22b5cdd031e48835bdd57428f628cfe",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/competitor-note-competitor-note-ergonest-support-es-e4404fc6.md",
+      "processed_sha256": "8dba731ead9af2f8a6b16272b4f969cc9cc2cf8d9ec0a4e5515a3684a9dc5086",
+      "provenance_hash": "96208fa09831f3f9"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/competitor-note/sl3-competitor-note-ergonest.md",
+      "raw_sha256": "2e112fc8cf657c4bd5dac9f38430244d229bdf1ffca45a1040bec3f312e01e4c",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-sl3-competitor-note-ergonest"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-beacon-w9-insurance-msa-checklist-2026-01.md",
+      "raw_sha256": "acfb651b2c4a398043f59b829deb5407ca694d59e04ff18cad90776888ca3529",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-beacon-w9-insurance-msa-checklist-2026-01.md",
+      "processed_sha256": "55a1482c1a7f71a485442454855ad9274193cd176ef63b854cbd562c1d56f66f",
+      "provenance_hash": "acfb651b2c4a3980"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-bluebird-footrest-count-2025-10.md",
+      "raw_sha256": "6fcf41c4b84c8ce5811ce54fe6575fab36ba925c6885d137e9a79dc8847d11c6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-bluebird-footrest-count-2025-10.md",
+      "processed_sha256": "a75fc1a8eeb1cb1e4b0a4cba57db31e18c3688b6717e2a64d8abb6e4fecd742c",
+      "provenance_hash": "6fcf41c4b84c8ce5"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-cobalt-four-clinic-checkin-2026-03.md",
+      "raw_sha256": "325237c2b35adc74a5aae9d2aac05d9342358c39ee5e98102664c2c31514a99a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-cobalt-four-clinic-checkin-2026-03.md",
+      "processed_sha256": "d2d8c53af3767e90957622e71c7332c47a4dd827afa239a2e50bd141329f6328",
+      "provenance_hash": "325237c2b35adc74"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-foxglove-renewal-checkin-2025-11.md",
+      "raw_sha256": "d166b60587fa991632d2280c3983d6b42f12709e739f79010508ffbbf9e555ad",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-foxglove-renewal-checkin-2025-11.md",
+      "processed_sha256": "ff06a156cccf8e50a38b54930466d8a762e951bb9fc127eee532160b6c892a3a",
+      "provenance_hash": "d166b60587fa9916"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-harborview-delivery-scheduling-2024-09.md",
+      "raw_sha256": "842c8b473232d83e1799bc66218b77fd5bf1e8a01ff048ef9a4a402fcc6cd6db",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-harborview-delivery-scheduling-2024-09.md",
+      "processed_sha256": "d760262c28f80ddbd21d3a4b4f7ffd8a2871885e11b075aa6f495218131ebbfe",
+      "provenance_hash": "842c8b473232d83e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-harborview-expansion-confirmation-2026-04.md",
+      "raw_sha256": "31373cf8b472d5305c1272fabf4e58047a5deb7738e5544db25eaa47135820a2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-harborview-expansion-confirmation-2026-04.md",
+      "processed_sha256": "ddbb39185190202979ef234495bc3b767ba4fb2e090b0187071a08867ff9cec7",
+      "provenance_hash": "31373cf8b472d530"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-juniper-tour-followup-2025-09.md",
+      "raw_sha256": "59f4124b79d0076007c721ef49a96633c10049fbb12eb3ba7325e2e5ffab3641",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-juniper-tour-followup-2025-09.md",
+      "processed_sha256": "abd86a9f6a6ab87b4a94e6353f1aa1cda991b64eea2f2cf1e7778e73cd01f721",
+      "provenance_hash": "59f4124b79d00760"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-kestrel-showroom-recap-2025-12.md",
+      "raw_sha256": "61f5eb99fdfa9f4f0aa2e6255a741ed4341066c277fec01e4d438b23bab2f4fd",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-kestrel-showroom-recap-2025-12.md",
+      "processed_sha256": "95eff759db2965b7173be66798e3a4d0d55a2310a6574862be207bd2bd77eb47",
+      "provenance_hash": "61f5eb99fdfa9f4f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-petrel-dropship-addresses-2025-08.md",
+      "raw_sha256": "95668f36d5e329e8468bad6c93a635994b77bb0b90b87c084b436e37e9bb0680",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-petrel-dropship-addresses-2025-08.md",
+      "processed_sha256": "cc879530a3e703cdad4483c5fb457e480e2345bef4acb4bcebe7913319ab5b32",
+      "provenance_hash": "95668f36d5e329e8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-sofia-tom-chinook-handoff-2026-03.md",
+      "raw_sha256": "fb898fbbf6c2abfe3bc37ca0d2c797ceaab51b39e1c8cf5979e29cee51233283",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-sofia-tom-chinook-handoff-2026-03.md",
+      "processed_sha256": "bb1e89190c3e2eba85fcb034c4057b39f8013faa2428960be008b3dab3346f54",
+      "provenance_hash": "fb898fbbf6c2abfe"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-sofia-tom-squall-case-study-2025-02.md",
+      "raw_sha256": "97e06d6e31a6c36b6b1a31677162cc7db91fe6db3b5c12421c606b62230ee11b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-sofia-tom-squall-case-study-2025-02.md",
+      "processed_sha256": "dea5e154a92920b6464e9e37b5e404ebbd84c114ffe1476c9cd48c654f72c9c3",
+      "provenance_hash": "97e06d6e31a6c36b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-stonebridge-kickoff-2025-03.md",
+      "raw_sha256": "546454997c59be18b6924bdb936eb6544ff2b77ff45cf8eb78f87cfadd42956e",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-stonebridge-kickoff-2025-03.md",
+      "processed_sha256": "d1aa6cdc0ec2d9711117ab2614cc9c3d0abfdda549374212722a3c9906ea11b3",
+      "provenance_hash": "546454997c59be18"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-summit-footrest-reorder-q1-2025.md",
+      "raw_sha256": "3238fd9ca68394a0ced31d2bfcd398f9f1a2509fcae94ed6e3e9d17210c034a1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-summit-footrest-reorder-q1-2025.md",
+      "processed_sha256": "7f0f2c1c9a724211b349cbafca37c2dff06475b064c7d49d03f56a873012676d",
+      "provenance_hash": "3238fd9ca68394a0"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-summit-q3-reorder-2025-09.md",
+      "raw_sha256": "320d2cbfcc391487554d4c929b1df56d4a810b8bb9270e1330e12d7b99954e02",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-summit-q3-reorder-2025-09.md",
+      "processed_sha256": "5c05050511227a7eccd18f0b0271c2961e9f52c174e90267dd40ea45596f3faa",
+      "provenance_hash": "320d2cbfcc391487"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-tidewater-freight-quote-2026-05.md",
+      "raw_sha256": "9f662494c3f216c6e831ad8944ec19ed917b3cc0d33b6a97f1a7152496d21143",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-tidewater-freight-quote-2026-05.md",
+      "processed_sha256": "ed03e7e48b69cfc7bd691805e76b18cd782dbedc094f4f70eb51fa04abc4a544",
+      "provenance_hash": "9f662494c3f216c6"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-tom-mara-pipeline-jul2024.md",
+      "raw_sha256": "42aca5cd88ce880b9c4c02db11ca9ddd374de947bc7fad7d5200e581066b3c8c",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-tom-mara-pipeline-jul2024.md",
+      "processed_sha256": "ab78de5821e28bd7c89b3908bdcfa119ccd6bcfd3d616685eedb40d18e12e65b",
+      "provenance_hash": "42aca5cd88ce880b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-tom-mara-pipeline-jun2025.md",
+      "raw_sha256": "51083f86da3ed1f855a400b4e36632bddb91bf71df94a5c85311d9cf34df470d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-tom-mara-pipeline-jun2025.md",
+      "processed_sha256": "c3d02d941e5711214b02516230de1ebe31e66d16859a4b9b14ba3c3558e66ded",
+      "provenance_hash": "51083f86da3ed1f8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-tom-mara-q2-pipeline-2026-06.md",
+      "raw_sha256": "9524968043f316cdc0248ca744600913c0f1fc7a488cdb5a0ed3465731f248e2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-tom-mara-q2-pipeline-2026-06.md",
+      "processed_sha256": "a8c4cba948d05e5e237b77e910d8d52c04bfc3a852b24d47f6035cf37a5cc2a6",
+      "provenance_hash": "9524968043f316cd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-tom-yuki-price-increase-heads-up-2026-01.md",
+      "raw_sha256": "33ed7c8c6ef8aeb48ce29e6244e4bb14adbd46a5fde2c4c0e88adec291d1cbb5",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-tom-yuki-price-increase-heads-up-2026-01.md",
+      "processed_sha256": "1856b1d20f4b9787a56016ecb12fdcd30a802bcb480f5a3757a30ed45de34438",
+      "provenance_hash": "33ed7c8c6ef8aeb4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/email-thread/email-yuki-intro-summit-2025-08.md",
+      "raw_sha256": "5a01d6e60c8d0bde2808ef476c4d5a1bffe36d28eb90cd871fce7318797e40fc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/email-thread-email-yuki-intro-summit-2025-08.md",
+      "processed_sha256": "c74ca5cd61a8dae4c6b4c756d9ee1becd32944470f27e0d1c9f91259aa6498ad",
+      "provenance_hash": "5a01d6e60c8d0bde"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-beacon-legal-discovery.md",
+      "raw_sha256": "7fc0b431b3625b9e05d0862fa49402bbe46a986c2f3f07c716c78d3652e112f5",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-beacon-legal-discovery.md",
+      "processed_sha256": "7c119fc642be8798701af44fc18fad44281a85fc6cee73e2500c4eabb7e7eae2",
+      "provenance_hash": "7fc0b431b3625b9e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-bluebird-closed-won.md",
+      "raw_sha256": "0896c48537985f9bbf14463dee71981a9d650e05b5d09e7060e2e9864aeb6515",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-bluebird-closed-won.md",
+      "processed_sha256": "39b75f8600b8598274675694fe2581860923578404a66d6f8fe6ee4a8f4621b4",
+      "provenance_hash": "0896c48537985f9b"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-bluebird-inbound.md",
+      "raw_sha256": "4b4ce4bdf629e5c7ce70db91739bf66984403041e3c95ef9679b7ee89a22ada1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-bluebird-inbound.md",
+      "processed_sha256": "9d6e1fe2452aa08cc6b2c0cd2f3b9ef6384ad2261b37036a48b5588732a5ece9",
+      "provenance_hash": "4b4ce4bdf629e5c7"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-foxglove-renewal-risk.md",
+      "raw_sha256": "948f73e6e0249346b127051cde6c2c8c873891184a699819a3f1853dc82d1e3f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-foxglove-renewal-risk.md",
+      "processed_sha256": "37bede9d218da492d4e684b0d5a7b3f6797abf82fae5514399c90268bf8da99e",
+      "provenance_hash": "948f73e6e0249346"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-harborview-closed-won.md",
+      "raw_sha256": "70e89c2731891dc80e018c75c6fe891a470641fb471dcaa33ee037a52522dc9a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-harborview-closed-won.md",
+      "processed_sha256": "dd3e025e2cd1c2d7e700248e7e95731c34ca952e3d5049d5956d25cafeaa7e43",
+      "provenance_hash": "70e89c2731891dc8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-harborview-expansion-opens.md",
+      "raw_sha256": "4609609bbaaae446f083b0bdb638bf7254d28ef9b38eac02710b7157afd5ac0b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-harborview-expansion-opens.md",
+      "processed_sha256": "e20c4d4d9ee85b3eb7fa6415afb5cbfad7656ef4815f5646309b107930f78605",
+      "provenance_hash": "4609609bbaaae446"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-harborview-expansion-signal.md",
+      "raw_sha256": "a6c0513e09e54abde43327d43e532642899aeceff735816ab09e7d92e85abd34",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-harborview-expansion-signal.md",
+      "processed_sha256": "c568a225c09d7677a911abe268f435dbfa534977ae75e74bc59679bf7492008c",
+      "provenance_hash": "a6c0513e09e54abd"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-harborview-first-contact.md",
+      "raw_sha256": "e024dee47ae2d3539cbaa2cd3035e8185ebca97a3c61bfd8cbd46b54b0159ecb",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-harborview-first-contact.md",
+      "processed_sha256": "db5bbd1132a1262cc1cdf9c63e89156f0ee16ae38a5150dc21e90d39e31628b1",
+      "provenance_hash": "e024dee47ae2d353"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-juniper-first-tour.md",
+      "raw_sha256": "1d8784db940429631829a8fd818ed8ba66591c9bfeea1fbe773c373308cfc532",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-juniper-first-tour.md",
+      "processed_sha256": "c8493f4c6e2b6849fde306b6b3801371f308d8a904ff2d9d52b643e13074816f",
+      "provenance_hash": "1d8784db94042963"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-juniper-floor1-pilot.md",
+      "raw_sha256": "183911dd4a6d30f8f602758a57302cb0ffe1fe735e6eeab793ee7d23c65ae4a0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-juniper-floor1-pilot.md",
+      "processed_sha256": "b8682015949b248e7ecc528e5a2e8d99d15929c5a456e445e4b87e19db2be892",
+      "provenance_hash": "183911dd4a6d30f8"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-kestrel-call-scheduled.md",
+      "raw_sha256": "f31280a95ebce7293cccbee50e0d61e740008bc7d4ca5beac607f785bf973c0a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-kestrel-call-scheduled.md",
+      "processed_sha256": "28553d476c0cb7b46387cfa96a491a5fc587d097f4e3f292f8cc9f08acd93e16",
+      "provenance_hash": "f31280a95ebce729"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-kestrel-showroom-walkin.md",
+      "raw_sha256": "341c03c825b8ce72487c9e61e68c004dcca86cc3edeb602805eb832a645cfbb8",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-kestrel-showroom-walkin.md",
+      "processed_sha256": "65db310640e8824e558d06d4f774da9f5d452abc295a2d426081c8fa6062eaf3",
+      "provenance_hash": "341c03c825b8ce72"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-petrel-closed-won.md",
+      "raw_sha256": "8520d5d377aa8e4d2a3c76b55629a662c26445db222e492afcc7cece03a856ef",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-petrel-closed-won.md",
+      "processed_sha256": "814b0e91949d9b46bb62c07708c0912b1e50c19198604d8031fac6aea5e1f1c4",
+      "provenance_hash": "8520d5d377aa8e4d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-petrel-inbound.md",
+      "raw_sha256": "764b2ef18ca02e072201619fc8ac550cef22e0cc91d08d05f61739d69f316b54",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-petrel-inbound.md",
+      "processed_sha256": "d83661c1a396c6a1fbf57bae81271a68b48f00a865e4f7c8c0912fa4b5f04ecd",
+      "provenance_hash": "764b2ef18ca02e07"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-riverbend-dental-stalled.md",
+      "raw_sha256": "4ef371940d276e892e2e95d1c6c9836a8232222445c116d427e94040be28bd8f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-riverbend-dental-stalled.md",
+      "processed_sha256": "ad06a04938dcf383f6384477cc44d4555737c7a52f7aae60304ac5c6b9450220",
+      "provenance_hash": "4ef371940d276e89"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-rosecity-lost.md",
+      "raw_sha256": "0a3df89bdcf63f7ee6489592bfdb19c9b1837d37a174eecc5052d2e132a47816",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-rosecity-lost.md",
+      "processed_sha256": "d56f2ad5d3566f9df60dab425fcafaaed5a5a7a8470d2a597046fccdda624fea",
+      "provenance_hash": "0a3df89bdcf63f7e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-stonebridge-discovery.md",
+      "raw_sha256": "86bffada3ecce053f0d130cb3300f075c2b8fc9761a6421f7c131ed23067927a",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-stonebridge-discovery.md",
+      "processed_sha256": "78161817f11eae88c5a1b639a764cfb94ca87072d38ca15131376a9c63df38e7",
+      "provenance_hash": "86bffada3ecce053"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-summit-physio-inbound.md",
+      "raw_sha256": "e601b99839966dbc433f0062c17f688164514f467dc85affb3b3936d2ce3ea60",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-summit-physio-inbound.md",
+      "processed_sha256": "5fba950b9d201327c73f657b6b68b02617faefe3036fa80aba470870d73af3b6",
+      "provenance_hash": "e601b99839966dbc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-summit-physio-q1-reorder.md",
+      "raw_sha256": "a1c565cc183f548e64b8a66ff834d924fc9f9f31572ebe8d3224e3472e0d7129",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-summit-physio-q1-reorder.md",
+      "processed_sha256": "655007c194ee8bc9d98a3c2bab1e0cfaee4584ab8989596bb17b47430c8b6f0f",
+      "provenance_hash": "a1c565cc183f548e"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-suttoncole-inbound.md",
+      "raw_sha256": "e7500f72d10da8c6c1811d116cad10b713829b0843859e9d9de2bf9057afdf46",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-lead-note-suttoncole-inbound"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-threadwork-lost.md",
+      "raw_sha256": "b8fe52e947e203575adcac1ef67ff41827a604473947c702e3931d67d755c86f",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-threadwork-lost.md",
+      "processed_sha256": "7e4e7531baca070ddcf005bade6c98cea756a091b5722870c73fa9c3ad6ed90f",
+      "provenance_hash": "b8fe52e947e20357"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-tidewater-inbound.md",
+      "raw_sha256": "6c5e6a0a4bffbf2d0c3e88ac69488a52637b0d665e6a2380786660b4b09109bf",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-tidewater-inbound.md",
+      "processed_sha256": "0b99f2338e706bb57f4083d3c7526c4b232d200a6db8d5d8c5fec2a8e58c46dd",
+      "provenance_hash": "6c5e6a0a4bffbf2d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/lead-note-tidewater-proposal-refresh.md",
+      "raw_sha256": "8632acd1c9054e6924a0c955952648f8ffb0729101bc8f7a2ddd603694827759",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-lead-note-tidewater-proposal-refresh.md",
+      "processed_sha256": "c5782b1a9299d8909d713d1a91ea1095019d930aadb57b7dc10f548d64e59a06",
+      "provenance_hash": "8632acd1c9054e69"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/sl3-lead-note-closed-won.md",
+      "raw_sha256": "704804d32df5c3453243e24b31f00698153fd6ffb77e43b6780f6142a3f8ddf6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-sl3-lead-note-closed-won.md",
+      "processed_sha256": "913eff30c571523972316e465e7d487814c9fc427fcc7717f03abf0dba5e0e4f",
+      "provenance_hash": "704804d32df5c345"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/sl3-lead-note-inbound.md",
+      "raw_sha256": "adb0ffc167e8d7012462091bc0c3c84f6908245274c1e32c7b061287e2a73f00",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/lead-note-sl3-lead-note-inbound.md",
+      "processed_sha256": "c3db8ccbb97be9502617197f60d307becee96c4808839339d37b40e41172c4fb",
+      "provenance_hash": "adb0ffc167e8d701"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/lead-note/sl3-objection-note-price.md",
+      "raw_sha256": "9068cacc71464dae762e7cc1cf82cac649f0fb72b503ebdf44a7043a7e0adf6d",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-sl3-objection-note-price"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/objection-note/objection-note-beacon-legal-liability-cap.md",
+      "raw_sha256": "9015581aa549b126044288ee20fb4b100e7a16784815ac54ad92900d74d85863",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/objection-note-objection-note-beacon-legal-liability-cap.md",
+      "processed_sha256": "489703120d17d864c61cd1952ac3ab2a6b2be98fe861e88e49a93f01cab904ad",
+      "provenance_hash": "9015581aa549b126"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/objection-note/objection-note-foxglove-transit-time.md",
+      "raw_sha256": "8d5e019292c508ca39580787602a8f552abe836ba3ba3635bc0b6644147825a1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/objection-note-objection-note-foxglove-transit-time.md",
+      "processed_sha256": "b18f36dc1d84b65c525755f46f545aef2e1f72025f6c2f9f7c949fdbfab19feb",
+      "provenance_hash": "8d5e019292c508ca"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/objection-note/objection-note-juniper-cowork-leasing.md",
+      "raw_sha256": "c356230b361a5e0a8c7f6ac5a27f46c4206609dbadb3e751aea0d0f6ce05a8d1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/objection-note-objection-note-juniper-cowork-leasing.md",
+      "processed_sha256": "7dc7964a8069a86ed5b4594b46150a988a75cb68ee3724cc3a93a965199c9215",
+      "provenance_hash": "c356230b361a5e0a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/objection-note/objection-note-kestrel-lease-comparison.md",
+      "raw_sha256": "b92b495259aa8f75d2c03b92bb166941e276a44889eed2ea593c8fda7584ce06",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/objection-note-objection-note-kestrel-lease-comparison.md",
+      "processed_sha256": "e745ef87036c2fb2242d8fd8ee48433a2280d70ab3e8e1296c9b256dec29ff2d",
+      "provenance_hash": "b92b495259aa8f75"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/objection-note/objection-note-tidewater-freight-line.md",
+      "raw_sha256": "a0d524e7105660d4abec36d7b258a125ee30224f0476a0778e9b1a86c59b7b7d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/objection-note-objection-note-tidewater-freight-line.md",
+      "processed_sha256": "899f40637323a54a1017aa3f5abee20fe9c728251472a8af9ce72fe187db4ae9",
+      "provenance_hash": "a0d524e7105660d4"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/policy/sl3-onepager-b2b-pricing.md",
+      "raw_sha256": "6b9f250cdeef9b6957fd8809b0577818faf0a239d1c1ecea7a6b859571ace6d3",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/policy-sl3-onepager-b2b-pricing.md",
+      "processed_sha256": "f18be33ab1d249812643b230636e17134b3f7c0cdb8382ce8474381e51ea9393",
+      "provenance_hash": "6b9f250cdeef9b69"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/policy/sl3-policy-b2b-tiers-v2.md",
+      "raw_sha256": "e3f57036ac7c9df320908b12546b5f92225e335b4ddf9d6317c11c12059ce2c7",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/policy-sl3-policy-b2b-tiers-v2.md",
+      "processed_sha256": "454de7a08aa4e749028c256bc273b3f8d3fc7bb023026173191dc1d45dafc93a",
+      "provenance_hash": "e3f57036ac7c9df3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/pricing-one-pager/pricing-onepager-b2b-freight-delivery-2025-05.md",
+      "raw_sha256": "aa035517ef2455eabea26c402092cdec50f2ed52c5f2ad5e14125172898ca7d2",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/pricing-one-pager-pricing-onepager-b2b-freight-deli-890b7e39.md",
+      "processed_sha256": "4abdbe8c7f08de230eaffb2f8d5798b2828fe10bc967573a90b68d5bd529c359",
+      "provenance_hash": "aa035517ef2455ea"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/pricing-one-pager/pricing-onepager-bundle-savings-2025-02.md",
+      "raw_sha256": "9db92e649802b1fc6571123313907089af99fba63fceeebba622d3dced3472d0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/pricing-one-pager-pricing-onepager-bundle-savings-2025-02.md",
+      "processed_sha256": "b6442a8df8cd756803297ca817a111609e71095152742de20cc54e51d37c1821",
+      "provenance_hash": "9db92e649802b1fc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-bluebird-9seat-2026-01.md",
+      "raw_sha256": "258cb4807a5c99d32f7d3f1f30cbef6f25b3a3a158b8780380717efe02897b74",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-bluebird-9seat-2026-01.md",
+      "processed_sha256": "5315403be39a42f07c3bdfc626b86f069f18e1001598a71a3c97a68c5612540f",
+      "provenance_hash": "258cb4807a5c99d3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-harborview-modelshop-arms-2024-11.md",
+      "raw_sha256": "652d688c7667f27d3b2504802b15ad66f446162e11e41643760a55bfa9221ed1",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-harborview-modelshop-arms-2024-11.md",
+      "processed_sha256": "b091f88b64219c232a668b93f1b94ff8c0c24a1be68e30527555904315ed0fe2",
+      "provenance_hash": "652d688c7667f27d"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-juniper-floor1-pilot.md",
+      "raw_sha256": "1f78d7433fead6e5cbaabd4a7557429a49834480544cb9dbae8ffcefc061283d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-juniper-floor1-pilot.md",
+      "processed_sha256": "eecfbe828392c08aa5887ee717d74f04d93d70a05a41420e818d91ec18c0c086",
+      "provenance_hash": "1f78d7433fead6e5"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-petrel-analytics-2025-07.md",
+      "raw_sha256": "956efdc82a89337ab9637a84031509ff37b8263d0e1aa33f1c976790fd56bb89",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-petrel-analytics-2025-07.md",
+      "processed_sha256": "d37983759a7eda1b91fffbc7e70f258ab96e315e22998e0d41ac5639a2198b8b",
+      "provenance_hash": "956efdc82a89337a"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-summit-physio-2024-10.md",
+      "raw_sha256": "f4fa094c2c3616c3a2f9eac730a801c9b2b75fd59a805f4176ad152aa2d587d4",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-summit-physio-2024-10.md",
+      "processed_sha256": "b1997c24400fc0f1fb846ba6f322931f3416f3380d8abd4a6bf4b940b379b6cb",
+      "provenance_hash": "f4fa094c2c3616c3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-tidewater-14seat-refresh.md",
+      "raw_sha256": "f5ea6d10b3357c16fbb184a39c770845efe457d4ca1cf27b6c334cc480ad106b",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-proposal-tidewater-14seat-refresh.md",
+      "processed_sha256": "cb9353858a065340923eee8817c798e039a4ad60860e9a5399fcb3a55c994b21",
+      "provenance_hash": "f5ea6d10b3357c16"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/sl3-proposal-v1.md",
+      "raw_sha256": "a0ed36f10cd8fa6f13446199b702afda2330b9a72b7fac50a8de15287999e6f6",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-sl3-proposal-v1.md",
+      "processed_sha256": "8c808b293d3692516bdd4fa076dcca94ed09a9db1101f76e5dfc71eb5b02ae90",
+      "provenance_hash": "a0ed36f10cd8fa6f"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/proposal/sl3-proposal-v2.md",
+      "raw_sha256": "8f84ca8ed6704c44f370e38a7a0944d85aa617a620f67e68d59caa1e9e3cf298",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/proposal-sl3-proposal-v2.md",
+      "processed_sha256": "b7b27844f8b7a914312ca214bbc19d3f22cbc06764cd2dd5070b95ea596e564b",
+      "provenance_hash": "8f84ca8ed6704c44"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-2024-h2-pipeline-review.md",
+      "raw_sha256": "3f0af21e8d5aa0fc0c47220b725a2aa64f1e573085c7c54b756dbc819258fc2d",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-2024-h2-pipeline-review.md",
+      "processed_sha256": "849eb8740db6a04007b1999beb5baf72a504cbc71557cc65f4b5957f90ee5071",
+      "provenance_hash": "3f0af21e8d5aa0fc"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-accessory-attach-rate-2025-05.md",
+      "raw_sha256": "38fab85ef2759083cbd86e234c21bffce7ca0361f4f127fe577f484c240632fd",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-accessory-attach-rate-2025-05.md",
+      "processed_sha256": "51c4519b6b1ce4b89abed6bad113b4933e41e2eb26001345c5efef8d4ea6ea56",
+      "provenance_hash": "38fab85ef2759083"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-bundle-performance-2025-04.md",
+      "raw_sha256": "42504ca93e098c15888c035c72f282ceb290a77c60e51975f08a368082991eda",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-bundle-performance-2025-04.md",
+      "processed_sha256": "3379fa3314ea60332705bc61a6b682393c4104d4e047c2d513177a67e82d05e3",
+      "provenance_hash": "42504ca93e098c15"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-dtc-segment-mix-2025-02.md",
+      "raw_sha256": "7003cb07194a0c3bfe215b75fa75c659db16bc2ac35d35c30ba80518139481f5",
+      "status": "historical_no_output",
+      "reason_code": "historical_no_output_unknown_cause",
+      "historical_record": "datasets/larkstead/failures/historical-ingest.json",
+      "historical_observation_id": "failed-qbr-dtc-segment-mix-2025-02"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-q1-2026-b2b-35pct-churn-risk.md",
+      "raw_sha256": "9d7608adf26b6bc384cda414031e9b5f2519c46cbd2f5f925ca5ea00d9e1b743",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-q1-2026-b2b-35pct-churn-risk.md",
+      "processed_sha256": "dd1046b28e70931b11f4844a34756a83cd29cfaa6fb4555132ac740111ad2762",
+      "provenance_hash": "9d7608adf26b6bc3"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-q3-2025-b2b-share-healthcare.md",
+      "raw_sha256": "da9e73afbaa8db708231ea5a2f3cabb8292e6f64dcc79a6104332092cc463fbc",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-q3-2025-b2b-share-healthcare.md",
+      "processed_sha256": "0f3bcdebe1f0ca0bce6a104b55b89e6ab1ce3ebbc63ec42c9af625982a512b53",
+      "provenance_hash": "da9e73afbaa8db70"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-repeat-purchase-cohort-2026-05.md",
+      "raw_sha256": "72a8c3bbd4791456d662c2a240ad72dae90f1115417c80c6b9e647f7f85012d0",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-repeat-purchase-cohort-2026-05.md",
+      "processed_sha256": "6de837809f6775786eaade65bf5b2d4680e79298688a4e84c5937e9b61ee4374",
+      "provenance_hash": "72a8c3bbd4791456"
+    },
+    {
+      "raw_path": "datasets/larkstead/raw/sales-crm/segment-qbr-analysis/qbr-showroom-pipeline-conversion-2026-03.md",
+      "raw_sha256": "d0b18ca17e6e0ac7337004f60b331d54d62497f1b63b05537e2370afde082384",
+      "status": "processed",
+      "processed_path": "datasets/larkstead/processed/sales-crm/sources/segment-qbr-analysis-qbr-showroom-pipeline-conversi-595584db.md",
+      "processed_sha256": "38645f69578f4e09a4d4dce665f86eb57048e15848963d907091d58ee11c6a04",
+      "provenance_hash": "d0b18ca17e6e0ac7"
+    }
+  ]
+}

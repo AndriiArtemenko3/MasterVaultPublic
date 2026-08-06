@@ -22,6 +22,7 @@ from mastervault.storage.base import (
     SchemaMismatchError,
     StorageBackend,
     StorageError,
+    UnsupportedSchemaVersionError,
 )
 from mastervault.storage.postgres import PostgresBackend
 from mastervault.storage.sqlite import SqliteBackend
@@ -43,6 +44,7 @@ __all__ = [
     "SqliteBackend",
     "StorageBackend",
     "StorageError",
+    "UnsupportedSchemaVersionError",
     "get_backend",
 ]
 

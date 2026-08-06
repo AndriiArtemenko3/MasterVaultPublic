@@ -9,6 +9,9 @@ Defined on `eval_app` but registered at the CLI top level (see app.py):
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -32,6 +35,13 @@ from mastervault.evals import (
     run_config,
     write_resolved_yaml,
 )
+from mastervault.evals.provenance import (
+    BASELINE_SCHEMA_VERSION,
+    collect_reproducibility_metadata,
+    embedding_runtime_identity,
+    provenance_comparison,
+    validate_baseline_document,
+)
 from mastervault.providers import get_embedding_provider, get_reranker
 from mastervault.providers.reranker import RerankerUnavailable
 from mastervault.storage import get_backend
@@ -50,6 +60,23 @@ PROCESSED_DIR = REPO_ROOT / "datasets" / "larkstead" / "processed"
 _CONFIG_NAMES = [c.name for c in ALL_CONFIGS]
 _METRIC_COLS = ("recall_at_5", "recall_at_10", "ndcg_at_10", "mrr")
 _METRIC_LABELS = ("recall@5", "recall@10", "nDCG@10", "MRR")
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Replace one frozen baseline only after the complete run document is durable."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary_path = Path(temporary)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except BaseException:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def _fmt(value: float | None) -> str:
@@ -93,12 +120,18 @@ def eval_cmd(
         0.02, "--tolerance", help="Max allowed metric drop vs. baseline before it's a regression."
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of rich tables."),
+    freeze: str | None = typer.Option(
+        None, "--freeze", help="Atomically freeze this actual all-config run as a baseline."
+    ),
 ) -> None:
     """Run the golden query set through hybrid_search and report recall@5/10,
     nDCG@10, and MRR per config, with a per-class breakdown. Exits 1 if the
     golden set fails to resolve, or (with --compare) if any metric regressed
     beyond --tolerance.
     """
+    if freeze is not None and (compare is not None or config != "all"):
+        typer.echo("error: --freeze requires --config all and cannot be combined with --compare", err=True)
+        raise typer.Exit(code=2)
     if not QUERIES_PATH.is_file():
         typer.echo(f"error: golden query set not found at {QUERIES_PATH}", err=True)
         raise typer.Exit(code=1)
@@ -118,6 +151,7 @@ def eval_cmd(
 
     settings = load_settings()
     backend = get_backend(settings)
+    effective_backend = backend.name
     embedder = get_embedding_provider(settings)
     try:
         reranker = get_reranker(settings)
@@ -140,9 +174,7 @@ def eval_cmd(
         if not matches:
             backend.close()
             available_names = [c.name for c in configs]
-            typer.echo(
-                f"error: --config must be one of {available_names} or 'all'", err=True
-            )
+            typer.echo(f"error: --config must be one of {available_names} or 'all'", err=True)
             raise typer.Exit(code=2)
         configs = matches
 
@@ -161,16 +193,49 @@ def eval_cmd(
             raise typer.Exit(code=1)
         baseline = json.loads(compare_path.read_text(encoding="utf-8"))
 
+    freeze_path = Path(freeze) if freeze is not None else None
+    reproduction_command = (
+        f"uv run mvault eval --json --freeze {freeze_path}"
+        if freeze_path is not None
+        else "uv run mvault eval --json"
+    )
+    reproducibility = collect_reproducibility_metadata(
+        REPO_ROOT,
+        "retrieval",
+        settings,
+        evaluation_input=QUERIES_PATH,
+        model_identity=embedding_runtime_identity(embedder),
+        effective_backend=effective_backend,
+        reproduction_command=reproduction_command,
+    )
     cmp_result = compare_to_baseline(reports, baseline, tolerance=tolerance) if baseline else None
+    if cmp_result is not None and baseline is not None:
+        envelope_errors = validate_baseline_document("retrieval", baseline)
+        provenance = provenance_comparison(reproducibility, baseline.get("reproducibility", {}))
+        cmp_result["provenance"] = provenance
+        cmp_result["regressed"].extend(f"baseline: {error}" for error in envelope_errors)
+        cmp_result["regressed"].extend(
+            f"baseline provenance: {error}" for error in provenance["incompatible_inputs"]
+        )
+
+    payload = {
+        "baseline_schema_version": BASELINE_SCHEMA_VERSION,
+        "baseline_kind": "retrieval",
+        "generated": datetime.now(UTC).isoformat(timespec="seconds"),
+        "golden_query_count": len(queries),
+        "dataset": "larkstead",
+        "embedding_model": settings.embedding.model,
+        "resolve": resolve_report.to_dict()["summary"],
+        "configs": {name: r.to_dict() for name, r in reports.items()},
+        "notes": notes,
+        "reproducibility": reproducibility,
+    }
+    if cmp_result is not None:
+        payload["compare"] = cmp_result
+    if freeze_path is not None:
+        _atomic_write_json(freeze_path, payload)
 
     if json_out:
-        payload = {
-            "resolve": resolve_report.to_dict()["summary"],
-            "configs": {name: r.to_dict() for name, r in reports.items()},
-            "notes": notes,
-        }
-        if cmp_result is not None:
-            payload["compare"] = cmp_result
         typer.echo(json.dumps(payload, indent=2))
         if cmp_result is not None and cmp_result["regressed"]:
             raise typer.Exit(code=1)
@@ -196,6 +261,12 @@ def eval_cmd(
             for line in cmp_result["regressed"]:
                 typer.echo(f"  - {line}")
             raise typer.Exit(code=1)
+        provenance = cmp_result.get("provenance", {})
+        differences = provenance.get("generation_provenance_differences", [])
+        if differences:
+            typer.echo(
+                "  non-gating generation provenance differs: " + ", ".join(differences)
+            )
         typer.echo("\nno regressions beyond tolerance")
 
 
@@ -229,6 +300,9 @@ def ask_eval_cmd(
         None, "--compare", help="Path to an ask baseline.json to diff this run against."
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of rich tables."),
+    freeze: str | None = typer.Option(
+        None, "--freeze", help="Atomically freeze this actual ask evaluation as a baseline."
+    ),
 ) -> None:
     """Run the frozen end-to-end `ask` evaluation.
 
@@ -239,6 +313,9 @@ def ask_eval_cmd(
     only. Exits 1 if any case fails, or (with --compare) if a case or check that
     the baseline recorded as passing now fails.
     """
+    if freeze is not None and compare is not None:
+        typer.echo("error: --freeze cannot be combined with --compare", err=True)
+        raise typer.Exit(code=2)
     cases_path = Path(cases) if cases is not None else ASK_CASES_PATH
     if not cases_path.is_file():
         typer.echo(f"error: ask-eval case file not found at {cases_path}", err=True)
@@ -271,6 +348,7 @@ def ask_eval_cmd(
     _require_loaded_index(settings)
 
     backend = get_backend(settings)
+    effective_backend = backend.name
     embedder = get_embedding_provider(settings)
     try:
         report = run_ask_suite(ask_cases, settings, backend, embedder)
@@ -278,26 +356,59 @@ def ask_eval_cmd(
         backend.close()
 
     uncovered = missing_case_classes(ask_cases)
+    freeze_path = Path(freeze) if freeze is not None else None
+    cases_arg = f" --cases {cases_path}" if cases is not None else ""
+    reproduction_command = (
+        f"uv run mvault ask-eval{cases_arg} --json --freeze {freeze_path}"
+        if freeze_path is not None
+        else f"uv run mvault ask-eval{cases_arg} --json"
+    )
+    reproducibility = collect_reproducibility_metadata(
+        REPO_ROOT,
+        "ask",
+        settings,
+        evaluation_input=cases_path,
+        model_identity=embedding_runtime_identity(embedder),
+        effective_backend=effective_backend,
+        reproduction_command=reproduction_command,
+    )
     cmp_result = None
     if compare is not None:
         compare_path = Path(compare)
         if not compare_path.is_file():
             typer.echo(f"error: ask baseline not found: {compare_path}", err=True)
             raise typer.Exit(code=1)
-        cmp_result = compare_ask_to_baseline(
-            report, json.loads(compare_path.read_text(encoding="utf-8"))
+        baseline = json.loads(compare_path.read_text(encoding="utf-8"))
+        cmp_result = compare_ask_to_baseline(report, baseline)
+        envelope_errors = validate_baseline_document("ask", baseline)
+        provenance = provenance_comparison(reproducibility, baseline.get("reproducibility", {}))
+        cmp_result["provenance"] = provenance
+        cmp_result["regressed"].extend(f"baseline: {error}" for error in envelope_errors)
+        cmp_result["regressed"].extend(
+            f"baseline provenance: {error}" for error in provenance["incompatible_inputs"]
         )
 
+    payload = report.to_dict()
+    payload.update(
+        {
+            "baseline_schema_version": BASELINE_SCHEMA_VERSION,
+            "baseline_kind": "ask",
+            "generated": datetime.now(UTC).isoformat(timespec="seconds"),
+            "uncovered_classes": uncovered,
+            "reproducibility": reproducibility,
+        }
+    )
+    if cmp_result is not None:
+        payload["compare"] = cmp_result
+    failed = not report.passed
+    if freeze_path is not None and not failed:
+        _atomic_write_json(freeze_path, payload)
+
     if json_out:
-        payload = report.to_dict()
-        payload["uncovered_classes"] = uncovered
-        if cmp_result is not None:
-            payload["compare"] = cmp_result
         typer.echo(json.dumps(payload, indent=2))
     else:
         _print_ask_report(report, uncovered, cmp_result, compare)
 
-    failed = not report.passed
     regressed = bool(cmp_result and cmp_result["regressed"])
     if failed or regressed:
         raise typer.Exit(code=1)
@@ -340,3 +451,9 @@ def _print_ask_report(report, uncovered: list[str], cmp_result, compare: str | N
                 typer.echo(f"  - {line}")
         else:
             typer.echo("  no regressions vs baseline")
+        provenance = cmp_result.get("provenance", {})
+        differences = provenance.get("generation_provenance_differences", [])
+        if differences:
+            typer.echo(
+                "  non-gating generation provenance differs: " + ", ".join(differences)
+            )

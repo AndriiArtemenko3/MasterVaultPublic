@@ -12,6 +12,7 @@ Postgres gets for free are handled by hand here:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -36,83 +37,19 @@ from mastervault.storage.base import (
     HydratedChunkRow,
     HydratedClaimRow,
     SchemaMismatchError,
+    StorageError,
     ensure_indexable_vector,
     normalized_vector,
     overfetch_limit,
+    validate_schema_meta,
 )
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 _CONFIDENCE_ORDER_SQL = "CASE c.confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END"
 
-_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS meta (
-  key   TEXT PRIMARY KEY,
-  value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS documents (
-  doc_id       TEXT PRIMARY KEY,
-  doc_type     TEXT NOT NULL CHECK (doc_type IN ('source','wiki','decision','strategy')),
-  domain       TEXT NOT NULL,
-  rel_path     TEXT NOT NULL UNIQUE,
-  title        TEXT NOT NULL,
-  frontmatter  TEXT NOT NULL,
-  body         TEXT NOT NULL,
-  content_hash TEXT NOT NULL,
-  indexed_at   TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_documents_domain ON documents (domain, doc_type);
-
-CREATE TABLE IF NOT EXISTS claims (
-  claim_id     TEXT PRIMARY KEY,
-  doc_id       TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
-  ordinal      INTEGER NOT NULL,
-  statement    TEXT NOT NULL,
-  confidence   TEXT NOT NULL CHECK (confidence IN ('low','medium','high')),
-  content_hash TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_claims_doc ON claims (doc_id);
-
-CREATE TABLE IF NOT EXISTS claim_affects (
-  claim_id  TEXT NOT NULL REFERENCES claims(claim_id) ON DELETE CASCADE,
-  wiki_slug TEXT NOT NULL,
-  PRIMARY KEY (claim_id, wiki_slug)
-);
-CREATE INDEX IF NOT EXISTS idx_affects_slug ON claim_affects (wiki_slug);
-
-CREATE TABLE IF NOT EXISTS wiki_aliases (
-  alias     TEXT NOT NULL,
-  wiki_slug TEXT NOT NULL,
-  domain    TEXT NOT NULL,
-  doc_id    TEXT REFERENCES documents(doc_id) ON DELETE CASCADE,
-  PRIMARY KEY (alias, wiki_slug)
-);
-CREATE INDEX IF NOT EXISTS idx_aliases_doc ON wiki_aliases (doc_id);
-
-CREATE TABLE IF NOT EXISTS chunks (
-  chunk_id     TEXT PRIMARY KEY,
-  doc_id       TEXT NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
-  ordinal      INTEGER NOT NULL,
-  text         TEXT NOT NULL,
-  content_hash TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks (doc_id);
-
-CREATE TABLE IF NOT EXISTS embeddings (
-  record_id     TEXT PRIMARY KEY,
-  record_type   TEXT NOT NULL CHECK (record_type IN ('claim','wiki','chunk')),
-  doc_id        TEXT REFERENCES documents(doc_id) ON DELETE CASCADE,
-  domain        TEXT,
-  content_hash  TEXT NOT NULL,
-  model_version TEXT NOT NULL,
-  updated_at    TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_emb_type ON embeddings (record_type, domain);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(claim_id UNINDEXED, statement);
-CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(doc_id UNINDEXED, title, body);
-"""
+_DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "sqlite"
+_MIGRATION_FILE_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
 
 
 def fts_match_expr(query: str) -> str | None:
@@ -162,10 +99,11 @@ _ALL_TABLES = (
 class SqliteBackend:
     name = "sqlite"
 
-    def __init__(self, db_path: Path | str) -> None:
+    def __init__(self, db_path: Path | str, migrations_dir: Path | None = None) -> None:
         self.db_path = Path(db_path)
+        self.migrations_dir = migrations_dir or _DEFAULT_MIGRATIONS_DIR
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path))
+        self.conn = sqlite3.connect(str(self.db_path), timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.conn.enable_load_extension(True)
         sqlite_vec.load(self.conn)
@@ -183,33 +121,155 @@ class SqliteBackend:
         rows = self.conn.execute("SELECT key, value FROM meta").fetchall()
         return {r["key"]: json.loads(r["value"]) for r in rows}
 
-    def init_schema(self, dim: int, model_version: str) -> None:
-        meta = self._read_meta()
-        if meta and (META_KEY_DIM in meta or META_KEY_MODEL in meta):
-            stored_dim = meta.get(META_KEY_DIM)
-            stored_model = meta.get(META_KEY_MODEL)
-            if stored_dim != dim or stored_model != model_version:
-                raise SchemaMismatchError(
-                    f"index was built with model={stored_model!r} dim={stored_dim}, "
-                    f"requested model={model_version!r} dim={dim}. "
-                    "Re-index explicitly (wipe + re-embed) before changing either."
-                )
-        with self.conn:
-            self.conn.executescript(_SCHEMA_SQL)
-            self.conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS vec_records USING vec0("
-                f"record_id TEXT PRIMARY KEY, embedding float[{dim}])"
+    def _refuse_unidentified_schema(self) -> None:
+        placeholders = _placeholders(len((*_ALL_TABLES, "schema_migrations")))
+        rows = self.conn.execute(
+            f"SELECT name FROM sqlite_master WHERE name IN ({placeholders}) ORDER BY name",
+            (*_ALL_TABLES, "schema_migrations"),
+        ).fetchall()
+        if rows:
+            names = [str(row["name"]) for row in rows]
+            raise SchemaMismatchError(
+                "index tables exist without a meta table; refusing to adopt an "
+                f"unidentified schema ({names}). Rebuild the index explicitly."
             )
-            for key, value in (
-                (META_KEY_MODEL, model_version),
-                (META_KEY_DIM, dim),
-                (META_KEY_SCHEMA, SCHEMA_VERSION),
-            ):
+
+    def _migration_files(self) -> dict[int, Path]:
+        files: dict[int, Path] = {}
+        for path in sorted(self.migrations_dir.glob("*.sql")):
+            match = _MIGRATION_FILE_RE.fullmatch(path.name)
+            if match is None:
+                raise StorageError(f"invalid SQLite migration filename: {path.name}")
+            version = int(match.group("version"))
+            if version in files:
+                raise StorageError(f"duplicate SQLite migration version {version:03d}")
+            files[version] = path
+        expected = list(range(1, SCHEMA_VERSION + 1))
+        if sorted(files) != expected:
+            raise StorageError(
+                f"SQLite migrations must be contiguous {expected}, found {sorted(files)} "
+                f"in {self.migrations_dir}"
+            )
+        return files
+
+    @staticmethod
+    def _sql_statements(sql: str) -> list[str]:
+        statements: list[str] = []
+        buf = ""
+        for line in sql.splitlines(keepends=True):
+            buf += line
+            if sqlite3.complete_statement(buf):
+                statement = buf.strip()
+                if statement:
+                    statements.append(statement)
+                buf = ""
+        if buf.strip():
+            raise StorageError("SQLite migration ended with an incomplete SQL statement")
+        return statements
+
+    @staticmethod
+    def _migration_checksum(path: Path) -> str:
+        """SHA-256 of the unrendered migration template bytes."""
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _record_migration(self, version: int, path: Path) -> None:
+        self.conn.execute(
+            "UPDATE meta SET value = ? WHERE key = ?",
+            (json.dumps(version), META_KEY_SCHEMA),
+        )
+        if version == 2:
+            migrations = self._migration_files()
+            for history_version in range(1, version + 1):
+                history_path = migrations[history_version]
                 self.conn.execute(
-                    "INSERT INTO meta (key, value) VALUES (?, ?)"
-                    " ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                    (key, json.dumps(value)),
+                    "INSERT INTO schema_migrations "
+                    "(version, name, checksum_sha256, applied_at) VALUES (?, ?, ?, ?)",
+                    (
+                        history_version,
+                        history_path.stem,
+                        self._migration_checksum(history_path),
+                        _now(),
+                    ),
                 )
+        elif version > 2:
+            self.conn.execute(
+                "INSERT INTO schema_migrations "
+                "(version, name, checksum_sha256, applied_at) VALUES (?, ?, ?, ?)",
+                (version, path.stem, self._migration_checksum(path), _now()),
+            )
+
+    def _validate_migration_ledger(self, migrations: dict[int, Path], version: int) -> None:
+        exists = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+        ).fetchone()
+        if version < 2:
+            if exists is not None:
+                raise SchemaMismatchError(
+                    f"schema_version={version} has an unexpected schema_migrations table; "
+                    "refusing to mutate conflicting migration history"
+                )
+            return
+        if exists is None:
+            raise SchemaMismatchError(
+                "schema_version is current but schema_migrations is missing; "
+                "refusing to infer migration history"
+            )
+        rows = self.conn.execute(
+            "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        actual = [
+            (int(row["version"]), str(row["name"]), str(row["checksum_sha256"]))
+            for row in rows
+        ]
+        expected = [
+            (item_version, migrations[item_version].stem, self._migration_checksum(migrations[item_version]))
+            for item_version in range(1, version + 1)
+        ]
+        if actual != expected:
+            raise SchemaMismatchError(
+                "schema_migrations does not exactly match the packaged migration history: "
+                f"expected {expected}, found {actual}"
+            )
+
+    def init_schema(self, dim: int, model_version: str) -> None:
+        migrations = self._migration_files()
+        if self.conn.in_transaction:
+            raise StorageError("cannot initialize schema inside an existing SQLite transaction")
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            # BEGIN IMMEDIATE is deliberately acquired before schema identity
+            # is read. Two first-openers therefore cannot both select v0.
+            meta = self._read_meta()
+            if meta is None:
+                self._refuse_unidentified_schema()
+            version = validate_schema_meta(meta, dim=dim, model_version=model_version)
+            if version:
+                self._validate_migration_ledger(migrations, version)
+
+            for next_version in range(version + 1, SCHEMA_VERSION + 1):
+                path = migrations[next_version]
+                sql = path.read_bytes().decode("utf-8").replace("{{DIM}}", str(dim))
+                for statement in self._sql_statements(sql):
+                    self.conn.execute(statement)
+                if next_version == 1:
+                    for key, value in (
+                        (META_KEY_MODEL, model_version),
+                        (META_KEY_DIM, dim),
+                        (META_KEY_SCHEMA, 1),
+                    ):
+                        self.conn.execute(
+                            "INSERT INTO meta (key, value) VALUES (?, ?)",
+                            (key, json.dumps(value)),
+                        )
+                else:
+                    self._record_migration(next_version, path)
+            if SCHEMA_VERSION >= 2:
+                self._validate_migration_ledger(migrations, SCHEMA_VERSION)
+            self.conn.execute("COMMIT")
+        except BaseException:
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
+            raise
 
     # -- documents ------------------------------------------------------------
 
@@ -266,8 +326,14 @@ class SqliteBackend:
                     "INSERT INTO claims (claim_id, doc_id, ordinal, statement, confidence,"
                     " content_hash) VALUES (?, ?, ?, ?, ?, ?)",
                     [
-                        (c.claim_id, doc.doc_id, c.ordinal, c.statement, c.confidence,
-                         c.content_hash)
+                        (
+                            c.claim_id,
+                            doc.doc_id,
+                            c.ordinal,
+                            c.statement,
+                            c.confidence,
+                            c.content_hash,
+                        )
                         for c in claims
                     ],
                 )
@@ -287,8 +353,10 @@ class SqliteBackend:
                 self.conn.executemany(
                     "INSERT INTO chunks (chunk_id, doc_id, ordinal, text, content_hash)"
                     " VALUES (?, ?, ?, ?, ?)",
-                    [(ch.chunk_id, doc.doc_id, ch.ordinal, ch.text, ch.content_hash)
-                     for ch in chunks],
+                    [
+                        (ch.chunk_id, doc.doc_id, ch.ordinal, ch.text, ch.content_hash)
+                        for ch in chunks
+                    ],
                 )
             if aliases:
                 self.conn.executemany(
@@ -418,13 +486,18 @@ class SqliteBackend:
                         model_version = excluded.model_version,
                         updated_at = excluded.updated_at
                     """,
-                    (r.record_id, r.record_type, r.doc_id, r.domain, r.content_hash,
-                     r.model_version, now),
+                    (
+                        r.record_id,
+                        r.record_type,
+                        r.doc_id,
+                        r.domain,
+                        r.content_hash,
+                        r.model_version,
+                        now,
+                    ),
                 )
                 # vec0 rows cannot be updated in place: delete + reinsert.
-                self.conn.execute(
-                    "DELETE FROM vec_records WHERE record_id = ?", (r.record_id,)
-                )
+                self.conn.execute("DELETE FROM vec_records WHERE record_id = ?", (r.record_id,))
                 self.conn.execute(
                     "INSERT INTO vec_records (record_id, embedding) VALUES (?, ?)",
                     (r.record_id, blob),
@@ -526,9 +599,13 @@ class SqliteBackend:
         ).fetchall()
         by_id = {
             r["doc_id"]: DocumentRow(
-                doc_id=r["doc_id"], doc_type=r["doc_type"], domain=r["domain"],
-                rel_path=r["rel_path"], title=r["title"],
-                frontmatter=json.loads(r["frontmatter"]), body=r["body"],
+                doc_id=r["doc_id"],
+                doc_type=r["doc_type"],
+                domain=r["domain"],
+                rel_path=r["rel_path"],
+                title=r["title"],
+                frontmatter=json.loads(r["frontmatter"]),
+                body=r["body"],
                 content_hash=r["content_hash"],
             )
             for r in rows
@@ -556,10 +633,15 @@ class SqliteBackend:
             affects.setdefault(r["claim_id"], []).append(r["wiki_slug"])
         by_id = {
             r["claim_id"]: HydratedClaimRow(
-                claim_id=r["claim_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
-                statement=r["statement"], confidence=r["confidence"],
-                content_hash=r["content_hash"], affects=affects.get(r["claim_id"], []),
-                rel_path=r["rel_path"], domain=r["domain"],
+                claim_id=r["claim_id"],
+                doc_id=r["doc_id"],
+                ordinal=r["ordinal"],
+                statement=r["statement"],
+                confidence=r["confidence"],
+                content_hash=r["content_hash"],
+                affects=affects.get(r["claim_id"], []),
+                rel_path=r["rel_path"],
+                domain=r["domain"],
             )
             for r in rows
         }
@@ -578,9 +660,13 @@ class SqliteBackend:
         ).fetchall()
         by_id = {
             r["chunk_id"]: HydratedChunkRow(
-                chunk_id=r["chunk_id"], doc_id=r["doc_id"], ordinal=r["ordinal"],
-                text=r["text"], content_hash=r["content_hash"],
-                rel_path=r["rel_path"], domain=r["domain"],
+                chunk_id=r["chunk_id"],
+                doc_id=r["doc_id"],
+                ordinal=r["ordinal"],
+                text=r["text"],
+                content_hash=r["content_hash"],
+                rel_path=r["rel_path"],
+                domain=r["domain"],
             )
             for r in rows
         }
@@ -596,8 +682,14 @@ class SqliteBackend:
             return {"backend": "sqlite", "initialized": False, "db_path": str(self.db_path)}
         counts = {
             table: self.conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-            for table in ("documents", "claims", "claim_affects", "wiki_aliases",
-                          "chunks", "embeddings")
+            for table in (
+                "documents",
+                "claims",
+                "claim_affects",
+                "wiki_aliases",
+                "chunks",
+                "embeddings",
+            )
         }
         return {
             "backend": "sqlite",
@@ -619,7 +711,7 @@ class SqliteBackend:
         # DROP TABLE never trips a foreign key. `meta` goes last: while it
         # exists the index still advertises an embedding model/dim.
         with self.conn:
-            for table in (*_ALL_TABLES, "meta"):
+            for table in (*_ALL_TABLES, "schema_migrations", "meta"):
                 self.conn.execute(f"DROP TABLE IF EXISTS {table}")
 
     def close(self) -> None:

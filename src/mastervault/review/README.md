@@ -7,7 +7,8 @@ This folder is the trust boundary that keeps ingested evidence from silently ove
 | File | Responsibility |
 |------|----------------|
 | `queue.py` | `ReviewQueue`, the file-backed queue. One markdown file per item (frontmatter + `## Rationale` / `## Proposal` / `## Resolution`). Handles `enqueue` with content dedupe, `archive` (resolve + move to `archive/`), `mark_conflict` (flip status in place), and read-side `list_items` / `load`. Includes the fence-aware section splitter that lets a 4-backtick proposal fence wrap 3-backtick blocks. |
-| `apply.py` | `apply()` — the guarded write path. Re-reads the target, gates on `base_hash` drift, then applies either a `replace` payload (`full_file` / `replace_section` / `append_section`) or a strict unified `diff`. Bumps the target's `updated:` field, archives the item as `applied`, and calls the reindex hook. `apply_unified_diff` is the no-fuzz patcher: any hunk mismatch raises `PatchError`. |
+| `apply.py` | `apply()` — the guarded write path. Re-reads the target, gates on `base_hash` drift, then applies either a `replace` payload or strict unified `diff`. It bumps `updated:`, synchronizes the derived index, and only then archives the item as applied. Reindex/archive failures restore canonical/index state and retain a conflict. |
+| `reindex.py` | Shared approval hook: runs vault synchronization and refuses success if the changed target was skipped as unindexable. Used by both `mvault review` and ingest's tier-2 auto-approval path. |
 | `__init__.py` | Public surface: re-exports `ReviewQueue`, `apply`, `apply_unified_diff`, `dedupe_key`, and the result types. |
 
 ## How it fits
