@@ -1,0 +1,136 @@
+schema_version: 1
+dataset_id: larkstead-pdf-layout-benchmark
+description: >-
+  A bounded, family-separated clean-digital benchmark derived from existing
+  Larkstead semantic sources. It tests layout, tables, reading order, and
+  page-grounded evidence without introducing OCR or a second business corpus.
+license: CC-BY-4.0
+
+size_budget:
+  max_total_pdf_bytes: 1048576
+  max_single_pdf_bytes: 65536
+  target_semantic_documents: 6
+  variants_per_document: 4
+
+layout_profiles:
+  - variant_id: single-column
+    description: Portrait, one-column business-document baseline.
+    columns: 1
+    landscape: false
+    table_emphasis: false
+    repeated_furniture: false
+    force_page_break: false
+    layout_features:
+      - clean-digital
+      - native-text
+      - single-column
+      - semantic-order
+  - variant_id: two-column
+    description: Landscape two-column flow with left-column-first reading order.
+    columns: 2
+    landscape: true
+    table_emphasis: false
+    repeated_furniture: false
+    force_page_break: false
+    layout_features:
+      - clean-digital
+      - native-text
+      - two-column
+      - explicit-reading-order
+  - variant_id: table-emphasis
+    description: Landscape single-column layout with high-contrast source tables.
+    columns: 1
+    landscape: true
+    table_emphasis: true
+    repeated_furniture: false
+    force_page_break: false
+    layout_features:
+      - clean-digital
+      - native-text
+      - table-forward-styling
+  - variant_id: repeated-furniture
+    description: Portrait layout forced across pages with repeated header and footer furniture.
+    columns: 1
+    landscape: false
+    table_emphasis: false
+    repeated_furniture: true
+    force_page_break: true
+    layout_features:
+      - clean-digital
+      - native-text
+      - repeated-header
+      - repeated-footer
+      - forced-pagination
+
+semantic_documents:
+  - document_family_id: customer-support.returns-policy
+    semantic_document_id: sl2-policy-returns-v2
+    version_id: v2
+    effective_from: 2026-01-12
+    effective_to: null
+    document_role: policy
+    authority: primary
+    supersedes_version_id: v1
+    split: development
+    storyline: SL2
+    source_path: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md
+
+  - document_family_id: operations.shopstack-ledgerly-export
+    semantic_document_id: integration-guide-shopstack-ledgerly-daily-export
+    version_id: updated-2025-06-10
+    effective_from: 2025-06-10
+    effective_to: null
+    document_role: integration-guide
+    authority: delegated
+    supersedes_version_id: null
+    split: development
+    storyline: null
+    source_path: datasets/larkstead/raw/operations/integration-guide/integration-guide-shopstack-ledgerly-daily-export.md
+
+  - document_family_id: internal-admin.parcelpoint-invoice
+    semantic_document_id: sl5-invoice-ppf-2026-003
+    version_id: inv-ppf-2026-003
+    effective_from: 2026-03-04
+    effective_to: 2026-04-03
+    document_role: financial-record
+    authority: transactional
+    supersedes_version_id: null
+    split: development
+    storyline: SL5
+    source_path: datasets/larkstead/raw/internal-admin/invoice/sl5-invoice-ppf-2026-003.md
+
+  - document_family_id: operations.ostrava-receiving-log
+    semantic_document_id: receiving-log-ostrava-lot-2026-15
+    version_id: lot-2026-15
+    effective_from: 2026-05-12
+    effective_to: null
+    document_role: receiving-log
+    authority: transactional
+    supersedes_version_id: null
+    split: held-out
+    storyline: null
+    source_path: datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2026-15.md
+
+  - document_family_id: sales-crm.bluebird-proposal
+    semantic_document_id: proposal-bluebird-9seat-2026-01
+    version_id: prepared-2026-01-28
+    effective_from: 2026-01-28
+    effective_to: 2026-02-27
+    document_role: proposal
+    authority: transactional
+    supersedes_version_id: null
+    split: held-out
+    storyline: null
+    source_path: datasets/larkstead/raw/sales-crm/proposal/proposal-bluebird-9seat-2026-01.md
+
+  - document_family_id: operations.vireo-firmware-postmortem
+    semantic_document_id: vireo-v12-flicker-postmortem
+    version_id: final
+    effective_from: 2026-02-24
+    effective_to: null
+    document_role: postmortem
+    authority: informational
+    supersedes_version_id: null
+    split: held-out
+    storyline: SL4
+    source_path: datasets/larkstead/raw/operations/postmortem/vireo-v12-flicker-postmortem.md

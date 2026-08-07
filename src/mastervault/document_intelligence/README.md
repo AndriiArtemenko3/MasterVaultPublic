@@ -11,6 +11,7 @@ vendor object, vendor Markdown, download behavior, or fallback to callers.
 | File | Responsibility |
 |---|---|
 | `models.py` | Frozen schema-v1 plus strict schema-v2 pages, sections, blocks, normalized bboxes, tables/rows/cells/spans, discriminated loading, and resolved evidence types. |
+| `benchmark.py` | Runtime-safe, strict contracts for the bounded Larkstead PDF source/render specification and manifest. It intentionally contains no evaluator answers and has no dependency on `mastervault.evals`. |
 | `parser.py` | `DocumentParser` protocol, compatible `PypdfParser`, and explicit parser factory. Optional imports remain lazy. |
 | `docling_adapter.py` | Sole vendor import boundary. Verifies exact component/artifact identity, forces the fixed offline CPU/resource/hierarchy profile, exports built-in dictionaries, and provides the read-only doctor. |
 | `docling_artifacts_manifest.json` | Certified full source commits plus the five allowed runtime paths, exact byte sizes, and SHA-256 hashes. It contains no weights. |
@@ -35,6 +36,11 @@ vendor object, vendor Markdown, download behavior, or fallback to callers.
   the referenced structure; duplicate, mixed-table and forged locations fail.
 - Schema-v2 IDs and reading order are MasterVault-owned and canonical. Bboxes
   use a normalized, six-decimal, top-left coordinate space.
+- Runtime benchmark discovery exposes source identity, family split, render
+  profile, raw-source hash, normalized semantic-projection hash, render/PDF
+  hashes, size, and page count only. Parser-hidden layout labels and temporal
+  change-impact answers are owned by `mastervault.evals` and loaded only by
+  evaluation/test code.
 - Docling requires the `pdf-layout` extra and a verified explicit artifacts
   path. The explicit fetch accepts only an absent output under an existing real
   parent, downloads into private sibling staging, verifies a publication tree

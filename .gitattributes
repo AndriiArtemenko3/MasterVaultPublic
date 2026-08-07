@@ -3,6 +3,10 @@
 # not skew language stats or show noisy diffs. See datasets/larkstead/README.md.
 datasets/larkstead/embeddings/embeddings.jsonl.gz binary linguist-generated
 
+# Deterministic benchmark PDFs are source-controlled fixtures, but their
+# internal PDF syntax is not a reviewable text format.
+datasets/larkstead/pdf/*.pdf binary linguist-generated
+
 # Lockfile: keep out of language stats and collapse diffs by default.
 uv.lock linguist-generated
 

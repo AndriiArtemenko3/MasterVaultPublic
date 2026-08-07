@@ -100,12 +100,56 @@ snapshot observations. It does not run the shipped mock
 LLM as causal evidence: that provider lacks structured extraction for every raw
 document, so its generic failure would not explain why these 20 were omitted.
 
+## Bounded clean-digital PDF benchmark
+
 The deterministic files under `datasets/larkstead/pdf/` are controlled
-clean-digital renditions of raw Larkstead content, not an additional semantic
-source. Their manifest pins bytes and page evidence. The two-page returns
-policy PDF is also the integration input used to exercise schema-v2 layout and
-one 6x2 table when a separately provisioned Docling environment is available.
-No OCR/scanned fixture or third-party model weight is committed to the dataset.
+renditions of existing raw Larkstead Markdown, not an additional semantic
+source. The benchmark contains 6 document families and 24 PDFs:
+
+| Split | Family | Source role |
+|---|---|---|
+| development | SL2 returns policy v2 | versioned policy with structured metadata and prose |
+| development | Shopstack–Ledgerly export guide | integration guide |
+| development | ParcelPoint invoice | financial record |
+| held-out | Ostrava receiving log | receiving log |
+| held-out | Bluebird 9-seat proposal | proposal |
+| held-out | Vireo v1.2 postmortem | postmortem |
+
+Every family is rendered as single-column, two-column, table-emphasis, and
+repeated-furniture. The split is by semantic family: no rendition of a
+development source appears in the held-out set. The committed assets total
+111,576 bytes against a 1 MiB release budget; every individual PDF is below
+64 KiB. The original two-page returns-policy fixture remains byte-identical at
+SHA-256
+`d12dc2de2b5a9fff9bba869c80cec305e5fc3744a1559302c3bbadf147e4332e`.
+
+Runtime and evaluator contracts are deliberately separate:
+
+- `pdf/benchmark.yaml` defines source identities and render profiles.
+- `pdf/manifest.json` records separate raw-source, canonical
+  semantic-projection, generator, render-contract, and PDF hashes, plus sizes,
+  pages, and non-secret layout features.
+- `golden/pdf_layout.json` contains parser-hidden headings, reading order,
+  tables/cells, and page evidence.
+- `golden/change_impact.yaml` contains the evaluator-only SL2 timeline,
+  claim-pair classifications, `DEPENDS_ON` edge truth, affected-document
+  labels, minimal patches, and review decisions. `COEXISTS` and `UNRELATED`
+  are no-edge dispositions rather than graph relationships.
+
+Source-semantic anchors are derived from normalized source content and remain
+stable across the four layouts. They are not sequential render IDs. The
+runtime loader does not import or expose the evaluator gold. Reproduction is
+local, keyless, and non-mutating by default:
+
+```bash
+uv run --extra dev python datasets/larkstead/qa/generate_pdf_fixtures.py --check
+```
+
+This milestone intentionally covers clean-digital layout variation and one
+temporal change-control seed. OCR/scans, external PDF datasets, parser quality
+scoring, retrieval ablations, LangGraph orchestration, a review UI, and
+PostgreSQL expansion are later milestones. No third-party document or model
+weight is committed here.
 
 ```bash
 uv run python datasets/larkstead/qa/validate_corpus_ledger.py

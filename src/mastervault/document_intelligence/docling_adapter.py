@@ -331,6 +331,7 @@ class DoclingParser:
     parser_version = DOCLING_COMPONENT_VERSIONS["docling-slim"]
     parser_core_version = DOCLING_COMPONENT_VERSIONS["docling-core"]
     profile = DOCLING_PARSER_PROFILE
+    resource_limits = DOCLING_RESOURCE_LIMITS
 
     def __init__(self, artifacts_path: Path | str | None):
         report = doctor_docling(artifacts_path)

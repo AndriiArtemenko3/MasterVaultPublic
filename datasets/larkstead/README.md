@@ -13,7 +13,7 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 | `bible/doc-templates/*.md` | 32 per-doc-type exemplars (ticket, invoice, memo, lead-note, receiving-log, …) that writer agents fill. |
 | `bible/manifest.yaml` | Frozen bible inventory with per-file sha256 prefixes. |
 | `raw/<domain>/<doc-type>/*.md` | 372 in-world source documents across the 4 domains, organized by doc type (e.g. `customer-support/policy/`, `sales-crm/lead-note/`). This is what `mvault ingest` reads. |
-| `pdf/*.pdf` / `pdf/manifest.json` | Deterministic renditions of selected raw documents. The first fixture is the two-page SL2 returns-policy v2 clean-digital variant; its manifest binds the semantic-source and PDF byte hashes to page-level evidence labels. |
+| `pdf/benchmark.yaml` / `pdf/*.pdf` / `pdf/manifest.json` | Runtime-safe specification and deterministic clean-digital renditions for 6 semantic document families × 4 layout variants. The manifest binds raw-source, canonical semantic-projection, generator, render-contract, and PDF hashes without exposing evaluator answers. |
 | `processed/<domain>/sources/*.md` | 352 source notes: raw docs plus ingestion frontmatter (`key_claims` with id/statement/confidence/`affects`, `provenance`, `provenance_hash`). |
 | `processed/<domain>/wiki/*.md` | 43 drafted wiki concepts (aliases, Definition, Cross-Refs), after pruning 22 malformed zero-inbound slugs. `operations` has zero surviving concepts by design. |
 | `processed/<domain>/{decisions,strategy}/*.md` | 10 decision notes and 4 strategy notes (one per domain, 2026-Q2), hand-authored on top of the verified claims layer. |
@@ -23,13 +23,15 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 | `golden/resolved.yaml` | Resolver output asserting all 69 docs / 78 claims resolve against the live `processed/` corpus; a non-empty `errors` list is a build error. |
 | `golden/baseline.json` | Recorded metrics for `lexical-only`, `vector-only`, and `hybrid` configs (recall@k, nDCG@10, MRR, abstention) overall and per class. |
 | `golden/ask_cases.yaml` / `ask_baseline.json` | 14 deterministic end-to-end ask cases and their frozen 97-check result, separate from retrieval ranking. |
+| `golden/pdf_layout.json` | Evaluator-only layout truth for headings, semantic reading order, tables/cells, and page-grounded evidence. Source-semantic anchors remain stable across all four renditions of one family. |
+| `golden/change_impact.yaml` | Evaluator-only SL2 chronology, claim-pair classifications, `DEPENDS_ON` edge truth, minimal patches, and approve/edit/reject outcomes. `SUPERSEDES`/`CONTRADICTS` may persist as edges; `COEXISTS`/`UNRELATED` are explicit no-edge dispositions. It is not loaded by the runtime benchmark module. |
 | `embeddings/embeddings.jsonl.gz` | 5352-vector sidecar (3412 claim + 43 wiki + 1897 chunk) from bge-small-en-v1.5, L2-normalized, 384-dim. |
 | `embeddings/manifest.json` | Sidecar metadata: model, dimensions, count, record-type breakdown, and extraction source. |
 | `corpus-ledger.json` | Deterministic accounting for all 372 raw files: 352 processed with full matching provenance hashes, 0 excluded, and 20 neutral `historical_no_output` entries. |
 | `failures/historical-ingest.json` | Immutable record for the 20 historical no-output observations: raw hashes, the source commit, and an explicit split between facts the repository proves and lost per-unit details. |
 | `exclusions.json` | Explicit exclusion registry, currently empty. Any future row must retain the raw hash plus a stable reason code and truthful explanation. |
 | `qa/mechanical_check.py` | Ground-truth checker with non-mutating `--check` and explicit `--write` modes: 10 checks against `company.yaml` + storylines (SKU/staff/vendor resolution, id-grammar, banned strings, invoice arithmetic, timestamp monotonicity, doc_id coverage, single-owner IDs). |
-| `qa/generate_pdf_fixtures.py` | ReportLab generator with non-mutating `--check` and explicit `--write` modes. It renders PDF bytes from the canonical raw Markdown and records reproducibility metadata in `pdf/manifest.json`. |
+| `qa/generate_pdf_fixtures.py` | ReportLab generator with non-mutating `--check` and explicit `--write` modes. It renders 24 PDFs from 6 canonical raw Markdown families, validates the separate evaluator contracts, and records reproducibility metadata. |
 | `qa/validate_corpus_ledger.py` / `qa/replay_corpus_failures.py` | Validate one current ledger entry per raw file and verify immutable historical raw hashes. The legacy replay filename does not claim to reproduce an unknown mechanism. |
 | `qa/violations.jsonl` | One JSON line per finding; currently empty (0 violations). |
 | `LICENSE.md` | CC BY 4.0 scope and attribution for synthetic data assets; code in this directory remains Apache-2.0. |
@@ -44,6 +46,15 @@ Larkstead Goods Co. is a fully fictional ergonomic-furniture business whose inte
 ## How it fits
 
 `bible/` is the upstream contract: writer agents generate `raw/` from the templates and storylines, and `qa/mechanical_check.py --check` gates `raw/` against `company.yaml` before ingestion. Of 372 raw inputs, the retained processed snapshot has 352 source notes. `corpus-ledger.json` proves the provenance hash for each successful note and classifies the other 20 neutrally as `historical_no_output`, with the precise reason `historical_no_output_unknown_cause`; the snapshot proves no output, not whether ingestion failed, skipped the source, or stopped elsewhere. No raw file is silently omitted or marked excluded. The separate 20-row history is never regenerated from current absence and remains if a file is processed later. `mvault sync --full` embeds the processed layer to yield the `embeddings/` sidecar. Downstream, the demo loader reads `processed/` plus the sidecar to stand up a queryable vault keyless, and the eval harness in [../../src/mastervault/evals](../../src/mastervault/evals) resolves `golden/queries.yaml` and scores the [../../src/mastervault/retrieval](../../src/mastervault/retrieval) channels against `golden/baseline.json`.
+
+The PDF benchmark deliberately separates concerns. `pdf/benchmark.yaml` and
+`pdf/manifest.json` are safe for runtime source/render discovery; parser-hidden
+answers live only under `golden/`. The six document families are split 3/3 by
+family between development and held-out evaluation, so alternate layouts of
+the same semantic source cannot leak across the split. Each family has
+single-column, two-column, table-emphasis, and repeated-furniture renditions.
+The 24 PDFs total 111,576 bytes, below the committed 1 MiB budget, and contain
+no third-party source material.
 
 The original build referenced per-run logs under `/tmp/mv-build/p5a.log`, but
 those temporary logs were not committed, so the exact historical provider

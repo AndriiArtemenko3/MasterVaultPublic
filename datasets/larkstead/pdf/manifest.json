@@ -1,83 +1,663 @@
 {
-  "dataset": "larkstead",
-  "description": "Deterministic PDF renditions with page-level ground truth for document intelligence evaluation.",
-  "documents": [
+  "dataset_id": "larkstead-pdf-layout-benchmark",
+  "description": "A bounded, family-separated clean-digital benchmark derived from existing Larkstead semantic sources. It tests layout, tables, reading order, and page-grounded evidence without introducing OCR or a second business corpus.",
+  "generator": {
+    "cross_platform_byte_identity_promised": false,
+    "deterministic_pdf": true,
+    "path": "datasets/larkstead/qa/generate_pdf_fixtures.py",
+    "reportlab_version": "4.4.3",
+    "sha256": "efce00eb3f9ad0d5ce16c3a76cb85c8ce7f8d94f955f337cd90aba470b8898a8"
+  },
+  "license": "CC-BY-4.0",
+  "schema_version": 2,
+  "semantic_documents": [
     {
-      "document_family": "returns-policy",
-      "document_id": "sl2-policy-returns-v2",
-      "encrypted": false,
-      "family_id": "SL2-refund-window-change",
-      "golden_evidence": [
+      "authority": "primary",
+      "document_family_id": "customer-support.returns-policy",
+      "document_role": "policy",
+      "effective_from": "2026-01-12",
+      "effective_to": null,
+      "renditions": [
         {
-          "block_id": "page-0001-block-0001",
-          "evidence_id": "sl2-returns-v2-return-window",
-          "page": 1,
-          "section": "1. Return window",
-          "text": "Customers may return any item within 45 days of the delivery date."
+          "asset_id": "sl2-policy-returns-v2.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 4862,
+          "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-repeated-furniture.pdf",
+          "pdf_sha256": "8c67b77d62c0f092db53641322c8fb17366ae7ea79d7b26d7d69b5c51c29bb93",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
         },
         {
-          "block_id": "page-0002-block-0001",
-          "evidence_id": "sl2-returns-v2-refund-timing",
-          "page": 2,
-          "section": "5. Refund timing",
-          "text": "Refunds go to the original payment method within 5 business days of warehouse receipt."
+          "asset_id": "sl2-policy-returns-v2.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order",
+            "repeated-header",
+            "repeated-footer",
+            "page-number-footer"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 5172,
+          "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-clean-digital.pdf",
+          "pdf_sha256": "d12dc2de2b5a9fff9bba869c80cec305e5fc3744a1559302c3bbadf147e4332e",
+          "render_contract_sha256": "5811c717ad393ededcba05c10058a416975440157e2512b196975e631a799ecf",
+          "variant_id": "single-column"
         },
         {
-          "block_id": "page-0002-block-0001",
-          "evidence_id": "sl2-returns-v2-supersession",
-          "page": 2,
-          "section": "Change note",
-          "text": "This version makes 45 days permanent policy."
+          "asset_id": "sl2-policy-returns-v2.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3720,
+          "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-table-emphasis.pdf",
+          "pdf_sha256": "e3daf35efbc1673b6c6f6fbf8bcdf781f76ba79113e18d8a92362c166ac69fd3",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "sl2-policy-returns-v2.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3738,
+          "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-two-column.pdf",
+          "pdf_sha256": "f0382508d3416fd33bcc15014f1db0e21fd3a5e9721ef77068bfed285d881e5b",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
         }
       ],
-      "layout_features": [
-        "digital-text",
-        "single-column",
-        "metadata-table",
-        "repeated-header",
-        "page-footer"
-      ],
-      "license": "CC-BY-4.0",
-      "media_type": "application/pdf",
-      "native_text": true,
-      "page_count": 2,
-      "page_size_points": [
-        595.2756,
-        841.8898
-      ],
-      "pages": [
-        {
-          "block_id": "page-0001-block-0001",
-          "block_type": "page_text",
-          "normalized_text_sha256": "35d770a30a04186a8bbfe63aec66cb48c65acd06c5ebef102cad68cc711f5590",
-          "page": 1
-        },
-        {
-          "block_id": "page-0002-block-0001",
-          "block_type": "page_text",
-          "normalized_text_sha256": "93d80cfeccfc17d2838ab82266767736400245ed41ed86e06d6640a98621673c",
-          "page": 2
-        }
-      ],
-      "pdf_bytes": 5172,
-      "pdf_path": "datasets/larkstead/pdf/sl2-policy-returns-v2-clean-digital.pdf",
-      "pdf_sha256": "d12dc2de2b5a9fff9bba869c80cec305e5fc3744a1559302c3bbadf147e4332e",
-      "role": "parser-smoke",
+      "semantic_document_id": "sl2-policy-returns-v2",
+      "semantic_projection_sha256": "f739b0d2a08d46340ae7cedd920d4d7af9c1e0f50a70a2ddccef455fda4bd2d8",
       "source_bytes": 1996,
       "source_path": "datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md",
       "source_sha256": "d9ee838873469234faa0e5e435ab61cfda1b1cff32daf7d792f7b1e8d673bb6d",
       "split": "development",
       "storyline": "SL2",
-      "text_normalization": "NFKC; CRLF/CR to LF; strip line edges; discard blank lines",
-      "variant": "clean-digital"
+      "supersedes_version_id": "v1",
+      "version_id": "v2"
+    },
+    {
+      "authority": "delegated",
+      "document_family_id": "operations.shopstack-ledgerly-export",
+      "document_role": "integration-guide",
+      "effective_from": "2025-06-10",
+      "effective_to": null,
+      "renditions": [
+        {
+          "asset_id": "integration-guide-shopstack-ledgerly-daily-export.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 6445,
+          "pdf_path": "datasets/larkstead/pdf/integration-guide-shopstack-ledgerly-daily-export-repeated-furniture.pdf",
+          "pdf_sha256": "21a9683175ccee5af4a65ff419ff61ca5ff2d04db87c02fe377c6c0ed8f9d880",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
+        },
+        {
+          "asset_id": "integration-guide-shopstack-ledgerly-daily-export.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 5230,
+          "pdf_path": "datasets/larkstead/pdf/integration-guide-shopstack-ledgerly-daily-export-single-column.pdf",
+          "pdf_sha256": "912c98e7621f13a0ee8c0c88ce32d5950a7bb51231dd179a5d1061cf7da4c5e8",
+          "render_contract_sha256": "fba8f4619e043dab41a7b67297e13c63c43b197dacbafce496699a59fb62e6a6",
+          "variant_id": "single-column"
+        },
+        {
+          "asset_id": "integration-guide-shopstack-ledgerly-daily-export.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 5839,
+          "pdf_path": "datasets/larkstead/pdf/integration-guide-shopstack-ledgerly-daily-export-table-emphasis.pdf",
+          "pdf_sha256": "cd53e42aa466ecf7f2907688dddeb498f16677fedaf97e891797a41d86a3ebba",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "integration-guide-shopstack-ledgerly-daily-export.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 5305,
+          "pdf_path": "datasets/larkstead/pdf/integration-guide-shopstack-ledgerly-daily-export-two-column.pdf",
+          "pdf_sha256": "d724ace2ec545ffbd2e4eeba5781e4822d5e694071adfc95af7b878c9f43af23",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
+        }
+      ],
+      "semantic_document_id": "integration-guide-shopstack-ledgerly-daily-export",
+      "semantic_projection_sha256": "736a362125b7fe1864ba6353e867ae7a23a82adaa8215c29ef4d6ccaf96c2508",
+      "source_bytes": 3514,
+      "source_path": "datasets/larkstead/raw/operations/integration-guide/integration-guide-shopstack-ledgerly-daily-export.md",
+      "source_sha256": "5d01929c5142ad5abae749942538fb9bc807a49c3a9cac65d21d6c88d241c00e",
+      "split": "development",
+      "storyline": null,
+      "supersedes_version_id": null,
+      "version_id": "updated-2025-06-10"
+    },
+    {
+      "authority": "transactional",
+      "document_family_id": "internal-admin.parcelpoint-invoice",
+      "document_role": "financial-record",
+      "effective_from": "2026-03-04",
+      "effective_to": "2026-04-03",
+      "renditions": [
+        {
+          "asset_id": "sl5-invoice-ppf-2026-003.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 4571,
+          "pdf_path": "datasets/larkstead/pdf/sl5-invoice-ppf-2026-003-repeated-furniture.pdf",
+          "pdf_sha256": "c64fd42fb3d1a226f2d815e322d421e4800491bcaa58212b9f19fd0767cff0d3",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
+        },
+        {
+          "asset_id": "sl5-invoice-ppf-2026-003.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 3373,
+          "pdf_path": "datasets/larkstead/pdf/sl5-invoice-ppf-2026-003-single-column.pdf",
+          "pdf_sha256": "de0391db7660a5e09f54f78d57197ba371ee2b8fb0d36c078206fbf7a4aa1c6e",
+          "render_contract_sha256": "fba8f4619e043dab41a7b67297e13c63c43b197dacbafce496699a59fb62e6a6",
+          "variant_id": "single-column"
+        },
+        {
+          "asset_id": "sl5-invoice-ppf-2026-003.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3388,
+          "pdf_path": "datasets/larkstead/pdf/sl5-invoice-ppf-2026-003-table-emphasis.pdf",
+          "pdf_sha256": "3ccbdf3036bf375fc0680fb504c8cadc43ff4bc8c20480cf2afff2b47f180469",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "sl5-invoice-ppf-2026-003.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3385,
+          "pdf_path": "datasets/larkstead/pdf/sl5-invoice-ppf-2026-003-two-column.pdf",
+          "pdf_sha256": "fc95aa2119a4211b4af67636bff25a9827099cead351d3d3829bbd910863a2c5",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
+        }
+      ],
+      "semantic_document_id": "sl5-invoice-ppf-2026-003",
+      "semantic_projection_sha256": "2ded221ba5e2f0c0a3490bfd2f486d942d65e126db867de7e6bfe117de18388c",
+      "source_bytes": 1268,
+      "source_path": "datasets/larkstead/raw/internal-admin/invoice/sl5-invoice-ppf-2026-003.md",
+      "source_sha256": "d08b51a6a77f32c7d7eac88ba559ed4d6622dc89bc2348afea174190b3fb0746",
+      "split": "development",
+      "storyline": "SL5",
+      "supersedes_version_id": null,
+      "version_id": "inv-ppf-2026-003"
+    },
+    {
+      "authority": "transactional",
+      "document_family_id": "operations.ostrava-receiving-log",
+      "document_role": "receiving-log",
+      "effective_from": "2026-05-12",
+      "effective_to": null,
+      "renditions": [
+        {
+          "asset_id": "receiving-log-ostrava-lot-2026-15.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 4220,
+          "pdf_path": "datasets/larkstead/pdf/receiving-log-ostrava-lot-2026-15-repeated-furniture.pdf",
+          "pdf_sha256": "ca2c4dc3cad0bdba6f402a22dc6902ec81eca832c0169010795e85da9d491d45",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
+        },
+        {
+          "asset_id": "receiving-log-ostrava-lot-2026-15.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 3066,
+          "pdf_path": "datasets/larkstead/pdf/receiving-log-ostrava-lot-2026-15-single-column.pdf",
+          "pdf_sha256": "9ed0cba0c3ad8599b5fe235cd89ed08dc850949f57beb8ef9add679beb15b528",
+          "render_contract_sha256": "fba8f4619e043dab41a7b67297e13c63c43b197dacbafce496699a59fb62e6a6",
+          "variant_id": "single-column"
+        },
+        {
+          "asset_id": "receiving-log-ostrava-lot-2026-15.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3076,
+          "pdf_path": "datasets/larkstead/pdf/receiving-log-ostrava-lot-2026-15-table-emphasis.pdf",
+          "pdf_sha256": "d757c62442a3af8dcac152ff5317a76c57d0c367f4a05601e20f5bfdc91c0957",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "receiving-log-ostrava-lot-2026-15.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3071,
+          "pdf_path": "datasets/larkstead/pdf/receiving-log-ostrava-lot-2026-15-two-column.pdf",
+          "pdf_sha256": "9a6f7186e104146b2476da8f9f4549a1a9cb09468f568dc188f41c7431e6a47a",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
+        }
+      ],
+      "semantic_document_id": "receiving-log-ostrava-lot-2026-15",
+      "semantic_projection_sha256": "98af56b1564a9a87e2736039ac90a9fd0816ada1df6c735fcd8af6bfd15486c4",
+      "source_bytes": 808,
+      "source_path": "datasets/larkstead/raw/operations/receiving-log/receiving-log-ostrava-lot-2026-15.md",
+      "source_sha256": "96d34bab3d47f0b19995f5933e833d2611b6d04ed82f91f2f0f5761175aaf763",
+      "split": "held-out",
+      "storyline": null,
+      "supersedes_version_id": null,
+      "version_id": "lot-2026-15"
+    },
+    {
+      "authority": "transactional",
+      "document_family_id": "sales-crm.bluebird-proposal",
+      "document_role": "proposal",
+      "effective_from": "2026-01-28",
+      "effective_to": "2026-02-27",
+      "renditions": [
+        {
+          "asset_id": "proposal-bluebird-9seat-2026-01.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 5169,
+          "pdf_path": "datasets/larkstead/pdf/proposal-bluebird-9seat-2026-01-repeated-furniture.pdf",
+          "pdf_sha256": "4e5f9d5af9d82c6a463bbdc77eed4bd4ae186908984bd3b6530933f57c308f98",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
+        },
+        {
+          "asset_id": "proposal-bluebird-9seat-2026-01.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 3908,
+          "pdf_path": "datasets/larkstead/pdf/proposal-bluebird-9seat-2026-01-single-column.pdf",
+          "pdf_sha256": "ebfb0752e237b869bd2c7b6ee703c543cf2c43d5d5d7d609b3179d8ccf094c5c",
+          "render_contract_sha256": "fba8f4619e043dab41a7b67297e13c63c43b197dacbafce496699a59fb62e6a6",
+          "variant_id": "single-column"
+        },
+        {
+          "asset_id": "proposal-bluebird-9seat-2026-01.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3900,
+          "pdf_path": "datasets/larkstead/pdf/proposal-bluebird-9seat-2026-01-table-emphasis.pdf",
+          "pdf_sha256": "d970d3206f91e8129c254f151aaccacff1d925be3aa238b815886a4ea9c82db7",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "proposal-bluebird-9seat-2026-01.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 3896,
+          "pdf_path": "datasets/larkstead/pdf/proposal-bluebird-9seat-2026-01-two-column.pdf",
+          "pdf_sha256": "60f8054632d68192864d716aaf42422ae5860fdddfd231fcc030de43708095c9",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
+        }
+      ],
+      "semantic_document_id": "proposal-bluebird-9seat-2026-01",
+      "semantic_projection_sha256": "a53fb88951215fb90e97d41b56035a32456fd4ccae77c4cf5048da10c18be41e",
+      "source_bytes": 1876,
+      "source_path": "datasets/larkstead/raw/sales-crm/proposal/proposal-bluebird-9seat-2026-01.md",
+      "source_sha256": "258cb4807a5c99d32f7d3f1f30cbef6f25b3a3a158b8780380717efe02897b74",
+      "split": "held-out",
+      "storyline": null,
+      "supersedes_version_id": null,
+      "version_id": "prepared-2026-01-28"
+    },
+    {
+      "authority": "informational",
+      "document_family_id": "operations.vireo-firmware-postmortem",
+      "document_role": "postmortem",
+      "effective_from": "2026-02-24",
+      "effective_to": null,
+      "renditions": [
+        {
+          "asset_id": "vireo-v12-flicker-postmortem.repeated-furniture",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "repeated-header",
+            "repeated-footer",
+            "forced-pagination"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 7218,
+          "pdf_path": "datasets/larkstead/pdf/vireo-v12-flicker-postmortem-repeated-furniture.pdf",
+          "pdf_sha256": "204e167d43a18d9abb563dd2658764a85fa9ebc11e5ca1d81df8e78142a70556",
+          "render_contract_sha256": "6267747d5b533e71a1aefd891cd4efe48bcf77861ee62ce1833a545001aa7fa9",
+          "variant_id": "repeated-furniture"
+        },
+        {
+          "asset_id": "vireo-v12-flicker-postmortem.single-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "single-column",
+            "semantic-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            595.2756,
+            841.8898
+          ],
+          "pdf_bytes": 6605,
+          "pdf_path": "datasets/larkstead/pdf/vireo-v12-flicker-postmortem-single-column.pdf",
+          "pdf_sha256": "204300cd2eef83d0b8053acd64df0655a71b9b3bda0564cfe08bc27d2fc7dfb9",
+          "render_contract_sha256": "fba8f4619e043dab41a7b67297e13c63c43b197dacbafce496699a59fb62e6a6",
+          "variant_id": "single-column"
+        },
+        {
+          "asset_id": "vireo-v12-flicker-postmortem.table-emphasis",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "table-forward-styling"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 2,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 6706,
+          "pdf_path": "datasets/larkstead/pdf/vireo-v12-flicker-postmortem-table-emphasis.pdf",
+          "pdf_sha256": "757a1c3837a71bf4b33c97880a693f188f101ab070e53f8d998bed8660adbdf9",
+          "render_contract_sha256": "5c272a4929139cdbfa28efc9931ff0601ca3cfefa6cfae67504f8c1a25b6c686",
+          "variant_id": "table-emphasis"
+        },
+        {
+          "asset_id": "vireo-v12-flicker-postmortem.two-column",
+          "encrypted": false,
+          "layout_features": [
+            "clean-digital",
+            "native-text",
+            "two-column",
+            "explicit-reading-order"
+          ],
+          "media_type": "application/pdf",
+          "native_text": true,
+          "page_count": 1,
+          "page_size_points": [
+            841.8898,
+            595.2756
+          ],
+          "pdf_bytes": 5713,
+          "pdf_path": "datasets/larkstead/pdf/vireo-v12-flicker-postmortem-two-column.pdf",
+          "pdf_sha256": "fa20001618e6e7dc804e132ea10ede9f77d94f00f5fa845c8ec8c4e39efd566e",
+          "render_contract_sha256": "78ab14c02b00b60e70006c41c92da121168595f874986513284fd9c330e06fd0",
+          "variant_id": "two-column"
+        }
+      ],
+      "semantic_document_id": "vireo-v12-flicker-postmortem",
+      "semantic_projection_sha256": "49a72e07769813830add8ec4bf154866f7affc1afd97c5eed6e1196070d26eaa",
+      "source_bytes": 4194,
+      "source_path": "datasets/larkstead/raw/operations/postmortem/vireo-v12-flicker-postmortem.md",
+      "source_sha256": "e453562e3c96d3cafbc46689a646c676cafe600636d1f5ee4db4e8390bf626c5",
+      "split": "held-out",
+      "storyline": "SL4",
+      "supersedes_version_id": null,
+      "version_id": "final"
     }
   ],
-  "generator": {
-    "deterministic_pdf": true,
-    "path": "datasets/larkstead/qa/generate_pdf_fixtures.py",
-    "render_profile": "clean-digital-a4-v1",
-    "reportlab_version": "4.4.3",
-    "sha256": "bff31ca20bd993315b9ee89cf0b2184d6b0b33d3649c41582200aa0e7b7595d7"
+  "size_budget": {
+    "max_single_pdf_bytes": 65536,
+    "max_total_pdf_bytes": 1048576,
+    "target_semantic_documents": 6,
+    "variants_per_document": 4
   },
-  "schema_version": 1
+  "spec_path": "datasets/larkstead/pdf/benchmark.yaml",
+  "spec_sha256": "d402e5fff6dda7c44c6a2bc403321f941b3b44b76c01fd474e201fc20847bee6",
+  "total_pdf_bytes": 111576
 }

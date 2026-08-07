@@ -29,7 +29,7 @@ The pytest suite for MasterVault is split into fast, hermetic `unit/` tests that
 | `unit/ingest_validate/` | Ingest validation gate and its CLI surface. |
 | `unit/contracts/` | Structured-output contract registry and the claims contract. |
 | `unit/core/` | Budgets, event bus, and run context. |
-| `unit/datasets/` | Byte reproducibility, manifest hashes, page-count, and page-grounded evidence checks for the committed Larkstead PDF fixtures. |
+| `unit/datasets/` | Deterministic regeneration and size gates for the 6-family/24-PDF benchmark; runtime/golden isolation; stable source-semantic anchors; explicit heading, reading-order, table/cell and page-evidence truth; preserved legacy bytes; and SL2 chronology/change-impact hard negatives. |
 | `unit/document_intelligence/` | Frozen schema-v1 compatibility plus deterministic schema-v2 normalization/render/store, strict ownership/grid/span validation, persisted-evidence failure modes, immutable artifact/symlink checks, resource ceilings, and optional-import/no-download boundaries. |
 | `fixtures/mini_vault/` | A 10-document vault (3 wiki, 5 source, 1 decision, 1 strategy) across 4 domains, used by the sync/search integration tests. |
 | `fixtures/raw_docs/` | Four unprocessed source docs (`.md` + `.txt`) for the in-world "Driftwood Supply Co.", fed to the ingest end-to-end test. |

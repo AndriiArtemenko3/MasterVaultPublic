@@ -402,6 +402,7 @@ Three caveats, stated plainly rather than buried in a footnote:
 | `uv run mvault runs show <run-id>` | Inspect one pipeline run: cost, status, failed units |
 | `uv run mvault eval [--compare <baseline>]` | Retrieval eval harness against the golden query set |
 | `uv run mvault ask-eval [--compare <baseline>]` | Deterministic 14-case/97-check end-to-end ask gate |
+| `uv run mvault pdf-eval --parser pypdf [--json]` | Deterministic development-split PDF layout/evidence measurement; held-out requires `--split held-out --allow-held-out` |
 | `uv run mvault demo load \| status \| reset \| delete` | Load, inspect, restore, or remove the shipped demo dataset |
 
 ## The dataset

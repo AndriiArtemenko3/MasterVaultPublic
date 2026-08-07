@@ -1,0 +1,244 @@
+schema_version: 1
+event_id: sl2-returns-policy-v2
+storyline: SL2
+title: Holiday exception becomes permanent returns policy v2
+trigger_document_id: sl2-policy-returns-v2
+
+documents:
+  - document_id: sl2-policy-returns-v2
+    source_path: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md
+    version_id: v2
+    effective_from: 2026-01-12
+    effective_to: null
+    document_role: policy
+    authority: primary
+  - document_id: sl2-policy-returns-v1
+    source_path: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v1.md
+    version_id: v1
+    effective_from: 2024-01-15
+    effective_to: 2026-01-11
+    document_role: policy
+    authority: primary
+  - document_id: sl2-memo-holiday-exception
+    source_path: datasets/larkstead/raw/internal-admin/memo/sl2-memo-holiday-exception.md
+    version_id: holiday-exception-2025
+    effective_from: 2025-11-03
+    effective_to: 2026-01-11
+    document_role: memo
+    authority: primary
+  - document_id: sl2-faq-returns
+    source_path: datasets/larkstead/raw/customer-support/faq/sl2-faq-returns.md
+    version_id: published-2024-01-22
+    effective_from: 2024-01-22
+    effective_to: null
+    document_role: faq
+    authority: delegated
+  - document_id: sl2-macros-returns-helprise
+    source_path: datasets/larkstead/raw/customer-support/sop/sl2-macros-returns-helprise.md
+    version_id: effective-2024-02-09
+    effective_from: 2024-02-09
+    effective_to: null
+    document_role: sop
+    authority: delegated
+  - document_id: process-showroom-demo-unit-rotation
+    source_path: datasets/larkstead/raw/operations/process/process-showroom-demo-unit-rotation.md
+    version_id: v1
+    effective_from: 2025-07-01
+    effective_to: null
+    document_role: process
+    authority: delegated
+  - document_id: sop-returns-receiving-restock-grading
+    source_path: datasets/larkstead/raw/operations/sop/sop-returns-receiving-restock-grading.md
+    version_id: v1
+    effective_from: 2025-06-23
+    effective_to: null
+    document_role: sop
+    authority: delegated
+  - document_id: sl3-proposal-v1
+    source_path: datasets/larkstead/raw/sales-crm/proposal/sl3-proposal-v1.md
+    version_id: v1
+    effective_from: 2025-09-18
+    effective_to: 2025-10-18
+    document_role: proposal
+    authority: transactional
+
+temporal_phases:
+  - phase_id: original-policy-window
+    governing_document_id: sl2-policy-returns-v1
+    announced_on: 2024-01-15
+    effective_from: 2024-01-15
+    effective_to: 2025-11-02
+    return_window_days: 30
+    status: superseded
+  - phase_id: holiday-exception
+    governing_document_id: sl2-memo-holiday-exception
+    announced_on: 2025-10-27
+    effective_from: 2025-11-03
+    effective_to: 2026-01-11
+    return_window_days: 45
+    status: temporary
+  - phase_id: permanent-policy-v2
+    governing_document_id: sl2-policy-returns-v2
+    announced_on: 2026-01-12
+    effective_from: 2026-01-12
+    effective_to: null
+    return_window_days: 45
+    status: permanent
+
+dependencies:
+  - upstream_document_id: sl2-policy-returns-v1
+    downstream_document_id: sl2-faq-returns
+    edge_label: DEPENDS_ON
+    dependency_type: summarizes
+    evidence_quote: You have 30 days from delivery to start a return.
+  - upstream_document_id: sl2-policy-returns-v1
+    downstream_document_id: sl2-macros-returns-helprise
+    edge_label: DEPENDS_ON
+    dependency_type: implements
+    evidence_quote: within 30 days of delivery
+  - upstream_document_id: sl2-policy-returns-v1
+    downstream_document_id: process-showroom-demo-unit-rotation
+    edge_label: DEPENDS_ON
+    dependency_type: implements
+    evidence_quote: Open-box sales carry the standard 30-day refund window
+  - upstream_document_id: sl2-policy-returns-v1
+    downstream_document_id: sl3-proposal-v1
+    edge_label: DEPENDS_ON
+    dependency_type: historical-reference
+    evidence_quote: Returns per the 30-day window
+
+expected_pair_classifications:
+  - pair_id: new-policy-supersedes-v1
+    source_document_id: sl2-policy-returns-v2
+    target_document_id: sl2-policy-returns-v1
+    pair_scope: claim
+    classification: SUPERSEDES
+    edge_label: SUPERSEDES
+    source_quote: Customers may return any item within 45 days of the delivery date.
+    target_quote: Customers may return any item within 30 days of the delivery date.
+    rationale: >-
+      Policy v2 supersedes v1 on 2026-01-12. The 30-day claim itself stopped
+      governing on 2025-11-03 under the temporary holiday exception, while
+      other v1 terms continued until v2.
+  - pair_id: new-policy-contradicts-stale-faq
+    source_document_id: sl2-policy-returns-v2
+    target_document_id: sl2-faq-returns
+    pair_scope: claim
+    classification: CONTRADICTS
+    edge_label: CONTRADICTS
+    source_quote: Customers may return any item within 45 days of the delivery date.
+    target_quote: You have 30 days from delivery to start a return.
+    rationale: The active public FAQ still presents 30 days after 45 days became permanent.
+  - pair_id: new-policy-contradicts-stale-macro
+    source_document_id: sl2-policy-returns-v2
+    target_document_id: sl2-macros-returns-helprise
+    pair_scope: claim
+    classification: CONTRADICTS
+    edge_label: CONTRADICTS
+    source_quote: Customers may return any item within 45 days of the delivery date.
+    target_quote: outside our 30-day return window.
+    rationale: The still-active operational macro quotes the obsolete eligibility limit.
+  - pair_id: new-policy-coexists-with-expired-proposal
+    source_document_id: sl2-policy-returns-v2
+    target_document_id: sl3-proposal-v1
+    pair_scope: claim
+    classification: COEXISTS
+    edge_label: null
+    source_quote: Customers may return any item within 45 days of the delivery date.
+    target_quote: Returns per the 30-day window
+    rationale: >-
+      The proposal expired on 2025-10-18, before the exception began. Its
+      historical 30-day term remains correct and must not be rewritten.
+  - pair_id: eligibility-claim-unrelated-to-grading-procedure
+    source_document_id: sl2-policy-returns-v2
+    target_document_id: sop-returns-receiving-restock-grading
+    pair_scope: claim
+    classification: UNRELATED
+    edge_label: null
+    source_quote: Customers may return any item within 45 days of the delivery date.
+    target_quote: Unbox on the grading table, never the shelf.
+    rationale: >-
+      Candidate-document retrieval is topically reasonable, but the eligibility
+      window claim is unrelated to the post-authorization physical grading step.
+
+expected_affected_document_ids:
+  - process-showroom-demo-unit-rotation
+  - sl2-faq-returns
+  - sl2-macros-returns-helprise
+
+expected_impacts:
+  - target_document_id: sl2-faq-returns
+    affected: true
+    reason: The active customer-facing FAQ directly quotes the obsolete 30-day window.
+    expected_review_decision: approve
+    patches:
+      - patch_id: faq-return-window
+        before: You have 30 days from delivery to start a return.
+        proposed_after: You have 45 days from delivery to start a return.
+        expected_after: You have 45 days from delivery to start a return.
+        grounding_document_id: sl2-policy-returns-v2
+        grounding_quote: Customers may return any item within 45 days of the delivery date.
+  - target_document_id: sl2-macros-returns-helprise
+    affected: true
+    reason: The active routing thresholds, support replies, and policy reference encode the old eligibility boundary.
+    expected_review_decision: edit
+    patches:
+      - patch_id: macro-ret-01-step
+        before: >-
+          2. Delivery date 30 days or less from today: send macro RET-01. Reply
+          text reads "within 30 days of delivery" and includes the restocking
+          fee line: 10% on opened, non-defective returns.
+        proposed_after: >-
+          2. Delivery date 45 days or less from today: send macro RET-01. Reply
+          text reads "within 45 days of delivery" and includes the restocking
+          fee line: 10% on opened, non-defective returns.
+        expected_after: >-
+          2. Delivery date 45 days or less from today: send macro RET-01. Reply
+          text reads "within 45 days of delivery" and includes the restocking
+          fee line: 10% on opened, non-defective returns.
+        grounding_document_id: sl2-policy-returns-v2
+        grounding_quote: Customers may return any item within 45 days of the delivery date.
+      - patch_id: macro-ret-02-step
+        before: >-
+          3. Delivery date over 30 days from today: send macro RET-02. Reply text
+          reads "outside our 30-day return window."
+        proposed_after: >-
+          3. Delivery date over 45 days from today: send macro RET-02. Reply text
+          reads "outside our current return window."
+        expected_after: >-
+          3. Delivery date over 45 days from today: send macro RET-02. Reply text
+          reads "outside our 45-day return window."
+        grounding_document_id: sl2-policy-returns-v2
+        grounding_quote: Customers may return any item within 45 days of the delivery date.
+      - patch_id: macro-policy-reference
+        before: "- Returns and refunds policy, effective 2024-01-15"
+        proposed_after: "- Returns and refunds policy, effective 2026-01-12"
+        expected_after: "- Returns and refunds policy, effective 2026-01-12"
+        grounding_document_id: sl2-policy-returns-v2
+        grounding_quote: "Effective: 2026-01-12"
+  - target_document_id: process-showroom-demo-unit-rotation
+    affected: true
+    reason: Only the active process's eligibility-window phrase is stale; its fee and scope remain valid.
+    expected_review_decision: approve
+    patches:
+      - patch_id: showroom-open-box-return-window
+        before: Open-box sales carry the standard 30-day refund window like any order (effective 2024-01-15)
+        proposed_after: Open-box sales carry the standard 45-day refund window like any order (permanent effective 2026-01-12; in force since 2025-11-03)
+        expected_after: Open-box sales carry the standard 45-day refund window like any order (permanent effective 2026-01-12; in force since 2025-11-03)
+        grounding_document_id: sl2-policy-returns-v2
+        grounding_quote: This 45-day window has been running since 2025-11-03 as a holiday exception. As of the effective date above, it is permanent
+  - target_document_id: sl2-policy-returns-v1
+    affected: false
+    reason: It remains authoritative historical evidence and is not a rewrite target.
+    expected_review_decision: reject
+    patches: []
+  - target_document_id: sl3-proposal-v1
+    affected: false
+    reason: The proposal expired before the exception and must remain historically intact.
+    expected_review_decision: reject
+    patches: []
+  - target_document_id: sop-returns-receiving-restock-grading
+    affected: false
+    reason: It governs post-authorization grading and contains no eligibility-window rule.
+    expected_review_decision: reject
+    patches: []
