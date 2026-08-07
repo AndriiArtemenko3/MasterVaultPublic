@@ -15,6 +15,10 @@ Runtime-only temporal contracts for MasterVault's knowledge-change workflow.
 - `workflow.py` provides the synchronous LangGraph wait/reconciliation seam
   for one already-created review request. Its sibling SQLite checkpoints are
   disposable cursors and can never authorize a review outcome.
+- `discovery.py` purely enumerates unassessed changed-to-incumbent claim pairs
+  and ranks current downstream attention candidates from canonical relation,
+  dependency, and temporal facts in the supplied validated snapshot. Its
+  outputs are advisory projections—not classifications or impact verdicts.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -46,8 +50,8 @@ projection only; they never rewrite source-declared dates or stable IDs.
 Conflicting declared/inferred or accepted bounds resolve to `unresolved`.
 
 The direction of a dependency edge is
-`downstream document --DEPENDS_ON--> upstream claim`. Impact discovery
-will traverse those edges in reverse after an upstream change. One semantic
+`downstream document --DEPENDS_ON--> upstream claim`. Document-attention
+discovery traverses those edges in reverse after an upstream change. One semantic
 dependency retains all exact downstream spans and all downstream claim
 revisions that express it; each binding must name the same canonical-note path
 and full SHA-256. PDF-backed spans retain the existing page/block/cell evidence
@@ -141,7 +145,7 @@ corrupt checkpoints fail closed without deletion. The owned connection and
 lock support synchronous callers in one process only; they make no
 multi-process or production-scaling claim.
 
-Deliberately deferred: candidate generation, classifiers, background workers,
-review UI/CLI integration,
+Deliberately deferred: relationship classifiers, actual-impact adjudication,
+background workers, review UI/CLI integration,
 multi-document apply/recovery, index updates, record-level evidence binding,
 PostgreSQL change-control persistence, and impact evaluation.

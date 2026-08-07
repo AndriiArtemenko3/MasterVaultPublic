@@ -14,6 +14,7 @@ import unicodedata
 from datetime import date
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
+from types import MappingProxyType
 from typing import Any, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1648,15 +1649,12 @@ def _resolve_temporality(
     target: TemporalTarget,
     declared_effective_from: date,
     declared_effective_to: date | None,
-    constraints: TemporalConstraintSet,
+    accepted_constraints: tuple[TemporalConstraint, ...],
     as_of: date,
 ) -> TemporalResolution:
-    relevant = tuple(
-        constraint
-        for constraint in constraints.constraints
-        if constraint.target == target and constraint.status == TemporalConstraintStatus.ACCEPTED
-    )
-    accepted_bounds = {constraint.inferred_valid_to_exclusive for constraint in relevant}
+    accepted_bounds = {
+        constraint.inferred_valid_to_exclusive for constraint in accepted_constraints
+    }
     declared_to_exclusive = declared_effective_to
     conflicts: set[str] = set()
     if len(accepted_bounds) > 1:
@@ -1671,12 +1669,12 @@ def _resolve_temporality(
     ):
         conflicts.add("declared and inferred valid-to bounds disagree")
 
-    applied_ids = tuple(sorted(constraint.constraint_id for constraint in relevant))
+    applied_ids = tuple(sorted(constraint.constraint_id for constraint in accepted_constraints))
     basis_ids = tuple(
         sorted(
             {
                 relation_id
-                for constraint in relevant
+                for constraint in accepted_constraints
                 for relation_id in constraint.basis_relation_ids
             }
         )
@@ -1697,7 +1695,7 @@ def _resolve_temporality(
     if as_of < declared_effective_from:
         state = TemporalState.FUTURE
     elif valid_to_exclusive is not None and as_of >= valid_to_exclusive:
-        state = TemporalState.HISTORICAL if relevant else TemporalState.EXPIRED
+        state = TemporalState.HISTORICAL if accepted_constraints else TemporalState.EXPIRED
     else:
         state = TemporalState.CURRENT
     return TemporalResolution(
@@ -1711,6 +1709,146 @@ def _resolve_temporality(
     )
 
 
+class TemporalResolutionContext:
+    """One validated, target-indexed temporal resolver for a fixed analysis date.
+
+    The supplied graph is defensively revalidated exactly once. Accepted
+    constraints and their exact bases are indexed once, while immutable
+    resolution values are cached per exact claim or document binding.
+    """
+
+    __slots__ = (
+        "_accepted_by_target",
+        "_as_of",
+        "_claim_cache",
+        "_claim_relations",
+        "_document_cache",
+        "_document_replacements",
+    )
+
+    def __init__(
+        self,
+        constraints: ValidatedTemporalConstraintSet,
+        *,
+        as_of: date,
+    ) -> None:
+        validated = _revalidate_temporal_constraints(constraints)
+        accepted_by_target: dict[tuple[TemporalTargetKind, str], list[TemporalConstraint]] = {}
+        for constraint in validated.constraints.constraints:
+            if constraint.status != TemporalConstraintStatus.ACCEPTED:
+                continue
+            key = (constraint.target.kind, constraint.target.target_id)
+            accepted_by_target.setdefault(key, []).append(constraint)
+        self._accepted_by_target = MappingProxyType(
+            {key: tuple(values) for key, values in accepted_by_target.items()}
+        )
+        self._claim_relations = MappingProxyType(
+            {
+                assessment.relation_id: assessment
+                for assessment in validated.relation_graph.assessments
+                if assessment.relation_id is not None
+            }
+        )
+        self._document_replacements = MappingProxyType(
+            {
+                assessment.relation_id: assessment
+                for assessment in validated.document_replacements.assessments
+            }
+        )
+        self._as_of = as_of
+        self._claim_cache: dict[bytes, TemporalResolution] = {}
+        self._document_cache: dict[bytes, TemporalResolution] = {}
+
+    @classmethod
+    def from_aggregate(
+        cls,
+        aggregate: ChangeControlAggregate,
+        *,
+        as_of: date,
+    ) -> TemporalResolutionContext:
+        """Validate and index an already-revalidated aggregate exactly once."""
+
+        unchecked = ValidatedTemporalConstraintSet.model_construct(
+            constraints=aggregate.temporal_constraints,
+            relation_graph=aggregate.relation_graph,
+            document_replacements=aggregate.document_replacements,
+        )
+        return cls(unchecked, as_of=as_of)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if hasattr(self, name):
+            raise AttributeError("temporal resolution context bindings are sealed")
+        object.__setattr__(self, name, value)
+
+    @property
+    def as_of(self) -> date:
+        return self._as_of
+
+    @property
+    def resolved_claim_count(self) -> int:
+        """Number of distinct exact claim bindings resolved by this context."""
+        return len(self._claim_cache)
+
+    @property
+    def resolved_document_count(self) -> int:
+        """Number of distinct exact document bindings resolved by this context."""
+        return len(self._document_cache)
+
+    def resolve_claim(self, revision: VersionedClaimRevision) -> TemporalResolution:
+        cache_key = canonical_json_bytes(revision.model_dump(mode="json"))
+        cached = self._claim_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        target = TemporalTarget(
+            kind=TemporalTargetKind.CLAIM_REVISION,
+            target_id=revision.claim_revision_id,
+        )
+        relevant = self._accepted_by_target.get((target.kind, target.target_id), ())
+        for constraint in relevant:
+            for basis_id in constraint.basis_relation_ids:
+                assessment = self._claim_relations[basis_id]
+                assert assessment.endpoint_ids is not None
+                if assessment.pair.revision(assessment.endpoint_ids[1]) != revision:
+                    raise ValueError(
+                        "resolution claim binding differs from its accepted relation basis"
+                    )
+        resolution = _resolve_temporality(
+            target=target,
+            declared_effective_from=revision.declared_effective_from,
+            declared_effective_to=revision.declared_effective_to,
+            accepted_constraints=relevant,
+            as_of=self._as_of,
+        )
+        self._claim_cache[cache_key] = resolution
+        return resolution
+
+    def resolve_document(self, document: DocumentVersionMetadata) -> TemporalResolution:
+        cache_key = canonical_json_bytes(document.model_dump(mode="json"))
+        cached = self._document_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        target = TemporalTarget(
+            kind=TemporalTargetKind.DOCUMENT_VERSION,
+            target_id=document.document_version_id,
+        )
+        relevant = self._accepted_by_target.get((target.kind, target.target_id), ())
+        for constraint in relevant:
+            for basis_id in constraint.basis_relation_ids:
+                if self._document_replacements[basis_id].older_document != document:
+                    raise ValueError(
+                        "resolution document binding differs from its accepted replacement basis"
+                    )
+        resolution = _resolve_temporality(
+            target=target,
+            declared_effective_from=document.declared_effective_from,
+            declared_effective_to=document.declared_effective_to,
+            accepted_constraints=relevant,
+            as_of=self._as_of,
+        )
+        self._document_cache[cache_key] = resolution
+        return resolution
+
+
 def resolve_document_temporality(
     document: DocumentVersionMetadata,
     constraints: ValidatedTemporalConstraintSet,
@@ -1719,26 +1857,26 @@ def resolve_document_temporality(
 ) -> TemporalResolution:
     """Project source-declared and accepted inferred document bounds."""
     validated = _revalidate_temporal_constraints(constraints)
-    for constraint in validated.constraints.constraints:
-        if (
-            constraint.status != TemporalConstraintStatus.ACCEPTED
-            or constraint.target.kind != TemporalTargetKind.DOCUMENT_VERSION
-            or constraint.target.target_id != document.document_version_id
-        ):
-            continue
+    target = TemporalTarget(
+        kind=TemporalTargetKind.DOCUMENT_VERSION,
+        target_id=document.document_version_id,
+    )
+    relevant = tuple(
+        constraint
+        for constraint in validated.constraints.constraints
+        if constraint.status == TemporalConstraintStatus.ACCEPTED and constraint.target == target
+    )
+    for constraint in relevant:
         for basis_id in constraint.basis_relation_ids:
             if validated.document_replacements.get(basis_id).older_document != document:
                 raise ValueError(
                     "resolution document binding differs from its accepted replacement basis"
                 )
     return _resolve_temporality(
-        target=TemporalTarget(
-            kind=TemporalTargetKind.DOCUMENT_VERSION,
-            target_id=document.document_version_id,
-        ),
+        target=target,
         declared_effective_from=document.declared_effective_from,
         declared_effective_to=document.declared_effective_to,
-        constraints=validated.constraints,
+        accepted_constraints=relevant,
         as_of=as_of,
     )
 
@@ -1756,13 +1894,16 @@ def resolve_claim_temporality(
         for assessment in validated.relation_graph.assessments
         if assessment.relation_id is not None
     }
-    for constraint in validated.constraints.constraints:
-        if (
-            constraint.status != TemporalConstraintStatus.ACCEPTED
-            or constraint.target.kind != TemporalTargetKind.CLAIM_REVISION
-            or constraint.target.target_id != revision.claim_revision_id
-        ):
-            continue
+    target = TemporalTarget(
+        kind=TemporalTargetKind.CLAIM_REVISION,
+        target_id=revision.claim_revision_id,
+    )
+    relevant = tuple(
+        constraint
+        for constraint in validated.constraints.constraints
+        if constraint.status == TemporalConstraintStatus.ACCEPTED and constraint.target == target
+    )
+    for constraint in relevant:
         for basis_id in constraint.basis_relation_ids:
             assessment = relations[basis_id]
             assert assessment.endpoint_ids is not None
@@ -1771,12 +1912,9 @@ def resolve_claim_temporality(
                     "resolution claim binding differs from its accepted relation basis"
                 )
     return _resolve_temporality(
-        target=TemporalTarget(
-            kind=TemporalTargetKind.CLAIM_REVISION,
-            target_id=revision.claim_revision_id,
-        ),
+        target=target,
         declared_effective_from=revision.declared_effective_from,
         declared_effective_to=revision.declared_effective_to,
-        constraints=validated.constraints,
+        accepted_constraints=relevant,
         as_of=as_of,
     )

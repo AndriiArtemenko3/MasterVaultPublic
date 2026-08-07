@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
+import mastervault.change_control.models as change_control_models
 from mastervault.change_control import (
     ClaimRevisionRegistry,
     ClaimSourceReference,
@@ -35,6 +36,7 @@ from mastervault.change_control import (
     resolve_document_temporality,
     stable_content_id,
 )
+from mastervault.change_control.models import TemporalResolutionContext
 from mastervault.document_intelligence.models import EvidenceRef
 
 SHA_A = "a" * 64
@@ -1053,6 +1055,180 @@ def test_resolver_revalidates_model_copy_bypass_and_exact_target_binding():
     )
     with pytest.raises(ValueError, match="binding differs"):
         resolve_claim_temporality(forged_old, validated, as_of=date(2026, 1, 12))
+
+
+def test_batch_temporal_context_matches_single_target_resolvers_for_all_states():
+    old, new = _versions()
+    relation = _assessment(ComparableClaimPair.create(old, new), PairDisposition.SUPERSEDES)
+    constraint = TemporalConstraint.from_supersession(
+        relation,
+        status=TemporalConstraintStatus.ACCEPTED,
+        rationale="Review accepts the exact claim supersession boundary.",
+    )
+    historical_constraints = _validated(
+        constraints=(constraint,),
+        relations=(relation,),
+    )
+    empty = _validated()
+    expiring_document = _document(
+        document_id="returns-expiring",
+        family="customer-support.expiring-policy",
+        version="v1",
+        declared_from=date(2024, 1, 1),
+        declared_to=date(2025, 1, 15),
+    )
+    expiring = _revision(
+        expiring_document,
+        claim_id="returns-expiring-01",
+        statement="This temporary returns rule expires on its declared boundary.",
+        declared_to=date(2025, 1, 15),
+    )
+
+    newest_document = _document(
+        document_id="returns-v3",
+        version="v3",
+        declared_from=date(2026, 2, 1),
+        sha=SHA_D,
+    )
+    newest = _revision(
+        newest_document,
+        claim_id="returns-v3-01",
+        statement="Customers may return an item within 60 days of delivery.",
+    )
+    second_relation = _assessment(
+        ComparableClaimPair.create(old, newest),
+        PairDisposition.SUPERSEDES,
+    )
+    second_constraint = TemporalConstraint.from_supersession(
+        second_relation,
+        status=TemporalConstraintStatus.ACCEPTED,
+        rationale="Review accepts another exact claim supersession boundary.",
+    )
+    unresolved_constraints = _validated(
+        constraints=(constraint, second_constraint),
+        relations=(relation, second_relation),
+    )
+
+    claim_cases = (
+        (new, empty, date(2026, 1, 20), TemporalState.CURRENT),
+        (newest, empty, date(2026, 1, 20), TemporalState.FUTURE),
+        (expiring, empty, date(2025, 1, 15), TemporalState.EXPIRED),
+        (old, historical_constraints, date(2026, 1, 20), TemporalState.HISTORICAL),
+        (old, unresolved_constraints, date(2026, 1, 20), TemporalState.UNRESOLVED),
+    )
+    for revision, validated, as_of, expected_state in claim_cases:
+        context = TemporalResolutionContext(validated, as_of=as_of)
+        batch = context.resolve_claim(revision)
+        assert batch == resolve_claim_temporality(revision, validated, as_of=as_of)
+        assert batch.state == expected_state
+        assert context.resolve_claim(revision) is batch
+        assert context.resolved_claim_count == 1
+
+    document_cases = (
+        (new.document, empty, date(2026, 1, 20), TemporalState.CURRENT),
+        (newest.document, empty, date(2026, 1, 20), TemporalState.FUTURE),
+        (expiring.document, empty, date(2025, 1, 15), TemporalState.EXPIRED),
+    )
+    for document, validated, as_of, expected_state in document_cases:
+        context = TemporalResolutionContext(validated, as_of=as_of)
+        batch = context.resolve_document(document)
+        assert batch == resolve_document_temporality(document, validated, as_of=as_of)
+        assert batch.state == expected_state
+        assert context.resolve_document(document) is batch
+        assert context.resolved_document_count == 1
+
+
+def test_batch_temporal_cache_keys_bind_complete_typed_target_payloads():
+    old, new = _versions()
+    relation = _assessment(ComparableClaimPair.create(old, new), PairDisposition.SUPERSEDES)
+    constraint = TemporalConstraint.from_supersession(
+        relation,
+        status=TemporalConstraintStatus.ACCEPTED,
+        rationale="Review accepts the exact claim supersession boundary.",
+    )
+    validated = _validated(constraints=(constraint,), relations=(relation,))
+    context = TemporalResolutionContext(validated, as_of=date(2026, 1, 12))
+    context.resolve_claim(old)
+
+    forged_old = old.model_copy(
+        update={"source": old.source.model_copy(update={"source_note_sha256": SHA_D})}
+    )
+    with pytest.raises(ValueError, match="binding differs"):
+        context.resolve_claim(forged_old)
+    with pytest.raises(ValueError, match="binding differs"):
+        resolve_claim_temporality(forged_old, validated, as_of=date(2026, 1, 12))
+    assert context.resolved_claim_count == 1
+
+    replacement = _replacement(old.document, new.document)
+    document_constraint = TemporalConstraint.from_document_replacement(
+        replacement,
+        status=TemporalConstraintStatus.ACCEPTED,
+        rationale="Review accepts the exact document replacement boundary.",
+    )
+    document_validated = _validated(
+        constraints=(document_constraint,),
+        replacements=(replacement,),
+    )
+    document_context = TemporalResolutionContext(
+        document_validated,
+        as_of=date(2026, 1, 12),
+    )
+    document_context.resolve_document(old.document)
+    forged_document = old.document.model_copy(update={"source_sha256": SHA_D})
+    with pytest.raises(ValueError, match="binding differs"):
+        document_context.resolve_document(forged_document)
+    with pytest.raises(ValueError, match="binding differs"):
+        resolve_document_temporality(
+            forged_document,
+            document_validated,
+            as_of=date(2026, 1, 12),
+        )
+    assert document_context.resolved_document_count == 1
+
+
+def test_irrelevant_constraints_are_indexed_once_and_exact_target_cache_hits(monkeypatch):
+    old, _ = _versions()
+    irrelevant = tuple(
+        _constraint(
+            target=TemporalTarget(
+                kind=TemporalTargetKind.DOCUMENT_VERSION,
+                target_id=f"docv:{index + 1:064x}",
+            ),
+            bound=date(2026, 1, 12),
+            basis_relation_id=f"rel:{index + 1:064x}",
+            status=TemporalConstraintStatus.PROPOSED,
+        )
+        for index in range(64)
+    )
+    validated = _validated(constraints=irrelevant)
+    revalidations = 0
+    resolutions = 0
+    original_revalidate = change_control_models._revalidate_temporal_constraints
+    original_resolve = change_control_models._resolve_temporality
+
+    def counted_revalidate(constraints):
+        nonlocal revalidations
+        revalidations += 1
+        return original_revalidate(constraints)
+
+    def counted_resolve(**kwargs):
+        nonlocal resolutions
+        resolutions += 1
+        return original_resolve(**kwargs)
+
+    monkeypatch.setattr(
+        change_control_models,
+        "_revalidate_temporal_constraints",
+        counted_revalidate,
+    )
+    monkeypatch.setattr(change_control_models, "_resolve_temporality", counted_resolve)
+    context = TemporalResolutionContext(validated, as_of=date(2026, 1, 12))
+    first = context.resolve_document(old.document)
+    for _ in range(8):
+        assert context.resolve_document(old.document) is first
+    assert revalidations == 1
+    assert resolutions == 1
+    assert context.resolved_document_count == 1
 
 
 def test_two_real_supersession_relations_can_surface_conflicting_bounds():

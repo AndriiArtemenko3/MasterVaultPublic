@@ -1,5 +1,15 @@
 """Temporal change-control contracts and evaluator-isolated seed services."""
 
+from mastervault.change_control.discovery import (
+    DiscoveryLimitError,
+    DocumentAttentionCandidate,
+    DocumentAttentionRanking,
+    RelationshipCandidate,
+    RelationshipCandidateSet,
+    generate_relationship_candidates,
+    rank_document_attention,
+    validate_document_attention_ranking,
+)
 from mastervault.change_control.models import (
     ChangeControlAggregate,
     ClaimRevisionRegistry,
@@ -123,6 +133,7 @@ __all__ = [
     "DependencyAssessment",
     "DependencyKind",
     "DependencyRegistry",
+    "DiscoveryLimitError",
     "DocumentAuthority",
     "DocumentReplacementAssessment",
     "DocumentReplacementSet",
@@ -130,6 +141,8 @@ __all__ = [
     "DocumentSpanReference",
     "DocumentVersionMetadata",
     "DocumentVersionRegistry",
+    "DocumentAttentionCandidate",
+    "DocumentAttentionRanking",
     "HumanReviewDecision",
     "HumanReviewDecisionCommand",
     "HumanReviewDecisionReceipt",
@@ -144,6 +157,8 @@ __all__ = [
     "PrechangeSeedManifest",
     "RelationAssessment",
     "RelationGraph",
+    "RelationshipCandidate",
+    "RelationshipCandidateSet",
     "ReviewDecisionItem",
     "ReviewDisposition",
     "ReviewLifecycle",
@@ -179,6 +194,7 @@ __all__ = [
     "aggregate_sha256",
     "apply_human_review_decision",
     "canonical_json_bytes",
+    "generate_relationship_candidates",
     "load_prechange_seed_manifest",
     "load_verified_prechange_seed_manifest",
     "human_review_decision_payload_sha256",
@@ -192,8 +208,10 @@ __all__ = [
     "resolve_claim_revision",
     "resolve_document_span",
     "resolve_document_temporality",
+    "rank_document_attention",
     "review_subject_sha256",
     "stable_content_id",
     "temporal_review_workflow_id",
+    "validate_document_attention_ranking",
     "verify_seed_document_context",
 ]
