@@ -6,10 +6,11 @@ The long-form design documents and architecture decision records behind the root
 
 | File | Responsibility |
 |---|---|
-| `ARCHITECTURE.md` | The internals a quickstart user never sees. Covers the three-layer data model (Markdown sources → wiki/decisions → derived index), the four-channel `hybrid_search` and its RRF fusion, the agentic `mvault ask` loop with its sufficiency judge and citation gate, the file-backed `ReviewQueue` and its three routing tiers, the shared `StorageBackend` protocol over SQLite/Postgres, the two content-hash idempotency gates plus the embeddings sidecar, and the embedding/LLM/reranker provider seams with their keyless mock defaults. |
+| `ARCHITECTURE.md` | The internals a quickstart user never sees. Covers the three-layer data model (Markdown sources → wiki/decisions → derived index), the four legacy `hybrid_search` channels plus additive structural FTS and their RRF fusion, the agentic `mvault ask` loop with its sufficiency judge and citation gate, the file-backed `ReviewQueue` and its three routing tiers, the legacy `StorageBackend` protocol plus official SQLite/Postgres structural capability, the two content-hash idempotency gates plus the embeddings sidecar, and the embedding/LLM/reranker provider seams with their keyless mock defaults. |
 | `DATASET.md` | How Larkstead Goods Co. was made and validated. Documents the `company.yaml` bible as single source of truth, the dated-policy-history mechanism that generates contradictions, the five interlocking storylines versus the four semantic-lint-confirmed contradictions that actually shipped, the mechanical checker's ten checks, the four rubric-judge passes, the `banned_strings` trademark denylist, and how the processed layer was reproduced from four `mvault ingest` runs plus hand curation. |
 | `decisions/0001-page-grounded-pdf-substrate.md` | Why the first v0.3 slice establishes immutable byte identity and exact page/block evidence with a deliberately coarse `pypdf` baseline. |
 | `decisions/0002-optional-docling-schema-v2.md` | The measured optional Docling dependency/artifact contract, fixed offline profile, MasterVault-owned schema-v2 and Markdown, structural evidence, compatibility boundary, and explicit deferrals. |
+| `decisions/0003-grounded-structural-retrieval.md` | Cryptographically owner/parse-bound schema-v2 structural records, row-span-aware table evidence, atomic projection replacement, exact hydrated citations, legacy compatibility, and bounded limitations. |
 
 ## How it fits
 
@@ -18,7 +19,7 @@ These two files are the prose companions to the root [../README.md](../README.md
 ## Key concepts / entry points
 
 - **Three-layer data model** — Markdown files are the only canonical store; Postgres/SQLite is a rebuildable derived index. `ARCHITECTURE.md:8`
-- **Retrieval path** — four channels (alias front-door, lexical, vector kNN, wiki graph) fused with Reciprocal Rank Fusion at `k=60`, then the agentic `ask` loop with sufficiency judge and citation gate. `ARCHITECTURE.md:68`
+- **Retrieval path** — four legacy channels plus additive schema-v2 structural FTS, fused with Reciprocal Rank Fusion at `k=60`, then the ask loop with citation gating. `ARCHITECTURE.md`
 - **Review-queue lifecycle** — three tiers, `pattern_key` batching, and the `base_hash` conflict check that marks a stale proposal instead of overwriting. `ARCHITECTURE.md:112`
 - **Idempotency and the embeddings sidecar** — document-level and record-level content-hash gates; how `mvault demo load` imports precomputed vectors in ~9s without trusting a stale one. `ARCHITECTURE.md:152`
 - **Provider seams** — embedding/LLM/reranker `Protocol` seams, each with a keyless `mock`, resolved once per process from `Settings`. `ARCHITECTURE.md:180`

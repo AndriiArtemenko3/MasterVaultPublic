@@ -19,7 +19,7 @@ from mastervault.storage import get_backend
 
 query_app = typer.Typer(help="Query the index.")
 
-_RECORD_TYPES = ("claim", "chunk", "wiki", "all")
+_RECORD_TYPES = ("claim", "chunk", "wiki", "structural", "all")
 _CONFIDENCES = ("low", "medium", "high")
 _CLAIMS_FETCH_K = 50
 
@@ -39,12 +39,12 @@ def search(
     domain: str | None = typer.Option(None, "--domain", help="Restrict to one domain."),
     k: int | None = typer.Option(None, "--k", help="Number of hits (default: retrieval.k)."),
     record_type: str = typer.Option(
-        "all", "--type", help="Filter hits: claim | chunk | wiki | all."
+        "all", "--type", help="Filter hits: claim | chunk | wiki | structural | all."
     ),
     rerank: bool = typer.Option(False, "--rerank", help="Rerank the top pool."),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON with channel provenance."),
 ) -> None:
-    """Hybrid search across claims, chunks, and wiki entries."""
+    """Hybrid search across claims, chunks, wiki, and PDF structural records."""
     if record_type not in _RECORD_TYPES:
         typer.echo(f"error: --type must be one of {', '.join(_RECORD_TYPES)}", err=True)
         raise typer.Exit(code=2)

@@ -83,8 +83,10 @@ printf '  wheel is package-only\n'
 for MIGRATION in \
   'mastervault/storage/migrations/pg/001_init.sql' \
   'mastervault/storage/migrations/pg/002_migration_ledger.sql' \
+  'mastervault/storage/migrations/pg/003_structural_records.sql' \
   'mastervault/storage/migrations/sqlite/001_init.sql' \
-  'mastervault/storage/migrations/sqlite/002_migration_ledger.sql'
+  'mastervault/storage/migrations/sqlite/002_migration_ledger.sql' \
+  'mastervault/storage/migrations/sqlite/003_structural_records.sql'
 do
   grep -q "$MIGRATION" "$WORK/wheel.txt" \
     || fail "wheel is missing an ordered schema migration ($MIGRATION)"

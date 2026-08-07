@@ -16,7 +16,8 @@ import hashlib
 import json
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ from mastervault.storage.base import (
     HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
+    StructuralRecordRow,
     ensure_indexable_vector,
     normalized_vector,
     overfetch_limit,
@@ -84,6 +86,7 @@ def _placeholders(n: int) -> str:
 
 
 _ALL_TABLES = (
+    "structural_records",
     "claim_affects",
     "claims",
     "chunks",
@@ -93,6 +96,7 @@ _ALL_TABLES = (
     "vec_records",
     "claims_fts",
     "documents_fts",
+    "structural_records_fts",
 )
 
 
@@ -273,6 +277,15 @@ class SqliteBackend:
 
     # -- documents ------------------------------------------------------------
 
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        """Join an explicit caller transaction, otherwise own one."""
+        if self.conn.in_transaction:
+            yield
+            return
+        with self.conn:
+            yield
+
     def upsert_document(
         self,
         doc: DocumentRow,
@@ -280,7 +293,7 @@ class SqliteBackend:
         chunks: list[ChunkRow],
         aliases: list[AliasRow],
     ) -> None:
-        with self.conn:
+        with self._transaction():
             old_claim_ids = [
                 r["claim_id"]
                 for r in self.conn.execute(
@@ -371,6 +384,24 @@ class SqliteBackend:
                 (doc.doc_id, doc.title, doc.body),
             )
 
+    def upsert_document_with_structural(
+        self,
+        doc: DocumentRow,
+        claims: list[ClaimRow],
+        chunks: list[ChunkRow],
+        aliases: list[AliasRow],
+        structural: list[StructuralRecordRow],
+    ) -> None:
+        """Atomically replace a changed document and its structural projection."""
+        if any(row.doc_id != doc.doc_id for row in structural):
+            raise StorageError("structural record belongs to another document")
+        if self.conn.in_transaction:
+            raise StorageError("cannot start atomic document upsert inside a transaction")
+        with self.conn:
+            self.conn.execute("BEGIN IMMEDIATE")
+            self.upsert_document(doc, claims, chunks, aliases)
+            self.replace_structural_records(doc.doc_id, structural)
+
     def _drop_orphan_record_vectors(
         self, doc: DocumentRow, claims: list[ClaimRow], chunks: list[ChunkRow]
     ) -> None:
@@ -408,7 +439,7 @@ class SqliteBackend:
             )
 
     def delete_documents_not_in(self, rel_paths: set[str]) -> list[str]:
-        with self.conn:
+        with self._transaction():
             if rel_paths:
                 paths = sorted(rel_paths)
                 doc_ids = [
@@ -436,8 +467,21 @@ class SqliteBackend:
                     f"SELECT record_id FROM embeddings WHERE doc_id IN ({ph})", doc_ids
                 )
             ]
+            structural_ids = [
+                r["record_id"]
+                for r in self.conn.execute(
+                    f"SELECT record_id FROM structural_records WHERE doc_id IN ({ph})",
+                    doc_ids,
+                )
+            ]
             self._delete_claims_fts(claim_ids)
             self.conn.execute(f"DELETE FROM documents_fts WHERE doc_id IN ({ph})", doc_ids)
+            if structural_ids:
+                self.conn.execute(
+                    "DELETE FROM structural_records_fts WHERE record_id IN "
+                    f"({_placeholders(len(structural_ids))})",
+                    structural_ids,
+                )
             if emb_ids:
                 self.conn.execute(
                     f"DELETE FROM vec_records WHERE record_id IN ({_placeholders(len(emb_ids))})",
@@ -570,6 +614,112 @@ class SqliteBackend:
         params.append(k)
         return [r["doc_id"] for r in self.conn.execute(sql, params)]
 
+    def replace_structural_records(
+        self, doc_id: str, rows: list[StructuralRecordRow]
+    ) -> None:
+        """Transactionally replace one document's derived structural records."""
+        if any(row.doc_id != doc_id for row in rows):
+            raise StorageError("structural record belongs to another document")
+        with self._transaction():
+            old_ids = [
+                row["record_id"]
+                for row in self.conn.execute(
+                    "SELECT record_id FROM structural_records WHERE doc_id = ?", (doc_id,)
+                )
+            ]
+            if old_ids:
+                self.conn.execute(
+                    f"DELETE FROM structural_records_fts WHERE record_id IN ({_placeholders(len(old_ids))})",
+                    old_ids,
+                )
+            self.conn.execute("DELETE FROM structural_records WHERE doc_id = ?", (doc_id,))
+            if not rows:
+                return
+            self.conn.executemany(
+                """INSERT INTO structural_records
+                (record_id, doc_id, ordinal, record_kind, text, asset_sha256,
+                 parsed_artifact_sha256, parser,
+                 parser_version, parser_core_version, parser_profile, normalization_profile,
+                 model_identity, resource_limits, page_number, block_id,
+                 section_id, table_id, row_id,
+                 cell_ids, evidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (
+                        row.record_id, row.doc_id, row.ordinal, row.record_kind, row.text,
+                        row.asset_sha256, row.parsed_artifact_sha256,
+                        row.parser, row.parser_version,
+                        row.parser_core_version, row.parser_profile,
+                        row.normalization_profile, row.model_identity,
+                        json.dumps(row.resource_limits), row.page_number,
+                        row.block_id, row.section_id, row.table_id, row.row_id,
+                        json.dumps(row.cell_ids),
+                        json.dumps([
+                            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+                            for item in row.evidence
+                        ]),
+                    )
+                    for row in rows
+                ],
+            )
+            self.conn.executemany(
+                "INSERT INTO structural_records_fts (record_id, text) VALUES (?, ?)",
+                [(row.record_id, row.text) for row in rows],
+            )
+
+    def lexical_structural(
+        self, query: str, k: int, domain: str | None = None
+    ) -> list[str]:
+        match = fts_match_expr(query)
+        if match is None:
+            return []
+        sql = (
+            "SELECT f.record_id FROM structural_records_fts f"
+            " JOIN structural_records s ON s.record_id = f.record_id"
+            " JOIN documents d ON d.doc_id = s.doc_id"
+            " WHERE structural_records_fts MATCH ?"
+        )
+        params: list[Any] = [match]
+        if domain is not None:
+            sql += " AND d.domain = ?"
+            params.append(domain)
+        sql += " ORDER BY bm25(structural_records_fts), f.record_id LIMIT ?"
+        params.append(k)
+        return [row["record_id"] for row in self.conn.execute(sql, params)]
+
+    def get_structural_records(self, record_ids: list[str]) -> list[StructuralRecordRow]:
+        if not record_ids:
+            return []
+        from mastervault.document_intelligence.models import StructuralEvidenceRef
+
+        rows = self.conn.execute(
+            "SELECT s.*, d.rel_path, d.domain FROM structural_records s"
+            " JOIN documents d ON d.doc_id = s.doc_id"
+            f" WHERE s.record_id IN ({_placeholders(len(record_ids))})",
+            record_ids,
+        ).fetchall()
+        by_id = {
+            row["record_id"]: StructuralRecordRow(
+                record_id=row["record_id"], doc_id=row["doc_id"], ordinal=row["ordinal"],
+                record_kind=row["record_kind"], text=row["text"],
+                asset_sha256=row["asset_sha256"], parser=row["parser"],
+                parsed_artifact_sha256=row["parsed_artifact_sha256"],
+                parser_version=row["parser_version"],
+                parser_core_version=row["parser_core_version"],
+                parser_profile=row["parser_profile"],
+                normalization_profile=row["normalization_profile"],
+                model_identity=row["model_identity"], page_number=row["page_number"],
+                resource_limits=json.loads(row["resource_limits"]),
+                block_id=row["block_id"], section_id=row["section_id"],
+                table_id=row["table_id"], row_id=row["row_id"],
+                cell_ids=json.loads(row["cell_ids"]),
+                evidence=[StructuralEvidenceRef.model_validate(item) for item in json.loads(row["evidence"])],
+                rel_path=row["rel_path"], domain=row["domain"],
+            )
+            for row in rows
+        }
+        return [by_id[record_id] for record_id in record_ids if record_id in by_id]
+
     # -- graph / hydration --------------------------------------------------------
 
     def claims_for_wiki(self, wiki_slugs: list[str], k: int) -> list[str]:
@@ -689,6 +839,7 @@ class SqliteBackend:
                 "wiki_aliases",
                 "chunks",
                 "embeddings",
+                "structural_records",
             )
         }
         return {

@@ -734,17 +734,17 @@
   ],
   "baseline_schema_version": 2,
   "baseline_kind": "ask",
-  "generated": "2026-08-06T16:57:27+00:00",
+  "generated": "2026-08-07T13:48:09+00:00",
   "uncovered_classes": [],
   "reproducibility": {
     "schema_version": 2,
     "evaluation": "ask",
     "source": {
-      "git_sha": "fd2dfe56bffbca2c1c3ca97218004696404839de",
+      "git_sha": "3a9024881d0577697d2138bbf474923780c26bfe",
       "git_dirty": true,
       "tree": {
-        "sha256": "0e91250a4e881094facfdb2e13b63a19080a59b8ad9dcaa0ddf98123619b05cd",
-        "file_count": 116
+        "sha256": "a07a960d5fb630dbf37b66b029af16391de60171050afe35c058ff8e95865413",
+        "file_count": 122
       },
       "package_version": "0.2.0"
     },
@@ -790,7 +790,7 @@
         "storage": {
           "configured_backend": "auto",
           "effective_backend": "sqlite",
-          "schema_version": 2
+          "schema_version": 3
         },
         "embedding": {
           "provider": "local",
@@ -868,10 +868,10 @@
       ]
     },
     "storage_schema": {
-      "version": 2,
+      "version": 3,
       "migrations": {
-        "sha256": "b8f3747268f7b95cf17b2f1ede24bf5cada9ec893f5227d1be52b94fb16533ab",
-        "file_count": 4,
+        "sha256": "1c964fe0dc2dc909ff1534d4a6b51df4c9737567d593cabf3f58efb15343e8a8",
+        "file_count": 6,
         "files": [
           {
             "path": "src/mastervault/storage/migrations/pg/001_init.sql",
@@ -882,12 +882,20 @@
             "sha256": "a08310c54f6bf86f9b4ec875e5dd99c49d627d0d621cd6d40e8a38081b3c3914"
           },
           {
+            "path": "src/mastervault/storage/migrations/pg/003_structural_records.sql",
+            "sha256": "21fb86731e7a85bfdc7d619f33cfa6b6c8c4ce6b6503e6fba7aa70f8ea4feb1b"
+          },
+          {
             "path": "src/mastervault/storage/migrations/sqlite/001_init.sql",
             "sha256": "eb5ed35311e82c726f034f3a679c7781ecf927d76f17c5499d30ec1e153aa08a"
           },
           {
             "path": "src/mastervault/storage/migrations/sqlite/002_migration_ledger.sql",
             "sha256": "c5df585e0bf78bf20ff1c4c12303eac5657a622175d37d8f3caa2aa48f84b076"
+          },
+          {
+            "path": "src/mastervault/storage/migrations/sqlite/003_structural_records.sql",
+            "sha256": "9705aeb1be953ac8a4f16a963e1c8843f9eb3ed29e9de47f4f28ca5c1c4ec1ce"
           }
         ]
       }

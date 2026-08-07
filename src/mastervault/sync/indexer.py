@@ -22,6 +22,12 @@ from typing import NamedTuple
 
 from pydantic import ValidationError
 
+from mastervault.document_intelligence import (
+    ParsedDocumentV2,
+    load_parsed_document,
+    structural_records,
+    verify_source_asset,
+)
 from mastervault.models import NoteType, RecordType, SourceNote, WikiEntry, content_hash
 from mastervault.providers import EmbeddingProvider
 from mastervault.storage.base import (
@@ -31,6 +37,7 @@ from mastervault.storage.base import (
     DocumentRow,
     EmbeddingRow,
     StorageBackend,
+    StructuralRecordRow,
 )
 from mastervault.vaultfs.frontmatter import FrontmatterError
 from mastervault.vaultfs.notes import LoadedNote, read_note
@@ -80,6 +87,7 @@ class _Prepared:
     chunks: list[ChunkRow]
     aliases: list[AliasRow]
     units: list[_Unit]
+    structural: list[StructuralRecordRow] = field(default_factory=list)
 
 
 @dataclass
@@ -96,7 +104,7 @@ class SyncReport:
     prepared_paths: set[str] = field(default_factory=set)
 
 
-def _prepare(note: NoteRef, loaded: LoadedNote) -> _Prepared:
+def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared:
     model, body = loaded
     doc_id = doc_id_for(note)
     domain = note.domain.value
@@ -179,11 +187,34 @@ def _prepare(note: NoteRef, loaded: LoadedNote) -> _Prepared:
         )
         for row in chunks
     )
-    return _Prepared(doc=doc, claims=claims, chunks=chunks, aliases=aliases, units=units)
+    structural: list[StructuralRecordRow] = []
+    if (
+        isinstance(model, SourceNote)
+        and model.parsed_document is not None
+        and model.parsed_document.document_schema_version == 2
+    ):
+        if model.source_asset is None:
+            raise ValueError("parsed PDF source is missing its immutable asset reference")
+        verify_source_asset(model.source_asset, workspace)
+        parsed = load_parsed_document(model.parsed_document, workspace)
+        if isinstance(parsed, ParsedDocumentV2):
+            structural = structural_records(
+                parsed,
+                doc_id=doc_id,
+                domain=domain,
+                parsed_artifact_sha256=model.parsed_document.artifact_sha256,
+            )
+    return _Prepared(
+        doc=doc, claims=claims, chunks=chunks, aliases=aliases, units=units,
+        structural=structural,
+    )
 
 
 def prepare_vault(
-    vault_dir: Path | str, *, progress: Progress | None = None
+    vault_dir: Path | str,
+    *,
+    progress: Progress | None = None,
+    workspace: Path | str | None = None,
 ) -> tuple[list[_Prepared], list[SkippedFile]]:
     """Walk + prepare every indexable note, without touching backend or embedder.
 
@@ -197,6 +228,8 @@ def prepare_vault(
         if progress is not None:
             progress(message)
 
+    vault_dir = Path(vault_dir)
+    resolved_workspace = Path(workspace) if workspace is not None else vault_dir.parent
     walk = walk_vault(vault_dir)
     skipped = list(walk.skipped)
     emit(f"walked {len(walk.notes)} notes ({len(walk.skipped)} skipped)")
@@ -208,7 +241,7 @@ def prepare_vault(
         except (FrontmatterError, ValidationError) as exc:
             skipped.append(SkippedFile(note.rel_path, f"invalid note: {exc}"))
             continue
-        prepared.append(_prepare(note, loaded))
+        prepared.append(_prepare(note, loaded, workspace=resolved_workspace))
     return prepared, skipped
 
 
@@ -268,14 +301,35 @@ def sync_vault(
     changed = [
         p for p in prepared if full or stored_hashes.get(p.doc.doc_id) != p.doc.content_hash
     ]
+    atomic_structural_upsert = getattr(backend, "upsert_document_with_structural", None)
+    replace_structural = getattr(backend, "replace_structural_records", None)
     for p in changed:
-        backend.upsert_document(p.doc, p.claims, p.chunks, p.aliases)
+        if callable(atomic_structural_upsert):
+            atomic_structural_upsert(
+                p.doc, p.claims, p.chunks, p.aliases, p.structural
+            )
+        else:
+            # Legacy duck-typed backends retain their original four-argument
+            # write path. A partial structural capability is best-effort only;
+            # official backends use the atomic method above.
+            backend.upsert_document(p.doc, p.claims, p.chunks, p.aliases)
+            if callable(replace_structural):
+                replace_structural(p.doc.doc_id, p.structural)
     report.docs_upserted = len(changed)
     emit(f"upserted {report.docs_upserted} documents")
 
     present = {p.doc.rel_path for p in prepared}
     report.docs_deleted = len(backend.delete_documents_not_in(present))
     emit(f"deleted {report.docs_deleted} documents")
+
+    # Structural records are cheap deterministic derivatives of immutable v2
+    # artefacts. Replace them on every sync so schema upgrades and interrupted
+    # runs converge without changing legacy record/embedding identities.
+    changed_ids = {p.doc.doc_id for p in changed}
+    if callable(replace_structural):
+        for p in prepared:
+            if p.doc.doc_id not in changed_ids:
+                replace_structural(p.doc.doc_id, p.structural)
 
     if not embed:
         emit("embedding pass skipped (embed=False)")

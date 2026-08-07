@@ -37,6 +37,7 @@ from mastervault.storage.base import (
     HydratedClaimRow,
     SchemaMismatchError,
     StorageError,
+    StructuralRecordRow,
     ensure_indexable_vector,
     overfetch_limit,
     validate_schema_meta,
@@ -61,6 +62,7 @@ _INDEX_TABLES = (
     "wiki_aliases",
     "chunks",
     "embeddings",
+    "structural_records",
 )
 
 
@@ -321,6 +323,23 @@ class PostgresBackend:
                     [(a.alias, a.wiki_slug, a.domain, doc.doc_id) for a in aliases],
                 )
 
+    def upsert_document_with_structural(
+        self,
+        doc: DocumentRow,
+        claims: list[ClaimRow],
+        chunks: list[ChunkRow],
+        aliases: list[AliasRow],
+        structural: list[StructuralRecordRow],
+    ) -> None:
+        """Atomically replace a changed document and its structural projection."""
+        if any(row.doc_id != doc.doc_id for row in structural):
+            raise StorageError("structural record belongs to another document")
+        with self.conn.transaction():
+            # The existing write methods join through psycopg savepoints; their
+            # work remains provisional until this outer transaction commits.
+            self.upsert_document(doc, claims, chunks, aliases)
+            self.replace_structural_records(doc.doc_id, structural)
+
     def delete_documents_not_in(self, rel_paths: set[str]) -> list[str]:
         with self.conn.transaction():
             if rel_paths:
@@ -441,6 +460,91 @@ class PostgresBackend:
         sql += " ORDER BY ts_rank_cd(d.search_tsv, q) DESC, d.doc_id LIMIT %(k)s"
         return [r[0] for r in self.conn.execute(sql, params).fetchall()]
 
+    def replace_structural_records(
+        self, doc_id: str, rows: list[StructuralRecordRow]
+    ) -> None:
+        if any(row.doc_id != doc_id for row in rows):
+            raise StorageError("structural record belongs to another document")
+        with self.conn.transaction(), self.conn.cursor() as cur:
+            cur.execute("DELETE FROM structural_records WHERE doc_id = %s", (doc_id,))
+            if rows:
+                cur.executemany(
+                    """INSERT INTO structural_records
+                    (record_id, doc_id, ordinal, record_kind, text, asset_sha256,
+                     parsed_artifact_sha256, parser,
+                     parser_version, parser_core_version, parser_profile,
+                     normalization_profile, model_identity, resource_limits,
+                     page_number, block_id,
+                     section_id, table_id, row_id, cell_ids, evidence)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [
+                        (
+                            row.record_id, row.doc_id, row.ordinal, row.record_kind,
+                            row.text, row.asset_sha256, row.parsed_artifact_sha256,
+                            row.parser, row.parser_version,
+                            row.parser_core_version, row.parser_profile,
+                            row.normalization_profile, row.model_identity,
+                            Jsonb(row.resource_limits), row.page_number, row.block_id, row.section_id,
+                            row.table_id, row.row_id, Jsonb(row.cell_ids),
+                            Jsonb([
+                                item.model_dump(mode="json")
+                                if hasattr(item, "model_dump") else item
+                                for item in row.evidence
+                            ]),
+                        )
+                        for row in rows
+                    ],
+                )
+
+    def lexical_structural(
+        self, query: str, k: int, domain: str | None = None
+    ) -> list[str]:
+        sql = (
+            "SELECT s.record_id FROM structural_records s"
+            " JOIN documents d ON d.doc_id = s.doc_id,"
+            " websearch_to_tsquery('english', %(q)s) AS q"
+            " WHERE s.search_tsv @@ q"
+        )
+        params: dict[str, Any] = {"q": query, "k": k}
+        if domain is not None:
+            sql += " AND d.domain = %(domain)s"
+            params["domain"] = domain
+        sql += " ORDER BY ts_rank_cd(s.search_tsv, q) DESC, s.record_id LIMIT %(k)s"
+        return [row[0] for row in self.conn.execute(sql, params).fetchall()]
+
+    def get_structural_records(self, record_ids: list[str]) -> list[StructuralRecordRow]:
+        if not record_ids:
+            return []
+        from mastervault.document_intelligence.models import StructuralEvidenceRef
+
+        rows = self.conn.execute(
+            "SELECT s.record_id, s.doc_id, s.ordinal, s.record_kind, s.text,"
+            " s.asset_sha256, s.parsed_artifact_sha256, s.parser,"
+            " s.parser_version, s.parser_core_version,"
+            " s.parser_profile, s.normalization_profile, s.model_identity,"
+            " s.resource_limits, s.page_number, s.block_id, s.section_id, s.table_id, s.row_id,"
+            " s.cell_ids, s.evidence, d.rel_path, d.domain"
+            " FROM structural_records s JOIN documents d ON d.doc_id = s.doc_id"
+            " WHERE s.record_id = ANY(%s)",
+            (record_ids,),
+        ).fetchall()
+        by_id = {
+            row[0]: StructuralRecordRow(
+                record_id=row[0], doc_id=row[1], ordinal=row[2], record_kind=row[3],
+                text=row[4], asset_sha256=row[5], parsed_artifact_sha256=row[6],
+                parser=row[7], parser_version=row[8], parser_core_version=row[9],
+                parser_profile=row[10], normalization_profile=row[11],
+                model_identity=row[12], resource_limits=dict(row[13]),
+                page_number=row[14], block_id=row[15], section_id=row[16],
+                table_id=row[17], row_id=row[18], cell_ids=list(row[19]),
+                evidence=[StructuralEvidenceRef.model_validate(item) for item in row[20]],
+                rel_path=row[21], domain=row[22],
+            )
+            for row in rows
+        }
+        return [by_id[record_id] for record_id in record_ids if record_id in by_id]
+
     # -- graph / hydration --------------------------------------------------------
 
     def claims_for_wiki(self, wiki_slugs: list[str], k: int) -> list[str]:
@@ -555,6 +659,7 @@ class PostgresBackend:
                 "wiki_aliases",
                 "chunks",
                 "embeddings",
+                "structural_records",
             )
         }
         return {
@@ -570,7 +675,7 @@ class PostgresBackend:
         with self.conn.transaction():
             self.conn.execute(
                 "TRUNCATE documents, claims, claim_affects, wiki_aliases, chunks,"
-                " embeddings CASCADE"
+                " embeddings, structural_records CASCADE"
             )
 
     def drop_schema(self) -> None:

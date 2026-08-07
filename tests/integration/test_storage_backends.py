@@ -26,6 +26,7 @@ from mastervault.storage.base import (
     EmbeddingRow,
     SchemaMismatchError,
     StorageError,
+    StructuralRecordRow,
 )
 
 pytestmark = pytest.mark.integration
@@ -117,6 +118,34 @@ def emb_row(
         content_hash=content_hash(text or record_id),
         model_version=model,
         vector=vector,
+    )
+
+
+def structural_row(
+    record_id: str, doc_id: str, ordinal: int, *, text: str = "Structural evidence"
+) -> StructuralRecordRow:
+    return StructuralRecordRow(
+        record_id=record_id,
+        doc_id=doc_id,
+        ordinal=ordinal,
+        record_kind="block",
+        text=text,
+        asset_sha256="a" * 64,
+        parsed_artifact_sha256="b" * 64,
+        parser="docling",
+        parser_version="2.118.0",
+        parser_core_version="2.91.0",
+        parser_profile="clean-digital-layout-table-v2",
+        normalization_profile="mv-clean-digital-v2",
+        model_identity="sha256:" + "c" * 64,
+        resource_limits={
+            "timeout_seconds": 120.0,
+            "max_source_bytes": 52_428_800,
+            "max_pages": 200,
+        },
+        page_number=1,
+        block_id="block-0001",
+        domain="operations",
     )
 
 
@@ -269,7 +298,7 @@ def test_current_schema_refuses_tampered_migration_history_without_repair(
         backend.init_schema(dim, model_version)
     assert backend._read_meta() == before_meta
     assert backend.conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == (
-        3 if tamper == "extra" else 2
+        4 if tamper == "extra" else 3
     )
 
 
@@ -299,7 +328,46 @@ def test_upgrade_from_schema_v1_preserves_rows_and_records_ordered_migrations(
     rows = backend.conn.execute(
         "SELECT version, name FROM schema_migrations ORDER BY version"
     ).fetchall()
-    assert [int(row[0]) for row in rows] == [1, 2]
+    assert [int(row[0]) for row in rows] == [1, 2, 3]
+
+
+def test_upgrade_from_schema_v2_to_v3_preserves_rows_and_is_idempotent(
+    backend, dim, model_version
+):
+    doc, claims, _chunks = seed_zebra_doc(backend)
+    if backend.name == "sqlite":
+        with backend.conn:
+            backend.conn.execute("DROP TABLE structural_records_fts")
+            backend.conn.execute("DROP TABLE structural_records")
+            backend.conn.execute("DELETE FROM schema_migrations WHERE version = 3")
+            backend.conn.execute(
+                "UPDATE meta SET value = ? WHERE key = ?",
+                (json.dumps(2), META_KEY_SCHEMA),
+            )
+    else:
+        with backend.conn.transaction():
+            backend.conn.execute("DROP TABLE structural_records")
+            backend.conn.execute("DELETE FROM schema_migrations WHERE version = 3")
+            backend.conn.execute(
+                "UPDATE meta SET value = %s WHERE key = %s",
+                (Jsonb(2), META_KEY_SCHEMA),
+            )
+
+    backend.init_schema(dim, model_version)
+    backend.init_schema(dim, model_version)
+
+    assert backend.stats()["schema_version"] == 3
+    assert backend.get_documents([doc.doc_id])[0].body == doc.body
+    assert [row.claim_id for row in backend.get_claims([claim.claim_id for claim in claims])] == [
+        claim.claim_id for claim in claims
+    ]
+    assert backend.conn.execute("SELECT count(*) FROM structural_records").fetchone()[0] == 0
+    assert [
+        int(row[0])
+        for row in backend.conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    ] == [1, 2, 3]
 
 
 def test_two_postgres_connections_serialize_fresh_initialization(pg_test_url, dim, model_version):
@@ -330,7 +398,7 @@ def test_two_postgres_connections_serialize_fresh_initialization(pg_test_url, di
             rows = inspector.conn.execute(
                 "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
             ).fetchall()
-            assert [int(row[0]) for row in rows] == [1, 2]
+            assert [int(row[0]) for row in rows] == [1, 2, 3]
             assert all(len(str(row[2])) == 64 for row in rows)
         finally:
             inspector.close()
@@ -756,6 +824,47 @@ def test_upsert_document_rolls_back_every_table_on_failure(backend, model_versio
     assert backend.lexical_docs("zebra migration corridor", k=5) == [doc.doc_id]
     # and the vector index still resolves
     assert [rid for rid, _ in backend.knn(basis(0), k=3)] == ["claim:zebra-note-01"]
+
+
+def test_atomic_document_and_structural_replace_rolls_back_together(backend):
+    """A failed structural replacement must also undo the document rewrite."""
+    doc, claims, chunks = seed_zebra_doc(backend)
+    original = structural_row("struct:original", doc.doc_id, 0)
+    backend.upsert_document_with_structural(doc, claims, chunks, [], [original])
+
+    rewritten = doc_row(
+        doc.doc_id,
+        doc.rel_path,
+        domain=doc.domain,
+        title="Rewritten title",
+        body="Rewritten body that must never be persisted.",
+    )
+    duplicate_ordinals = [
+        structural_row("struct:replacement-1", doc.doc_id, 1, text="Replacement one"),
+        structural_row("struct:replacement-2", doc.doc_id, 1, text="Replacement two"),
+    ]
+
+    with pytest.raises(INTEGRITY_ERRORS):
+        backend.upsert_document_with_structural(
+            rewritten,
+            [],
+            [],
+            [],
+            duplicate_ordinals,
+        )
+
+    got_doc = backend.get_documents([doc.doc_id])[0]
+    assert got_doc.title == doc.title
+    assert got_doc.body == doc.body
+    assert [
+        row.record_id
+        for row in backend.get_structural_records(
+            ["struct:original", "struct:replacement-1", "struct:replacement-2"]
+        )
+    ] == ["struct:original"]
+    assert backend.lexical_structural("Structural evidence", k=5) == [
+        "struct:original"
+    ]
 
 
 def test_upsert_embeddings_leaves_no_partial_batch_on_failure(backend, model_version):

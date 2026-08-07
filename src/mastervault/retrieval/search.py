@@ -1,14 +1,15 @@
-"""Hybrid search: alias front-door + four fused channels + optional rerank.
+"""Hybrid search: alias front-door + legacy and structural channels + optional rerank.
 
 Pipeline:
 
 1. Alias front-door — resolve the query to a wiki entry; it becomes the
    pinned `wiki_card`, excluded from the fused hit list.
-2. Channels — lexical claims (30), lexical docs (20), vector k-NN (30), and
-   the wiki graph (20) seeded by the alias hit plus wiki records in the
-   vector top-10.
-3. RRF fusion over the four ranked lists, then hydration into `Hit` models
-   with per-channel 1-based ranks.
+2. Channels — lexical claims (30), lexical docs (20), vector k-NN (30), the
+   wiki graph (20) seeded by the alias hit plus wiki records in the vector
+   top-10, and parser-neutral structural FTS (30).
+3. RRF fusion over the populated ranked lists, then hydration into `Hit`
+   models with per-channel 1-based ranks. An empty structural channel is
+   omitted so legacy fusion scores remain identical.
 4. Optional cross-encoder rerank of the top `retrieval.rerank_pool` hits,
    then trim to k.
 
@@ -29,7 +30,7 @@ from typing import TypeVar
 from pydantic import BaseModel, Field
 
 from mastervault.config import Settings
-from mastervault.evidence import evidence_by_claim
+from mastervault.evidence import evidence_by_claim, validate_structural_hits
 from mastervault.models import ChannelRank, Confidence, Domain, Hit, RecordType
 from mastervault.providers import Candidate, EmbeddingProvider, Reranker
 from mastervault.retrieval.channels import (
@@ -37,6 +38,7 @@ from mastervault.retrieval.channels import (
     graph_channel,
     lexical_claims,
     lexical_docs,
+    structural_channel,
     vector_channel,
 )
 from mastervault.retrieval.fuse import rrf_fuse
@@ -48,10 +50,11 @@ LEXICAL_DOCS_K = 20
 VECTOR_K = 30
 GRAPH_K = 20
 GRAPH_SEED_VECTOR_TOP = 10
+STRUCTURAL_K = 30
 
 _DOC_BODY_EXCERPT_CHARS = 600
 
-CHANNELS = ("lexical_claims", "lexical_docs", "vector", "graph")
+CHANNELS = ("lexical_claims", "lexical_docs", "vector", "graph", "structural")
 
 T = TypeVar("T")
 
@@ -97,7 +100,10 @@ def _hydrate(
     """Hydrate fused ids into Hit models. Ids that no longer resolve are dropped."""
     claim_ids = [i.removeprefix("claim:") for i in fused_ids if i.startswith("claim:")]
     chunk_ids = [i for i in fused_ids if i.startswith("chunk:")]
-    doc_ids = [i for i in fused_ids if not i.startswith(("claim:", "chunk:"))]
+    structural_ids = [i for i in fused_ids if i.startswith("struct:")]
+    doc_ids = [
+        i for i in fused_ids if not i.startswith(("claim:", "chunk:", "struct:"))
+    ]
 
     hits: dict[str, Hit] = {}
     hydrated_claims = backend.get_claims(claim_ids)
@@ -122,6 +128,31 @@ def _hydrate(
             text=chunk.text,
             rel_path=chunk.rel_path,
         )
+    structural_get = getattr(backend, "get_structural_records", None)
+    structural_rows = list(structural_get(structural_ids)) if callable(structural_get) else []
+    validate_structural_hits(structural_rows, backend, workspace)
+    for row in structural_rows:
+        hits[row.record_id] = Hit(
+            record_id=row.record_id,
+            record_type=RecordType.STRUCTURAL,
+            doc_id=row.doc_id,
+            domain=Domain(row.domain),
+            text=row.text,
+            rel_path=row.rel_path,
+            evidence=row.evidence,
+            structural_kind=row.record_kind,
+            source_identity={
+                "asset_sha256": row.asset_sha256,
+                "parsed_artifact_sha256": row.parsed_artifact_sha256,
+                "parser": row.parser,
+                "parser_version": row.parser_version,
+                "parser_core_version": row.parser_core_version,
+                "parser_profile": row.parser_profile,
+                "normalization_profile": row.normalization_profile,
+                "model_identity": row.model_identity,
+                "resource_limits": row.resource_limits,
+            },
+        )
     for doc_id in doc_ids:
         hit = _doc_hit(doc_id, backend)
         if hit is not None:
@@ -144,9 +175,9 @@ def hybrid_search(
     use_alias: bool = True,
 ) -> SearchResult:
     """`channels` and `use_alias` are ablation knobs for the retrieval eval
-    harness (`mastervault.evals`): `channels` restricts which of the four
-    fused lists get computed (default: all four, identical to omitting the
-    argument), and `use_alias=False` disables the alias front-door (no
+    harness (`mastervault.evals`): `channels` restricts which fused lists get
+    computed (default: all available channels), and `use_alias=False`
+    disables the alias front-door (no
     `wiki_card`, no alias-seeded graph entry). Both default to the full
     pipeline, so existing callers are unaffected.
     """
@@ -194,6 +225,11 @@ def hybrid_search(
         if "graph" in active
         else []
     )
+    structural = (
+        timed("structural", lambda: structural_channel(query, backend, STRUCTURAL_K, domain))
+        if "structural" in active
+        else []
+    )
 
     channel_lists = {
         "lexical_claims": lex_claims,
@@ -201,10 +237,17 @@ def hybrid_search(
         "vector": vec,
         "graph": graph,
     }
+    if structural:
+        channel_lists["structural"] = structural
     channel_counts = {name: len(ids) for name, ids in channel_lists.items()}
 
     start = time.perf_counter()
-    fused = rrf_fuse(list(channel_lists.values()), k=settings.retrieval.rrf_k)
+    # Preserve the exact legacy RRF input list when the additive structural
+    # channel is empty; existing indexes therefore retain byte-for-byte ranks.
+    fusion_lists = [lex_claims, lex_docs, vec, graph]
+    if structural:
+        fusion_lists.append(structural)
+    fused = rrf_fuse(fusion_lists, k=settings.retrieval.rrf_k)
     if wiki_doc_id is not None:
         fused.pop(wiki_doc_id, None)  # the wiki card is pinned, never a hit
     fused_ids = [i for i, _ in sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))]
@@ -229,6 +272,7 @@ def hybrid_search(
             lexical_docs=rank_maps["lexical_docs"].get(record_id),
             vector=rank_maps["vector"].get(record_id),
             graph=rank_maps["graph"].get(record_id),
+            structural=rank_maps.get("structural", {}).get(record_id),
         )
         hits.append(hit)
     timings["fuse_hydrate"] = round(time.perf_counter() - start, 6)
