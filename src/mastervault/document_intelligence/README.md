@@ -20,6 +20,7 @@ vendor object, vendor Markdown, download behavior, or fallback to callers.
 | `renderer.py` | MasterVault-owned deterministic Markdown; omits furniture by default, uses GFM for simple tables and an explicit grid form for spans. |
 | `store.py` | Exclusive content-addressed publication under `workspace/assets/sha256/` and deterministic schema-v1/v2 JSON under `workspace/parsed/sha256/`; verifies hashes and identities on reuse/load. |
 | `grounding.py` | Resolves a model-proposed block or cell id plus quote to authoritative structural location/offsets, then revalidates persisted evidence fail-closed. |
+| `structural_records.py` | Derives stable section, block and header-preserving table-row retrieval records from parser-neutral schema-v2 only. |
 | `__init__.py` | Public exports for the document-intelligence boundary. |
 
 ## Invariants
@@ -36,6 +37,18 @@ vendor object, vendor Markdown, download behavior, or fallback to callers.
   the referenced structure; duplicate, mixed-table and forged locations fail.
 - Schema-v2 IDs and reading order are MasterVault-owned and canonical. Bboxes
   use a normalized, six-decimal, top-left coordinate space.
+- Structural table-row text always retains table/row scope and column headers;
+  it is never indexed as a naked cell value. Hydration re-derives persisted
+  rows from the verified artifact before returning exact cell evidence.
+- Each structural record ID includes the full source-asset SHA-256, full parsed-
+  artifact SHA-256, SHA-256 of the owning `doc_id`, and its canonical section,
+  block, or table-row location. Shared bytes, reparses, and separate note owners
+  therefore cannot alias one another.
+- A table cell occupies every row satisfying
+  `cell.row_index <= row_index < cell.row_index + cell.row_span`. Its cell ID
+  is retained on each occupied row, and citable spanning text is returned as
+  evidence wherever it contributes to displayed row text. Rows with no citable
+  text are omitted instead of receiving placeholder text or empty evidence.
 - Runtime benchmark discovery exposes source identity, family split, render
   profile, raw-source hash, normalized semantic-projection hash, render/PDF
   hashes, size, and page count only. Parser-hidden layout labels and temporal
@@ -55,3 +68,7 @@ vendor object, vendor Markdown, download behavior, or fallback to callers.
   timeout, plus deterministic bookmark/style hierarchy inference. Empty,
   textless, scanned, corrupt, encrypted, oversized, timed-out and partial
   inputs fail visibly.
+
+This boundary supports clean digital PDFs and exact structural evidence; it
+does not claim production parser accuracy or a measured retrieval improvement.
+See [ADR 0003](../../../docs/decisions/0003-grounded-structural-retrieval.md).

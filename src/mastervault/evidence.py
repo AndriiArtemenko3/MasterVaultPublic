@@ -14,11 +14,17 @@ from mastervault.document_intelligence import (
     SourceAssetRef,
     StructuralEvidenceRef,
     load_parsed_document,
+    structural_records,
     validate_resolved_evidence,
     verify_source_asset,
 )
 from mastervault.models import SourceNote
-from mastervault.storage.base import DocumentRow, HydratedClaimRow, StorageBackend
+from mastervault.storage.base import (
+    DocumentRow,
+    HydratedClaimRow,
+    StorageBackend,
+    StructuralRecordRow,
+)
 
 
 class EvidenceBundle(BaseModel):
@@ -124,3 +130,49 @@ def resolve_claim_evidence(
         parsed_document=note.parsed_document,
         evidence=list(canonical.evidence),
     )
+
+
+def validate_structural_hits(
+    rows: list[StructuralRecordRow],
+    backend: StorageBackend,
+    workspace: Path | str,
+) -> None:
+    """Re-derive structural hits from verified artefacts; reject stale/forged rows."""
+    documents = {
+        row.doc_id: row for row in backend.get_documents(sorted({item.doc_id for item in rows}))
+    }
+    expected_by_doc: dict[str, dict[str, StructuralRecordRow]] = {}
+    for item in rows:
+        document_row = documents.get(item.doc_id)
+        if document_row is None or document_row.doc_type != "source":
+            raise DocumentIntegrityError(f"structural hit parent is not a source: {item.doc_id}")
+        if item.doc_id not in expected_by_doc:
+            note = _load_source_note(document_row)
+            if note.source_asset is None or note.parsed_document is None:
+                raise DocumentIntegrityError("structural hit has no asset/parse reference")
+            verify_source_asset(note.source_asset, workspace)
+            parsed = load_parsed_document(note.parsed_document, workspace)
+            from mastervault.document_intelligence.models import ParsedDocumentV2
+
+            if not isinstance(parsed, ParsedDocumentV2):
+                raise DocumentIntegrityError("structural hit points to a non-v2 parse")
+            expected_by_doc[item.doc_id] = {
+                value.record_id: value
+                for value in structural_records(
+                    parsed,
+                    doc_id=item.doc_id,
+                    domain=document_row.domain,
+                    parsed_artifact_sha256=note.parsed_document.artifact_sha256,
+                )
+            }
+        expected = expected_by_doc[item.doc_id].get(item.record_id)
+        if expected is None:
+            raise EvidenceGroundingError(f"unknown structural record: {item.record_id}")
+        # Hydration-only document fields are excluded; every persisted identity,
+        # text, row scope, cell and evidence location must match exactly.
+        actual_payload = {**item.__dict__, "rel_path": "", "domain": document_row.domain}
+        expected_payload = {**expected.__dict__, "rel_path": ""}
+        if actual_payload != expected_payload:
+            raise EvidenceGroundingError(
+                f"structural record does not match its verified parsed document: {item.record_id}"
+            )

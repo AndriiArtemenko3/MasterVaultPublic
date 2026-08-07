@@ -49,6 +49,7 @@ from mastervault.document_intelligence.store import (
     store_source_asset,
     verify_source_asset,
 )
+from mastervault.document_intelligence.structural_records import structural_records
 
 __all__ = [
     "DOCUMENT_SCHEMA_VERSION",
@@ -88,6 +89,7 @@ __all__ = [
     "render_document_markdown",
     "store_parsed_document",
     "store_source_asset",
+    "structural_records",
     "validate_resolved_evidence",
     "verify_source_asset",
 ]

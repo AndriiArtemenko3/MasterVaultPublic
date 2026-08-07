@@ -7,6 +7,7 @@ Id vocabulary per channel:
 - lexical_docs     -> doc_ids as stored ("source:<rel>", "wiki:<d>:<s>", ...)
 - vector_channel   -> record_ids straight from the embeddings table
 - graph_channel    -> record_ids ("claim:<claim-id>")
+- structural_channel -> record_ids ("struct:<asset>:artifact:<parse>:...")
 
 Every channel degrades to empty output instead of raising: a vault with zero
 embeddings, no aliases, or no claims must still search cleanly.
@@ -82,3 +83,13 @@ def graph_channel(seed_wiki_slugs: list[str], backend: StorageBackend, k: int) -
     if not seed_wiki_slugs:
         return []
     return [f"claim:{claim_id}" for claim_id in backend.claims_for_wiki(seed_wiki_slugs, k)]
+
+
+def structural_channel(
+    query: str, backend: StorageBackend, k: int, domain: str | None = None
+) -> list[str]:
+    """Lexical schema-v2 structural records; empty for legacy-only indexes."""
+    search = getattr(backend, "lexical_structural", None)
+    if not callable(search):
+        return []
+    return list(search(query, k, domain))

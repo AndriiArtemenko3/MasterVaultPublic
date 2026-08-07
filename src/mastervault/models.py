@@ -93,6 +93,7 @@ class RecordType(StrEnum):
     CLAIM = "claim"
     WIKI = "wiki"
     CHUNK = "chunk"
+    STRUCTURAL = "structural"
 
 
 class ReviewStatus(StrEnum):
@@ -229,6 +230,7 @@ class ChannelRank(BaseModel):
     lexical_docs: int | None = None
     vector: int | None = None
     graph: int | None = None
+    structural: int | None = None
 
 
 class Hit(BaseModel):
@@ -241,7 +243,9 @@ class Hit(BaseModel):
     confidence: Confidence | None = None  # claims only
     evidence: list[EvidenceRef | StructuralEvidenceRef] = Field(
         default_factory=list
-    )  # grounded claims only
+    )  # grounded claims and structural records
+    structural_kind: str | None = None
+    source_identity: dict[str, Any] | None = None
     channels: ChannelRank = Field(default_factory=ChannelRank)
     rrf_score: float = 0.0
     rerank_score: float | None = None

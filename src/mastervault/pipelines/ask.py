@@ -34,6 +34,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from mastervault.config import Settings
 from mastervault.contracts.judge import SufficiencyJudgeContract
@@ -74,14 +75,14 @@ class AskOutcome:
     answer_markdown: str
     confidence: str | None
     gaps: list[str]
-    sources: list[dict[str, str]]
+    sources: list[dict[str, Any]]
     trace: str
     extractive: bool
     zero_evidence: bool
     rounds: int
     cost_usd: float
     warnings: list[str] = field(default_factory=list)
-    evidence: list[dict[str, str]] = field(default_factory=list)
+    evidence: list[dict[str, Any]] = field(default_factory=list)
     nearest_wiki_titles: list[str] = field(default_factory=list)
 
 
@@ -170,7 +171,11 @@ def _apply_citation_gate(text: str, evidence_ids: set[str]) -> tuple[str, list[s
 #: ids as "<note-type>:<rel-path>", and `retrieval.search` surfaces those
 #: verbatim as a hit's record_id -- so source/decision/strategy/wiki are all
 #: citation-shaped too. Anything outside this set is ordinary prose ("[sic]").
-_RECORD_NAMESPACES = ("claim", "chunk", "wiki", "source", "decision", "strategy")
+_RECORD_NAMESPACES = (
+    "claim", "chunk", "wiki", "source", "decision", "strategy", "struct"
+)
+
+
 _FORGED_CITATION_RE = re.compile(
     r"\[((?:" + "|".join(_RECORD_NAMESPACES) + r"):[^\[\]]+)\]"
 )
@@ -221,11 +226,22 @@ def _extractive_answer(hits: list[Hit], evidence_ids: set[str]) -> tuple[str, li
     return "\n".join(lines), warnings
 
 
-def _render_sources(hits: list[Hit]) -> list[dict[str, str]]:
-    return [
-        {"record_id": h.record_id, "rel_path": h.rel_path or h.doc_id}
-        for h in hits
-    ]
+def _render_sources(hits: list[Hit]) -> list[dict[str, Any]]:
+    rendered: list[dict[str, Any]] = []
+    for hit in hits:
+        item: dict[str, Any] = {
+            "record_id": hit.record_id,
+            "rel_path": hit.rel_path or hit.doc_id,
+        }
+        # Ordinary Markdown/text hits keep the exact legacy two-field shape.
+        # Grounded claims and structural rows add only evidence that hydration
+        # already resolved against an immutable parser artefact.
+        if hit.evidence:
+            item["evidence"] = [value.model_dump(mode="json") for value in hit.evidence]
+        if hit.source_identity is not None:
+            item["source_identity"] = hit.source_identity
+        rendered.append(item)
+    return rendered
 
 
 def _nearest_wiki_titles(

@@ -101,6 +101,35 @@ class HydratedChunkRow(ChunkRow):
 
 
 @dataclass
+class StructuralRecordRow:
+    """Parser-neutral structural retrieval unit with exact persisted evidence."""
+
+    record_id: str
+    doc_id: str
+    ordinal: int
+    record_kind: str  # section | block | table_row
+    text: str
+    asset_sha256: str
+    parsed_artifact_sha256: str
+    parser: str
+    parser_version: str
+    parser_core_version: str
+    parser_profile: str
+    normalization_profile: str
+    model_identity: str
+    resource_limits: dict[str, Any]
+    page_number: int
+    block_id: str
+    domain: str = ""
+    rel_path: str = ""
+    section_id: str | None = None
+    table_id: str | None = None
+    row_id: str | None = None
+    cell_ids: list[str] = field(default_factory=list)
+    evidence: list[Any] = field(default_factory=list)
+
+
+@dataclass
 class AliasRow:
     alias: str
     wiki_slug: str
@@ -123,7 +152,7 @@ class EmbeddingRow:
 # ---------------------------------------------------------------------------
 
 MIN_SCHEMA_VERSION = 1
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 META_KEY_MODEL = "embedding_model"
 META_KEY_DIM = "dimensions"
@@ -138,9 +167,10 @@ def validate_schema_meta(
 ) -> int:
     """Validate index identity and return its schema version (0 for a new index).
 
-    Existing metadata is never repaired by guessing. Version 1 is the only
-    supported historical state; version 0/corrupt metadata and versions newer
-    than this build are refused with an explicit rebuild/upgrade message.
+    Existing metadata is never repaired by guessing. Versions from the
+    explicit migration floor through the current schema are supported;
+    version 0/corrupt metadata and versions newer than this build are refused
+    with an explicit rebuild/upgrade message.
     """
     if meta is None:
         return 0

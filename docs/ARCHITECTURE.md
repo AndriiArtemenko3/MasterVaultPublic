@@ -110,23 +110,45 @@ and measured dependency/model costs are in [ADR 0002](decisions/0002-optional-do
 
 ## Retrieval path
 
-`hybrid_search()` (`src/mastervault/retrieval/search.py`) runs four
-independent channels and fuses them:
+Schema-v2 PDF sources also produce deterministic structural records at sync
+time. Sections and non-table blocks remain addressable, while every table row
+with citable content is indexed independently with table/row scope and column
+headers (for example `Customer tier: Premium | Return window: 45 days`).
+Hydration re-verifies the immutable asset and parser artifact and re-derives
+the row before returning page/block/table/row/cell evidence. The structural
+lexical channel is additive: when it is empty, the original four RRF inputs and
+rankings are unchanged. See
+[ADR 0003](decisions/0003-grounded-structural-retrieval.md).
+
+A structural ID includes the full asset SHA-256, full parsed-artifact SHA-256,
+SHA-256 of the owning `doc_id`, and the section, block, or table-row location.
+For tables, a cell occupies every row covered by its declared `row_span`; its
+cell ID is retained on each such row, and exact evidence is returned for every
+citable label or value displayed in the row text. Rows without citable text are
+not indexed. This makes shared source bytes, reparses, and distinct owning notes
+separate identities without inventing evidence.
+
+`hybrid_search()` (`src/mastervault/retrieval/search.py`) runs four legacy
+channels plus the additive structural channel and fuses the non-empty ranked
+lists:
 
 1. **Alias front-door.** The query is checked against every known wiki alias.
    A hit becomes the pinned `wiki_card` shown above the ranked results and is
    excluded from the fused list, so it never double-counts.
-2. **Lexical claims** (FTS over claim statements, top 30) and **lexical
-   docs** (FTS over document title + body, top 20).
+2. **Lexical claims** (FTS over claim statements, top 30), **lexical
+   docs** (FTS over document title + body, top 20), and schema-v2
+   **structural rows/blocks/sections** (FTS, top 30 when present).
 3. **Vector kNN** (top 30) over the embedding index, cosine similarity.
 4. **Wiki graph** (top 20): seeded by the alias hit plus any wiki records in
    the vector top 10, then walked one hop via `claims_for_wiki` (claims whose
    `affects:` names that slug).
 
-The four ranked lists are merged with Reciprocal Rank Fusion,
+The active ranked lists (the four legacy lists plus structural FTS only when it
+is non-empty) are merged with Reciprocal Rank Fusion,
 `score(d) = Σ 1 / (k + rank_r(d))` with `k = 60` (Cormack, Clarke &
 Buettcher, SIGIR 2009), then hydrated into `Hit` records carrying their
-per-channel rank for provenance. An optional cross-encoder rerank
+per-channel rank for provenance, including optional `channels.structural`.
+An optional cross-encoder rerank
 (Cohere `rerank-v3.5`, gated on `COHERE_API_KEY`) reorders the top
 `retrieval.rerank_pool` (default 30) before the result is trimmed to `k`
 (default 10).
@@ -151,6 +173,12 @@ loop:
    citation gets stripped, or the LLM call fails structured-output
    validation twice, the pipeline falls back to a deterministic extractive
    answer built from the top 5 MMR cards instead of guessing.
+
+For a cited grounded claim or structural hit, `run_ask` and the public JSON ask
+CLI (`mvault ask --json`) add the revalidated exact evidence (and structural
+source identity when available) to that item in `sources`. A source without
+grounded evidence keeps the legacy two-field `{record_id, rel_path}` projection
+exactly.
 
 ## Review-queue lifecycle
 
@@ -183,24 +211,31 @@ double-queues the same proposal.
 
 ## Storage
 
-Both backends implement the same `StorageBackend` protocol
-(`src/mastervault/storage/base.py`) over the same logical schema
-(`src/mastervault/storage/migrations/{pg,sqlite}/001_init.sql`; the SQLite
-backend uses `sqlite-vec`'s `vec0` virtual table for vectors and FTS5 for
-lexical search in place of pgvector's HNSW index and Postgres's generated
-`tsvector` columns). Both apply ordered versions and record them in
-`schema_migrations`; v1 upgrades in place to v2, while corrupt/pre-v1 and
-future schema metadata is refused without overwriting it. `storage.backend = "auto"` (the default) picks Postgres
-when `DATABASE_URL` is set and reachable, otherwise SQLite at
-`<workspace>/index.db`.
+Both backends implement the legacy `StorageBackend` protocol
+(`src/mastervault/storage/base.py`) over the same logical schema and expose the
+same optional structural capability used by sync and retrieval. Migration 003
+adds the derived structural table and lexical index without changing
+`ParsedDocumentV2`. SQLite uses `sqlite-vec`'s `vec0` virtual table for vectors
+and FTS5 for lexical search in place of pgvector's HNSW index and Postgres's
+generated `tsvector` columns. Both apply ordered versions and record them in
+`schema_migrations`; v1 and v2 upgrade in place to v3, while corrupt/pre-v1 and
+future schema metadata is refused without overwriting it. `storage.backend =
+"auto"` (the default) picks Postgres when `DATABASE_URL` is set and reachable,
+otherwise SQLite at `<workspace>/index.db`. PostgreSQL support is implemented
+but was not acceptance-tested in the reported environment; that suite requires
+`DATABASE_URL`. This milestone makes no PostgreSQL performance claim.
 
 ### Idempotency and the embeddings sidecar
 
 Two independent content-hash gates keep re-runs cheap and safe:
 
-- **Document level.** `sync_vault` re-upserts a document (and its claims,
-  chunks, aliases) only when the full-file content hash changed, or when
-  `--full` forces every document regardless.
+- **Document level.** `sync_vault` re-upserts a document and its claims,
+  chunks, and aliases only when the full-file content hash changed, or when
+  `--full` forces every document regardless. For a changed document, the
+  official SQLite/PostgreSQL backends include its structural projection in the
+  same transaction, so a structural failure rolls back the whole write. On an
+  unchanged document, sync still replaces the cheap deterministic structural
+  projection so interrupted and newly migrated indexes converge.
 - **Record level.** Every embeddable unit (a claim statement, a wiki
   definition, a body chunk) carries its own content hash. `needs_embedding`
   checks `(record_id, content_hash, model_version)` against what is already

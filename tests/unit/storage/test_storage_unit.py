@@ -130,7 +130,7 @@ def test_sqlite_upgrades_a_representative_v1_workspace_without_data_loss(tmp_pat
                 "SELECT version FROM schema_migrations ORDER BY version"
             )
         ]
-        assert versions == [1, 2]
+        assert versions == [1, 2, 3]
     finally:
         upgraded.close()
 
@@ -187,7 +187,7 @@ def test_two_sqlite_connections_serialize_fresh_initialization(tmp_path):
         rows = backend.conn.execute(
             "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [int(row[0]) for row in rows] == [1, 2]
+        assert [int(row[0]) for row in rows] == [1, 2, 3]
         assert all(len(str(row[2])) == 64 for row in rows)
     finally:
         backend.close()

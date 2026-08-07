@@ -115,6 +115,7 @@ def test_ask_cli_json_output_shape(cli_workspace: Path):
     assert payload["rounds"] >= 1
     assert any("30 days" in s for s in [payload["answer_markdown"]])
     assert payload["sources"]
+    assert all(set(source) == {"record_id", "rel_path"} for source in payload["sources"])
 
 
 def test_ask_cli_zero_evidence_before_any_sync(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

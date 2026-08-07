@@ -42,10 +42,22 @@ def synced(backend, embedder):
 def test_exact_phrase_surfaces_the_claim_first(synced, embedder, settings):
     result = hybrid_search(EXACT_PHRASE, settings, synced, embedder)
     assert result.hits
+    # SQLite and PostgreSQL intentionally use backend-native rankers, so exact
+    # lower-hit positions and scores are not a cross-backend contract.
+    assert {
+        "claim:policy-returns-02",
+        "chunk:wiki:customer-support:restocking-fee#0",
+        "claim:faq-desk-mat-02",
+        "claim:sop-returns-01",
+        "source:customer-support/sources/policy-returns-and-refunds.md",
+    } <= {hit.record_id for hit in result.hits}
+    assert "structural" not in result.channel_counts
+    assert all(hit.channels.structural is None for hit in result.hits)
     top = result.hits[0]
     assert top.record_id == "claim:policy-returns-02"
     assert top.record_type is RecordType.CLAIM
     assert top.channels.lexical_claims == 1
+    assert top.channels.structural is None
     assert top.rrf_score > 0
     assert EXACT_PHRASE in top.text
     assert top.rel_path == "customer-support/sources/policy-returns-and-refunds.md"
@@ -155,8 +167,15 @@ def test_cli_init_sync_status_search(tmp_path, monkeypatch):
     assert top["record_id"] == "claim:policy-returns-02"
     assert top["record_type"] == "claim"
     assert top["confidence"] == "high"
-    assert set(top["channels"]) == {"lexical_claims", "lexical_docs", "vector", "graph"}
+    assert set(top["channels"]) == {
+        "lexical_claims",
+        "lexical_docs",
+        "vector",
+        "graph",
+        "structural",
+    }
     assert top["channels"]["lexical_claims"] == 1
+    assert top["channels"]["structural"] is None
     assert top["rrf_score"] > 0
     assert set(payload["channel_counts"]) == {
         "lexical_claims",
