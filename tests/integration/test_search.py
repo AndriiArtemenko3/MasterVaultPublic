@@ -42,13 +42,16 @@ def synced(backend, embedder):
 def test_exact_phrase_surfaces_the_claim_first(synced, embedder, settings):
     result = hybrid_search(EXACT_PHRASE, settings, synced, embedder)
     assert result.hits
-    assert [(hit.record_id, hit.rrf_score) for hit in result.hits[:5]] == [
-        ("claim:policy-returns-02", 0.048395),
-        ("chunk:wiki:customer-support:restocking-fee#0", 0.016393),
-        ("claim:faq-desk-mat-02", 0.016393),
-        ("claim:sop-returns-01", 0.016129),
-        ("source:customer-support/sources/policy-returns-and-refunds.md", 0.016129),
-    ]
+    # SQLite and PostgreSQL intentionally use backend-native rankers, so exact
+    # lower-hit positions and scores are not a cross-backend contract.
+    assert {
+        "claim:policy-returns-02",
+        "chunk:wiki:customer-support:restocking-fee#0",
+        "claim:faq-desk-mat-02",
+        "claim:sop-returns-01",
+        "source:customer-support/sources/policy-returns-and-refunds.md",
+    } <= {hit.record_id for hit in result.hits}
+    assert "structural" not in result.channel_counts
     assert all(hit.channels.structural is None for hit in result.hits)
     top = result.hits[0]
     assert top.record_id == "claim:policy-returns-02"
