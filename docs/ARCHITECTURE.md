@@ -209,6 +209,18 @@ Enqueueing is deduped by `sha256(producer|target|change_type|proposal)`, so
 a producer that re-runs (a resumed ingest, a repeated lint pass) never
 double-queues the same proposal.
 
+This file queue is authoritative only for canonical Markdown patch actions.
+Temporal change-control review is a distinct typed authority in
+`<workspace>/change_control/state.sqlite3`: it binds exact proposed document
+replacement/temporal-constraint snapshots, records one immutable per-subject
+outcome batch, and advances the aggregate only through that decision. The two
+stores must never decide the same action. A future unified `mvault review`
+facade may present both kinds while preserving their separate authority.
+The local synchronous LangGraph wait/reconciliation seam stores only
+disposable execution cursors in sibling `change_control/checkpoints.sqlite3`,
+never in the schema-attested state DB. A fixed wake signal carries no outcome;
+the graph always rereads authoritative review state after waking.
+
 ## Storage
 
 Both backends implement the legacy `StorageBackend` protocol
@@ -224,6 +236,25 @@ future schema metadata is refused without overwriting it. `storage.backend =
 otherwise SQLite at `<workspace>/index.db`. PostgreSQL support is implemented
 but was not acceptance-tested in the reported environment; that suite requires
 `DATABASE_URL`. This milestone makes no PostgreSQL performance claim.
+
+Temporal change-control state is not part of that rebuildable index. A separate
+`SqliteChangeControlStore` persists one closed `ChangeControlAggregate` per
+logical aggregate ID at `<workspace>/change_control/state.sqlite3`. It has its
+own schema identity and checksummed migration ledger. Every update replaces the
+complete normalized document/claim/relation/dependency/replacement/constraint
+graph under one `BEGIN IMMEDIATE` compare-and-swap transaction. Loads rebuild
+canonical domain objects, revalidate accepted temporal bases, and verify the
+aggregate digest. Authoritative review-request/decision rows are implemented in
+that same state store. `TemporalReviewWorkflow` may pause an already-created
+request and later reconcile a separately committed decision through a strict,
+primitive-only, versioned checkpoint. The cross-database interval is an
+intentional saga window: checkpoint failure affects availability only and
+never repeats or rolls back authority. Checkpoints disable pickle fallback,
+are identity/schema validated when restored, and are not auto-deleted on
+corruption. The service owns one synchronous connection and a process-local
+lock; no multi-process or production-scaling claim is made. PostgreSQL
+change-control persistence, background workers, and CLI/UI orchestration
+remain unimplemented.
 
 ### Idempotency and the embeddings sidecar
 

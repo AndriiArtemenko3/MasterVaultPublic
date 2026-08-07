@@ -108,6 +108,14 @@ class PathsCfg(BaseModel):
     def sqlite_path(self) -> Path:
         return self.workspace / "index.db"
 
+    @property
+    def change_control_db_path(self) -> Path:
+        return self.workspace / "change_control" / "state.sqlite3"
+
+    @property
+    def change_control_checkpoint_path(self) -> Path:
+        return self.workspace / "change_control" / "checkpoints.sqlite3"
+
 
 def resolve_config_path() -> Path | None:
     """Return the exact TOML source selected by the settings precedence."""

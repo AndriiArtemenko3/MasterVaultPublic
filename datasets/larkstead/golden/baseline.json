@@ -1,7 +1,7 @@
 {
   "baseline_schema_version": 2,
   "baseline_kind": "retrieval",
-  "generated": "2026-08-07T13:48:02+00:00",
+  "generated": "2026-08-07T20:44:35+00:00",
   "golden_query_count": 52,
   "dataset": "larkstead",
   "embedding_model": "BAAI/bge-small-en-v1.5",
@@ -1727,11 +1727,11 @@
     "schema_version": 2,
     "evaluation": "retrieval",
     "source": {
-      "git_sha": "3a9024881d0577697d2138bbf474923780c26bfe",
+      "git_sha": "00b6898605cf8c5cd81e94e876d81a0582acc608",
       "git_dirty": true,
       "tree": {
-        "sha256": "a07a960d5fb630dbf37b66b029af16391de60171050afe35c058ff8e95865413",
-        "file_count": 122
+        "sha256": "05991ed86797fe731326ff3ef75d44f8e74eb99376d4c10d25f5799f27311b1e",
+        "file_count": 131
       },
       "package_version": "0.2.0"
     },
@@ -1766,7 +1766,7 @@
     },
     "dependencies": {
       "lock_path": "uv.lock",
-      "lock_sha256": "39d6912d4acc8c950f29d5c8500d964b5fb3f828da908ef4b5f0c2c678ba53dc"
+      "lock_sha256": "b283b9c13095863d20e04a1ee1d82d2cb83013b62c50363948169e7df961dda5"
     },
     "config": {
       "source": {

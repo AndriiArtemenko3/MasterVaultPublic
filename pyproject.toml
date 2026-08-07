@@ -40,6 +40,8 @@ dependencies = [
     "sqlite-vec>=0.1.6",
     "numpy>=1.26",
     "pypdf>=4.2",
+    "langgraph==1.2.9",
+    "langgraph-checkpoint-sqlite==3.1.0",
     "anthropic>=0.40",
     "openai>=1.50",
     "jinja2>=3.1",
