@@ -8,7 +8,8 @@ The long-form design documents and architecture decision records behind the root
 |---|---|
 | `ARCHITECTURE.md` | The internals a quickstart user never sees. Covers the three-layer data model (Markdown sources → wiki/decisions → derived index), the four-channel `hybrid_search` and its RRF fusion, the agentic `mvault ask` loop with its sufficiency judge and citation gate, the file-backed `ReviewQueue` and its three routing tiers, the shared `StorageBackend` protocol over SQLite/Postgres, the two content-hash idempotency gates plus the embeddings sidecar, and the embedding/LLM/reranker provider seams with their keyless mock defaults. |
 | `DATASET.md` | How Larkstead Goods Co. was made and validated. Documents the `company.yaml` bible as single source of truth, the dated-policy-history mechanism that generates contradictions, the five interlocking storylines versus the four semantic-lint-confirmed contradictions that actually shipped, the mechanical checker's ten checks, the four rubric-judge passes, the `banned_strings` trademark denylist, and how the processed layer was reproduced from four `mvault ingest` runs plus hand curation. |
-| `decisions/0001-page-grounded-pdf-substrate.md` | Why the first v0.3 slice establishes immutable byte identity and exact page/block evidence with a deliberately coarse `pypdf` baseline before Docling, OCR, tables, or LangGraph. |
+| `decisions/0001-page-grounded-pdf-substrate.md` | Why the first v0.3 slice establishes immutable byte identity and exact page/block evidence with a deliberately coarse `pypdf` baseline. |
+| `decisions/0002-optional-docling-schema-v2.md` | The measured optional Docling dependency/artifact contract, fixed offline profile, MasterVault-owned schema-v2 and Markdown, structural evidence, compatibility boundary, and explicit deferrals. |
 
 ## How it fits
 

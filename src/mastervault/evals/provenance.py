@@ -314,7 +314,7 @@ def collect_reproducibility_metadata(
         },
         "reproduction": {
             "setup_commands": [
-                "uv sync --all-extras",
+                "uv sync",
                 "uv run mvault init",
                 "uv run mvault demo load",
             ],

@@ -28,5 +28,6 @@ vault_workspace/
 
 # Build orchestration scratch (not part of the product)
 _build/
+.ci-cache/
 BUILD_LOG.md
 MORNING_REPORT.md

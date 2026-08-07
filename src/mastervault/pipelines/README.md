@@ -7,7 +7,7 @@ This folder holds the three top-level runs a user triggers: `ingest`, `ask`, and
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | Re-exports the three entry points and their outcome dataclasses (`run_ingest`/`IngestOutcome`, `run_ask`/`AskOutcome`, `run_lint`/`LintOutcome`). |
-| `ingest.py` | Raw→routed pipeline: PLAN → EXTRACT+WRITE → initial INDEX → CONCEPT MATCH/CORPUS CHECK/ROUTE → final index convergence → SUMMARY. Tier-2 auto-approval synchronizes before archive; tier-1 links and reconciliation converge in the final pass. |
+| `ingest.py` | Raw→routed pipeline. PDF plans freeze byte, parser/core, schema, normalization and model identities; each PDF parses once per invocation, resume revalidates drift, and assets/IR/notes publish only after extraction and evidence validation. The routing/index lifecycle is otherwise unchanged. |
 | `ask.py` | Agentic multi-round retrieval under a sufficiency judge, then grounded LLM synthesis behind a citation gate, with a deterministic extractive fallback. Enforces three mechanical stop guards the judge never controls. |
 | `lint.py` | Mechanical vault-health scan (frontmatter validity, broken `affects`, duplicate claim ids, orphan wikis, drifted review items) plus an optional semantic contradiction pass that double-confirms every flag before queuing it. |
 

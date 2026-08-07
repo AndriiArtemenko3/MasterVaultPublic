@@ -61,6 +61,11 @@ class IngestionCfg(BaseModel):
     max_claims_per_doc: int = 10
 
 
+class DocumentCfg(BaseModel):
+    pdf_parser: Literal["pypdf", "docling"] = "pypdf"
+    docling_artifacts_path: Path | None = None
+
+
 class AskCfg(BaseModel):
     max_rounds: int = 3
     budget_usd: float = 0.25
@@ -151,6 +156,7 @@ class Settings(BaseSettings):
     reranker: RerankerCfg = Field(default_factory=RerankerCfg)
     retrieval: RetrievalCfg = Field(default_factory=RetrievalCfg)
     ingestion: IngestionCfg = Field(default_factory=IngestionCfg)
+    document: DocumentCfg = Field(default_factory=DocumentCfg)
     ask: AskCfg = Field(default_factory=AskCfg)
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)

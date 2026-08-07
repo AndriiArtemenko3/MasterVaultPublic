@@ -38,6 +38,11 @@ def ingest_cmd(
         False, "--auto-approve", help="Apply tier-2 review items immediately."
     ),
     fail_fast: bool = typer.Option(False, "--fail-fast", help="Stop at the first unit hard-fail."),
+    pdf_parser: str | None = typer.Option(
+        None,
+        "--pdf-parser",
+        help="PDF parser override: pypdf or docling (default: document.pdf_parser).",
+    ),
 ) -> None:
     """Ingest raw .md/.txt/.pdf files into vault source notes."""
     path = Path(path_arg)
@@ -48,6 +53,9 @@ def ingest_cmd(
         raise typer.Exit(EXIT_CODES["usage"]) from None
     if dry_run and resume:
         typer.echo("error: --dry-run and --resume cannot be combined", err=True)
+        raise typer.Exit(EXIT_CODES["usage"])
+    if pdf_parser not in {None, "pypdf", "docling"}:
+        typer.echo("error: --pdf-parser must be one of pypdf, docling", err=True)
         raise typer.Exit(EXIT_CODES["usage"])
     if not path.exists():
         typer.echo(f"error: path does not exist: {path}", err=True)
@@ -70,6 +78,7 @@ def ingest_cmd(
             resume_run_id=resume,
             auto_approve=auto_approve,
             fail_fast=fail_fast,
+            pdf_parser_name=pdf_parser,
             announce=lambda msg: typer.echo(f"  {msg}"),
         )
     finally:

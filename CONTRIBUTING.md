@@ -3,11 +3,36 @@
 ## Dev setup
 
 ```bash
-uv sync --all-extras       # core + rerank (cohere) + dev (pytest, ruff, mypy)
+uv sync --extra dev --extra rerank  # core + rerank + developer tools
 docker compose up -d       # only needed for the postgres half of the test matrix
 uv run pytest tests -q
 uv run ruff check src tests
 ```
+
+The core environment intentionally excludes Docling. For layout/table adapter
+work, install the separate extra and prefetch models explicitly:
+
+```bash
+uv sync --extra dev --extra pdf-layout
+uv run python -m mastervault.document_intelligence.fetch_docling_artifacts \
+  --output-dir /absolute/path
+MV_DOCUMENT__DOCLING_ARTIFACTS_PATH=/absolute/path \
+  uv run mvault document doctor --parser docling
+```
+
+`--output-dir` must name an absent directory whose existing parent has no
+symlink or non-directory components. The helper downloads into private sibling
+staging, verifies the complete size/hash contract, and atomically publishes the
+verified tree. Any failure removes staging and leaves the output absent; choose
+a new path instead of updating an existing artifact tree in place.
+
+Docling tests must remain hermetic: normal unit/core-package checks may not
+import vendor packages or access the network. Real-adapter checks use a
+pre-provisioned artifacts path with `HF_HUB_OFFLINE=1` and
+`TRANSFORMERS_OFFLINE=1`. The fetch helper may run only as an explicit setup
+step: it uses the packaged full-commit manifest and a file allowlist. Do not
+vendor weights, substitute a branch/tag, or silently refresh hashes; changing
+a certified component requires an intentional manifest/ADR/lock/test update.
 
 Tests that touch storage are parametrized over both backends
 (`tests/conftest.py`'s `backend` fixture). The postgres half creates a

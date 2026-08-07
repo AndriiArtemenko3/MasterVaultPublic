@@ -7,8 +7,8 @@ The ingest stages that take one raw document from bytes on disk to atomic claims
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | Re-exports the public stage functions and their result dataclasses (`extract_claims`, `match_claim`, `adjudicate`, `draft_new_entry`, `insert_wikilink`, `validate_source_note`, etc.). |
-| `convert.py` | Raw-file discovery and compatibility text extraction. Markdown/text remain direct reads; PDFs now delegate to the parser-neutral document substrate while `read_raw_text` preserves the v0.2 flattened-text view. |
-| `extract.py` | Claim extraction for one unit. Markdown/text dispatch `ClaimExtractionContract`; PDFs dispatch the separate page-grounded contract and resolve its block/quote evidence before returning ordinary claims. Both retain canonical `<unit-slug>-NN` ids. |
+| `convert.py` | Raw-file discovery and compatibility text extraction. Markdown/text remain direct reads; PDFs use the explicitly selected parser-neutral implementation while `read_raw_text` preserves the v0.2 `pypdf` flattened view. |
+| `extract.py` | Claim extraction for one unit. PDF candidates resolve against schema-v1 blocks or schema-v2 blocks/cells before returning ordinary claims with structural evidence. Canonical `<unit-slug>-NN` ids remain unchanged. |
 | `concept_match.py` | Routes one claim to an existing wiki concept, a corpus-check candidate pairing, or a brand-new-concept tally. Alias-exact (free, longest-alias-wins, word-boundary) first; falls back to a KNN similarity band against `record_type='wiki'` rows. |
 | `corpus_check.py` | Dispatch shim over `CorpusCheckContract`. `adjudicate` scores one (claim, candidate-wiki) pairing and returns a `relation` (supports/extends/challenges) plus rationale for the caller to route on. |
 | `wiki_draft.py` | Dispatch shim over `WikiDraftContract`. `draft_extend` writes a one-paragraph body addition for an 'extends' relation; `draft_new_entry` writes a full new-concept entry with aliases. |

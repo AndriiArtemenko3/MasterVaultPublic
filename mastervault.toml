@@ -36,6 +36,10 @@ band_exists = 0.80        # cosine >= : attach claim to existing concept
 band_candidate = 0.60     # cosine >= : LLM adjudicates the pairing
 max_claims_per_doc = 10
 
+[document]
+pdf_parser = "pypdf"      # pypdf | docling (explicit opt-in; core/default stays pypdf)
+# docling_artifacts_path = "/absolute/prefetched/path"  # required for docling; no downloads
+
 [ask]
 max_rounds = 3
 budget_usd = 0.25

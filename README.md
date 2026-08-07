@@ -44,13 +44,15 @@ approval step.
 
 ## v0.3 in development: page-grounded PDF evidence
 
-The first v0.3 vertical slice replaces lossy PDF flattening with an auditable
-evidence spine for clean, digitally generated PDFs. MasterVault snapshots the
-exact source bytes under a full SHA-256 identity, preserves physical pages in
-a strict parser-independent representation, and accepts a PDF claim only when
-its supporting quote resolves inside a real page block. The canonical source
-note retains the immutable asset and parsed-artifact references, while search
-hydrates and revalidates the evidence without changing v0.2 ranking inputs.
+The v0.3 document spine replaces lossy PDF flattening with auditable evidence
+for clean, digitally generated PDFs. MasterVault snapshots the exact source
+bytes under a full SHA-256 identity and accepts a PDF claim only when its
+supporting quote resolves inside the parser-independent IR. The default
+`pypdf` profile preserves the original schema-v1, one-block-per-page behavior.
+An optional Docling profile adds schema-v2 layout blocks, section hierarchy,
+normalized bounding boxes, tables, rows, cells, spans, and cell-level evidence.
+Canonical notes retain immutable asset/parse identities, while retrieval
+inputs and the v0.2 ranking path remain unchanged.
 
 ```text
 PDF bytes → immutable asset → page-preserving parse → grounded claim
@@ -65,12 +67,32 @@ uv run mvault evidence show <claim-id>
 uv run mvault evidence show <claim-id> --json
 ```
 
-This is deliberately a narrow foundation, not a claim of complete document
-intelligence. The current baseline uses `pypdf`, emits one text block per page,
-and rejects scanned, textless, corrupt, and encrypted PDFs. OCR, layout-aware
-sections, table cells, bounding-box highlighting, and Docling routing are later
-measured milestones. The design and compatibility boundaries are recorded in
-[ADR 0001](docs/decisions/0001-page-grounded-pdf-substrate.md).
+Docling is deliberately optional and offline-only at runtime. Install it with
+`uv sync --extra pdf-layout`, fetch the manifest-pinned layout/TableFormer
+artifacts as an explicit network-enabled operator step, then verify them before
+ingest:
+
+```bash
+uv run python -m mastervault.document_intelligence.fetch_docling_artifacts \
+  --output-dir /absolute/path
+MV_DOCUMENT__DOCLING_ARTIFACTS_PATH=/absolute/path \
+  uv run mvault document doctor --parser docling
+uv run mvault ingest ./my-pdfs --domain operations --pdf-parser docling
+```
+
+The fetch destination must not exist, and its parent must already be a real
+(non-symlink) directory. Acquisition happens in a private sibling staging tree;
+only manifest-listed files enter the verified publication tree, which is then
+atomically renamed into place. A download, size, hash, or path-safety failure
+removes staging and leaves the destination absent.
+
+The adapter never downloads or falls back during parse. Its fixed profile
+accepts at most 50 MiB and 200 pages and applies Docling's 120-second
+cooperative document timeout; only a complete-success result is accepted. This
+remains a clean-digital profile: OCR, scans, image tables, charts, formulas,
+and cross-page table stitching are outside the slice. See [ADR 0001](docs/decisions/0001-page-grounded-pdf-substrate.md)
+for the immutable substrate and [ADR 0002](docs/decisions/0002-optional-docling-schema-v2.md)
+for the optional dependency, artifact identity, schema-v2, and measured limits.
 
 ## Quickstart
 
@@ -372,6 +394,8 @@ Three caveats, stated plainly rather than buried in a footnote:
 | `uv run mvault wiki [show <slug>]` | List wiki entries, or render one |
 | `uv run mvault ask <question>` | Agentic multi-round retrieval, judged, grounded, cited |
 | `uv run mvault ingest <path> --domain <d>` | Raw files → source notes → indexed → concept-routed |
+| `uv run mvault ingest <path> --domain <d> --pdf-parser docling` | Opt into the verified offline layout/table parser for PDFs |
+| `uv run mvault document doctor --parser <pypdf\|docling>` | Read-only parser/package/artifact readiness check |
 | `uv run mvault evidence show <claim-id> [--json]` | Verify and display the immutable page/block evidence behind a grounded PDF claim |
 | `uv run mvault lint [--mechanical-only]` | Vault health check: mechanical always, semantic (LLM) optional |
 | `uv run mvault review list \| show \| approve \| reject \| approve-pattern \| spot-check` | Triage the human-in-the-loop queue |
@@ -436,9 +460,10 @@ Drop `.md`, `.txt`, or `.pdf` files in a folder and run
 `uv run mvault ingest ./my-docs --domain operations` (domains: `customer-support`,
 `sales-crm`, `operations`, `internal-admin`). Use `--dry-run` first to see the
 plan and cost estimate. Clean digital PDFs retain an immutable byte identity
-and page-grounded claim evidence. The current `pypdf` baseline has no OCR,
-layout-aware section reconstruction, table-cell model, or bounding boxes;
-scanned/textless and encrypted PDFs are rejected visibly.
+and structurally grounded claim evidence. `pypdf` remains the exact compatible
+default; `--pdf-parser docling` opts into the installed `pdf-layout` extra and
+requires a verified `document.docling_artifacts_path`. Neither profile performs
+OCR, and textless/scanned or encrypted PDFs are rejected visibly.
 
 **How do I use Postgres instead of SQLite?**
 `docker compose up -d`, then export the `DATABASE_URL` shown in the Quickstart

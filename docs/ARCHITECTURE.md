@@ -65,6 +65,49 @@ A `Claim` is `{id, statement, confidence, affects}`. `id` matches
 `^[a-z0-9][a-z0-9-]*-\d{2}$` (a slug plus a two-digit ordinal); `affects`
 entries must be bare kebab-case wiki slugs, validated at write time.
 
+## PDF document boundary
+
+PDFs enter through `document_intelligence`, before claim extraction. The core
+`pypdf` path retains schema-v1 exactly: immutable source bytes, physical pages,
+and one text block per page. The optional `pdf-layout` extra adds a Docling
+adapter, but parser objects never cross its module boundary. Vendor output is
+immediately converted to built-in dictionaries and normalized into the strict
+MasterVault-owned schema-v2: page dimensions, six-decimal top-left bounding
+boxes, sections, blocks, tables, rows, cells, spans, and header flags.
+New parses use the paired `mv-clean-digital-v2`/`grid-v2` normalization
+identity. Previously persisted v1/v1 artifacts remain readable, but v1/v2
+cross-pairing is invalid.
+
+At runtime Docling requires an explicit, real (non-symlink) artifact directory
+whose selected layout/TableFormer files match the packaged full-commit,
+path/size/hash manifest. Every path component stays inside that directory and
+runtime inputs must be regular files. Offline controls are set, remote
+services/plugins/OCR are disabled, and a missing or changed artifact is a hard
+error—there is no download or `pypdf` fallback. Artifacts are revalidated
+before model initialization and immediately before conversion. `mvault
+document doctor --parser docling` checks this boundary without parsing or
+mutating state.
+
+The schema-v2 profile freezes a 50 MiB source ceiling, 200-page ceiling and
+120-second cooperative Docling timeout in both parsed artifacts and ingest
+plans. It retains parsed-page style data and enables Docling's deterministic
+bookmark/style heading pass, so the real fixture produces nested section
+parents rather than a flat list. A timeout or partial conversion fails closed.
+The normalizer cross-checks Docling's canonical cells against every declared
+grid slot. Explicit empty grid cells are preserved with `bbox: null` when no
+text region exists; non-empty cells still require coordinates and bbox-less
+cells cannot be cited. Items with more than one provenance region are rejected
+until the IR can retain exact ordered regions without drawing an enclosing box
+over unrelated page content.
+
+The model proposes exactly one `block_id` or `cell_id` plus a verbatim quote.
+Grounding derives page, bbox, table coordinates and offsets from the stored IR;
+unknown, duplicate, mixed-table, or forged evidence fails closed. The ingest
+plan freezes byte, parser/core, normalization, schema and model identities, and
+resume reparses once before publication to reject drift. Schema-v2 Markdown is
+rendered by MasterVault, never accepted from the parser vendor. Full rationale
+and measured dependency/model costs are in [ADR 0002](decisions/0002-optional-docling-schema-v2.md).
+
 ## Retrieval path
 
 `hybrid_search()` (`src/mastervault/retrieval/search.py`) runs four

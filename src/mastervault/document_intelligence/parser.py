@@ -14,6 +14,7 @@ from mastervault.document_intelligence.models import (
     DocumentBlock,
     DocumentBlockType,
     ParsedDocument,
+    ParsedDocumentAny,
     ParsedPage,
     ParseWarning,
 )
@@ -48,7 +49,7 @@ class DocumentParser(Protocol):
     parser_version: str
     profile: str
 
-    def parse(self, source: PdfSource) -> ParsedDocument: ...
+    def parse(self, source: PdfSource) -> ParsedDocumentAny: ...
 
 
 class PypdfParser:
@@ -120,7 +121,19 @@ class PypdfParser:
         )
 
 
-def parse_pdf(path: Path | str, parser: DocumentParser | None = None) -> ParsedDocument:
+def make_document_parser(
+    name: str, *, docling_artifacts_path: Path | str | None = None
+) -> DocumentParser:
+    if name == "pypdf":
+        return PypdfParser()
+    if name != "docling":
+        raise ValueError("PDF parser must be one of: pypdf, docling")
+    from mastervault.document_intelligence.docling_adapter import DoclingParser
+
+    return DoclingParser(docling_artifacts_path)
+
+
+def parse_pdf(path: Path | str, parser: DocumentParser | None = None) -> ParsedDocumentAny:
     """Convenience boundary for callers that do not need the source payload."""
     source = load_pdf_source(path)
     return (parser or PypdfParser()).parse(source)

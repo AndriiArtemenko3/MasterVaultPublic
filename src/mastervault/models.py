@@ -21,6 +21,7 @@ from mastervault.document_intelligence.models import (
     EvidenceRef,
     ParsedDocumentRef,
     SourceAssetRef,
+    StructuralEvidenceRef,
 )
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class Claim(BaseModel):
     statement: str = Field(min_length=8)
     confidence: Confidence
     affects: list[str] = Field(default_factory=list)  # wiki slugs (bare basenames)
-    evidence: list[EvidenceRef] = Field(default_factory=list)
+    evidence: list[EvidenceRef | StructuralEvidenceRef] = Field(default_factory=list)
 
     @field_validator("affects")
     @classmethod
@@ -238,7 +239,9 @@ class Hit(BaseModel):
     text: str
     rel_path: str | None = None
     confidence: Confidence | None = None  # claims only
-    evidence: list[EvidenceRef] = Field(default_factory=list)  # grounded claims only
+    evidence: list[EvidenceRef | StructuralEvidenceRef] = Field(
+        default_factory=list
+    )  # grounded claims only
     channels: ChannelRank = Field(default_factory=ChannelRank)
     rrf_score: float = 0.0
     rerank_score: float | None = None
