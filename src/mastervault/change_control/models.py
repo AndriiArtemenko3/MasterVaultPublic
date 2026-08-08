@@ -1271,6 +1271,46 @@ class TemporalConstraint(_StrictFrozenModel):
             rationale=canonical_rationale,
         )
 
+    @classmethod
+    def propose_from_document_replacement(
+        cls,
+        assessment: DocumentReplacementAssessment,
+        *,
+        rationale: str,
+    ) -> Self:
+        """Create the proposed document bound for review with its proposed basis.
+
+        The accepted-only factory above remains the derivation boundary for an
+        already reviewed replacement.  This factory exists for ADR 0006's
+        atomic review shape, where a replacement and its dependent document
+        constraint must both enter the request as proposed subjects.
+        """
+
+        if assessment.status != TemporalConstraintStatus.PROPOSED:
+            raise ValueError("proposed document constraint requires a proposed replacement")
+        canonical_rationale = _canonical_semantic_input(rationale, label="rationale")
+        target = TemporalTarget(
+            kind=TemporalTargetKind.DOCUMENT_VERSION,
+            target_id=assessment.older_document.document_version_id,
+        )
+        basis = (assessment.relation_id,)
+        bound = assessment.newer_document.declared_effective_from
+        payload = {
+            "namespace": TEMPORAL_CONSTRAINT_NAMESPACE,
+            "resolver_version": "temporal-resolution-v1",
+            "target": target.model_dump(mode="json"),
+            "inferred_valid_to_exclusive": bound.isoformat(),
+            "basis_relation_ids": list(basis),
+        }
+        return cls(
+            constraint_id=stable_content_id("tempc", payload),
+            target=target,
+            inferred_valid_to_exclusive=bound,
+            basis_relation_ids=basis,
+            status=TemporalConstraintStatus.PROPOSED,
+            rationale=canonical_rationale,
+        )
+
     def with_status(self, status: TemporalConstraintStatus) -> TemporalConstraint:
         return TemporalConstraint.model_validate({**self.model_dump(mode="json"), "status": status})
 

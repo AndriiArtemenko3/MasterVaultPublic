@@ -88,7 +88,8 @@ for MIGRATION in \
   'mastervault/storage/migrations/sqlite/002_migration_ledger.sql' \
   'mastervault/storage/migrations/sqlite/003_structural_records.sql' \
   'mastervault/change_control/migrations/sqlite/001_change_control_aggregate.sql' \
-  'mastervault/change_control/migrations/sqlite/002_authoritative_human_review.sql'
+  'mastervault/change_control/migrations/sqlite/002_authoritative_human_review.sql' \
+  'mastervault/change_control/migrations/sqlite/003_managed_revision_review.sql'
 do
   grep -q "$MIGRATION" "$WORK/wheel.txt" \
     || fail "wheel is missing an ordered schema migration ($MIGRATION)"
@@ -121,7 +122,9 @@ grep -q 'mastervault/prompts/page_grounded_claim_extraction/v1.md' "$WORK/wheel.
   || fail "wheel is missing the page-grounded PDF extraction prompt"
 grep -q 'mastervault/document_intelligence/docling_artifacts_manifest.json' "$WORK/wheel.txt" \
   || fail "wheel is missing the immutable Docling artifact manifest"
-printf '  wheel ships the prompt files and Docling artifact manifest\n'
+grep -q 'mastervault/py.typed' "$WORK/wheel.txt" \
+  || fail "wheel is missing the PEP 561 py.typed marker"
+printf '  wheel ships prompt files, the Docling artifact manifest and py.typed\n'
 
 # No absolute developer paths baked into the metadata.
 if unzip -p "$WHEEL" '*/METADATA' | grep -nE '/(Users|home)/[a-z]'; then

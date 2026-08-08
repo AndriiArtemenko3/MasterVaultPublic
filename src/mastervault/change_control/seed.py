@@ -19,6 +19,12 @@ from typing import Any, Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mastervault.change_control._repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    read_repository_file,
+    verified_repository_root,
+)
 from mastervault.change_control.models import (
     ClaimSourceReference,
     DocumentAuthority,
@@ -39,6 +45,9 @@ _RECEIPT_RELATIVE_PATH = PurePosixPath("change_control/seed-receipt.json")
 _VERIFIED_MANIFEST_TOKEN = object()
 _VERIFIED_CONTEXT_TOKEN = object()
 _VERIFIED_CONTEXT_SECRET = os.urandom(32)
+MAX_SEED_MANIFEST_BYTES = 64 * 1024
+MAX_SEED_SOURCE_BYTES = 128 * 1024
+MAX_SEED_PROCESSED_NOTE_BYTES = 256 * 1024
 
 # These keys carry answers rather than runtime source metadata. The recursive
 # check gives a direct boundary error before Pydantic's general extra-field
@@ -317,6 +326,43 @@ def load_verified_prechange_seed_manifest(path: Path) -> VerifiedPrechangeSeedMa
     )
 
 
+def load_verified_prechange_seed_manifest_from_repository(
+    *, repo_root: Path, manifest_path: Path
+) -> VerifiedPrechangeSeedManifest:
+    """Capture one exact-case, non-symlink repository manifest snapshot."""
+
+    try:
+        resolved_root = verified_repository_root(repo_root)
+        absolute = Path(os.path.abspath(manifest_path))
+        relative = absolute.relative_to(resolved_root).as_posix()
+        resolved, snapshot = read_repository_file(
+            repo_root=resolved_root,
+            relative=relative,
+            limit=MAX_SEED_MANIFEST_BYTES,
+            label="pre-change seed manifest",
+        )
+    except RepositoryFileBoundaryError as exc:
+        raise SeedBoundaryError(str(exc)) from exc
+    except (RepositoryFileIntegrityError, ValueError) as exc:
+        raise SeedIntegrityError(str(exc)) from exc
+    if resolved.suffix not in {".yaml", ".yml"}:
+        raise SeedBoundaryError("pre-change seed manifest must be YAML")
+    snapshot_sha256 = hashlib.sha256(snapshot).hexdigest()
+    manifest = _parse_manifest_snapshot(snapshot)
+    return VerifiedPrechangeSeedManifest(
+        manifest_path=resolved,
+        manifest=manifest,
+        snapshot=snapshot,
+        manifest_sha256=snapshot_sha256,
+        _verification_token=_VERIFIED_MANIFEST_TOKEN,
+        _verification_seal=_manifest_seal(
+            manifest_path=resolved,
+            manifest=manifest,
+            manifest_sha256=snapshot_sha256,
+        ),
+    )
+
+
 def load_prechange_seed_manifest(path: Path) -> PrechangeSeedManifest:
     """Load runtime metadata while refusing evaluator directories and answers."""
     return load_verified_prechange_seed_manifest(path).manifest
@@ -371,22 +417,26 @@ def _read_verified(repo_root: Path, relative: str, expected_sha256: str) -> tupl
         allowed_prefix = _PROCESSED_PREFIX
     else:
         raise SeedIntegrityError(f"seed source is outside the runtime roots: {relative}")
+    limit = (
+        MAX_SEED_SOURCE_BYTES if allowed_prefix == _RAW_PREFIX else MAX_SEED_PROCESSED_NOTE_BYTES
+    )
     try:
-        allowed_root = resolve_within(repo_root, allowed_prefix.as_posix())
-        if "golden" in {part.casefold() for part in allowed_root.parts}:
-            raise SeedBoundaryError(
-                "runtime seed root cannot resolve into an evaluator-gold directory"
-            )
-        path = resolve_within(allowed_root, lexical.relative_to(allowed_prefix).as_posix())
-    except PathBoundaryError as exc:
+        path, data = read_repository_file(
+            repo_root=repo_root,
+            relative=relative,
+            limit=limit,
+            label="seed source" if allowed_prefix == _RAW_PREFIX else "seed canonical note",
+        )
+    except RepositoryFileBoundaryError as exc:
         raise SeedBoundaryError(
             f"runtime seed path escapes its declared source root: {relative}"
         ) from exc
-    if "golden" in {part.casefold() for part in path.parts}:
-        raise SeedBoundaryError("runtime seed source cannot resolve into evaluator gold")
-    if not path.is_file():
-        raise SeedIntegrityError(f"seed source is missing or not a regular file: {relative}")
-    data = path.read_bytes()
+    except RepositoryFileIntegrityError as exc:
+        if "unavailable" in str(exc) or "disappeared" in str(exc):
+            raise SeedIntegrityError(
+                f"seed source is missing or not a regular file: {relative}"
+            ) from exc
+        raise SeedIntegrityError(str(exc)) from exc
     actual = _sha256_bytes(data)
     if actual != expected_sha256:
         raise SeedIntegrityError(
