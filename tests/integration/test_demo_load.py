@@ -75,11 +75,12 @@ def _row(record_id: str, content_hash: str, *, model_version: str = MODEL) -> di
 class TestLoadEmbeddings:
     def test_imports_matching_rows(self, backend, tmp_path):
         path = tmp_path / "emb.jsonl.gz"
-        _write_sidecar(
-            path, [_row("claim:a-01", "h1"), _row("claim:b-01", "h2")]
-        )
+        _write_sidecar(path, [_row("claim:a-01", "h1"), _row("claim:b-01", "h2")])
         report = load_embeddings(
-            path, backend, expected_hashes={"claim:a-01": "h1", "claim:b-01": "h2"}, model_version=MODEL
+            path,
+            backend,
+            expected_hashes={"claim:a-01": "h1", "claim:b-01": "h2"},
+            model_version=MODEL,
         )
         assert report.total_rows == 2
         assert report.imported == 2
@@ -125,7 +126,9 @@ class TestLoadEmbeddings:
     def test_no_model_version_disables_the_model_gate(self, backend, tmp_path):
         path = tmp_path / "emb.jsonl.gz"
         _write_sidecar(path, [_row("claim:a-01", "h1", model_version="whatever")])
-        report = load_embeddings(path, backend, expected_hashes={"claim:a-01": "h1"}, model_version=None)
+        report = load_embeddings(
+            path, backend, expected_hashes={"claim:a-01": "h1"}, model_version=None
+        )
         assert report.imported == 1
 
     def test_batches_across_multiple_flushes(self, backend, tmp_path):
@@ -275,16 +278,22 @@ class TestLoadDemoDataset:
         backend.init_schema(embedder.dimensions, embedder.model_version)
         try:
             load_demo_dataset(
-                dataset_dir=dataset_dir, vault_dir=vault_dir,
-                review_pending_dir=review_pending_dir, backend=backend, embedder=embedder,
+                dataset_dir=dataset_dir,
+                vault_dir=vault_dir,
+                review_pending_dir=review_pending_dir,
+                backend=backend,
+                embedder=embedder,
             )
             # Hand-edit the copied file; a no-force rerun must not touch it.
             doc_path = vault_dir / "customer-support" / "sources" / "tiny-fixture-policy.md"
             doc_path.write_text(doc_path.read_text() + "\nhand-edited\n", encoding="utf-8")
 
             second = load_demo_dataset(
-                dataset_dir=dataset_dir, vault_dir=vault_dir,
-                review_pending_dir=review_pending_dir, backend=backend, embedder=embedder,
+                dataset_dir=dataset_dir,
+                vault_dir=vault_dir,
+                review_pending_dir=review_pending_dir,
+                backend=backend,
+                embedder=embedder,
             )
         finally:
             backend.close()
@@ -302,15 +311,21 @@ class TestLoadDemoDataset:
         backend.init_schema(embedder.dimensions, embedder.model_version)
         try:
             load_demo_dataset(
-                dataset_dir=dataset_dir, vault_dir=vault_dir,
-                review_pending_dir=review_pending_dir, backend=backend, embedder=embedder,
+                dataset_dir=dataset_dir,
+                vault_dir=vault_dir,
+                review_pending_dir=review_pending_dir,
+                backend=backend,
+                embedder=embedder,
             )
             doc_path = vault_dir / "customer-support" / "sources" / "tiny-fixture-policy.md"
             doc_path.write_text(doc_path.read_text() + "\nhand-edited\n", encoding="utf-8")
 
             forced = load_demo_dataset(
-                dataset_dir=dataset_dir, vault_dir=vault_dir,
-                review_pending_dir=review_pending_dir, backend=backend, embedder=embedder,
+                dataset_dir=dataset_dir,
+                vault_dir=vault_dir,
+                review_pending_dir=review_pending_dir,
+                backend=backend,
+                embedder=embedder,
                 force=True,
             )
         finally:
@@ -350,7 +365,9 @@ def test_cli_demo_load_real_dataset(tmp_path, monkeypatch):
     pending_items = list((workspace / "review" / "pending").glob("*.md"))
     assert len(pending_items) == EXPECTED_PENDING_REVIEW
 
-    settings = Settings(paths=PathsCfg(workspace=workspace), embedding=EmbeddingCfg(provider="local"))
+    settings = Settings(
+        paths=PathsCfg(workspace=workspace), embedding=EmbeddingCfg(provider="local")
+    )
     backend = get_backend(settings)
     try:
         stats = backend.stats()
@@ -376,10 +393,62 @@ def test_cli_demo_load_real_dataset(tmp_path, monkeypatch):
     parsed = workspace / "parsed/sha256/aa/example.json"
     asset.parent.mkdir(parents=True)
     parsed.parent.mkdir(parents=True)
+    settings.paths.change_control_db_path.parent.mkdir(parents=True)
     asset.write_bytes(b"post-demo source bytes")
     parsed.write_text("{}", encoding="utf-8")
+    settings.paths.change_control_db_path.write_bytes(b"authoritative review state")
+    (settings.paths.change_control_db_path.parent / "checkpoints.sqlite3").write_bytes(
+        b"non-authoritative workflow checkpoints"
+    )
 
     reset = runner.invoke(app, ["demo", "reset", "--yes"])
     assert reset.exit_code == 0, reset.output
     assert not settings.paths.assets_dir.exists()
     assert not settings.paths.parsed_documents_dir.exists()
+    assert not settings.paths.change_control_db_path.parent.exists()
+
+
+def test_demo_reset_cleanup_failure_closes_backend_and_propagates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mastervault.cli import demo as demo_module
+
+    settings = Settings(
+        paths=PathsCfg(workspace=tmp_path / "workspace"),
+        embedding=EmbeddingCfg(provider="mock"),
+    )
+    change_control_dir = settings.paths.change_control_db_path.parent
+    change_control_dir.mkdir(parents=True)
+    settings.paths.change_control_db_path.write_bytes(b"bounded failure target")
+
+    class RecordingBackend:
+        wiped = False
+        closed = False
+
+        def wipe(self) -> None:
+            self.wiped = True
+
+        def close(self) -> None:
+            self.closed = True
+
+    backend = RecordingBackend()
+    monkeypatch.setattr(demo_module, "load_settings", lambda: settings)
+    monkeypatch.setattr(demo_module, "_init_backend", lambda _settings: (backend, object()))
+    monkeypatch.setattr(
+        demo_module,
+        "load_demo_dataset",
+        lambda **_kwargs: pytest.fail("reload must not run after cleanup failure"),
+    )
+    original_rmtree = demo_module.shutil.rmtree
+
+    def fail_change_control_cleanup(path: Path) -> None:
+        if Path(path) == change_control_dir:
+            raise OSError("injected change-control cleanup failure")
+        original_rmtree(path)
+
+    monkeypatch.setattr(demo_module.shutil, "rmtree", fail_change_control_cleanup)
+    with pytest.raises(OSError, match="injected change-control cleanup failure"):
+        demo_module.reset_cmd(workspace=None, yes=True)
+    assert backend.wiped
+    assert backend.closed
+    assert settings.paths.change_control_db_path.is_file()

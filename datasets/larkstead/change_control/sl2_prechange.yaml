@@ -1,0 +1,91 @@
+schema_version: 1
+scenario_id: sl2-returns-prechange
+storyline: SL2
+as_of: 2026-01-11
+
+# Runtime source inventory only. Relationship labels, impact targets, patches,
+# and review decisions belong exclusively to evaluator data.
+documents:
+  - document_id: sl2-policy-returns-v1
+    document_family: customer-support.returns-policy
+    version_label: v1
+    source_path: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v1.md
+    source_sha256: 9ab9d48a1f42a0bb16e998b6d12ebc3353c31794fad2e57545a975f0269ccdce
+    processed_path: datasets/larkstead/processed/customer-support/sources/policy-sl2-policy-returns-v1.md
+    processed_sha256: 1bed198d580623229cd9a2ca581ed9305a1333754a8923cb1cc5c843e9d5bec9
+    declared_effective_from: 2024-01-15
+    declared_effective_to: null
+    role: policy
+    authority: primary
+
+  - document_id: sl2-memo-holiday-exception
+    document_family: sl2-holiday-return-exception
+    version_label: holiday-2025
+    source_path: datasets/larkstead/raw/internal-admin/memo/sl2-memo-holiday-exception.md
+    source_sha256: 30990c4f2e6290079d632c767c48855c7e23a097bf0d004d3bd6ed8b16fc7f35
+    processed_path: datasets/larkstead/processed/internal-admin/sources/memo-sl2-memo-holiday-exception.md
+    processed_sha256: 15f9384840735c04162ba70c9d5cfd5b5d128bc5da1bc0219e63091c981c908e
+    declared_effective_from: 2025-11-03
+    declared_effective_to: null
+    role: memo
+    authority: primary
+
+  - document_id: sl2-faq-returns
+    document_family: sl2-returns-faq
+    version_label: published-2024-01-22
+    source_path: datasets/larkstead/raw/customer-support/faq/sl2-faq-returns.md
+    source_sha256: 1212f2552da6910849644f8d95a0936ae27e6577105d84410994d360e465dd75
+    processed_path: datasets/larkstead/processed/customer-support/sources/faq-sl2-faq-returns.md
+    processed_sha256: 4a3bdcb4736414bb02c832b4a109664df6173a2bb0a58230a8b5bacb6bdffd6d
+    declared_effective_from: 2024-01-22
+    declared_effective_to: null
+    role: faq
+    authority: delegated
+
+  - document_id: sl2-macros-returns-helprise
+    document_family: sl2-returns-macros
+    version_label: effective-2024-02-09
+    source_path: datasets/larkstead/raw/customer-support/sop/sl2-macros-returns-helprise.md
+    source_sha256: d9faa2254df5a5916a44b233b396a3ba1ee2c576828e1dffbf98bf7063156a8e
+    processed_path: datasets/larkstead/processed/customer-support/sources/sop-sl2-macros-returns-helprise.md
+    processed_sha256: b6bd61bfcb56a0c44c0c001f697656337f6acdbbe32bb4c30a13b1b5d6a608b7
+    declared_effective_from: 2024-02-09
+    declared_effective_to: null
+    role: sop
+    authority: delegated
+
+  - document_id: process-showroom-demo-unit-rotation
+    document_family: showroom-demo-unit-rotation
+    version_label: v1
+    source_path: datasets/larkstead/raw/operations/process/process-showroom-demo-unit-rotation.md
+    source_sha256: 9f97a5afafa097fa815f4cc521e520b71576fc68ad02c3bf721e1bd8db36437a
+    processed_path: datasets/larkstead/processed/operations/sources/process-process-showroom-demo-unit-rotation.md
+    processed_sha256: 922b537d2b53cddf9700dfa05ba28e2a3e919efb4f015dae0ae45234d674bf30
+    declared_effective_from: 2025-07-01
+    declared_effective_to: null
+    role: process
+    authority: delegated
+
+  - document_id: sop-returns-receiving-restock-grading
+    document_family: returns-receiving-restock-grading
+    version_label: v1
+    source_path: datasets/larkstead/raw/operations/sop/sop-returns-receiving-restock-grading.md
+    source_sha256: adaf3437f6bf43c69c2cf49eb93db5f6240ce7fce001357b95dff7c109ca2c64
+    processed_path: datasets/larkstead/processed/operations/sources/sop-sop-returns-receiving-restock-grading.md
+    processed_sha256: 6cc2b7b047e145df3348c838d666be5af86929395cc79a5eca0fa711ff442dc5
+    declared_effective_from: 2025-06-23
+    declared_effective_to: null
+    role: sop
+    authority: delegated
+
+  - document_id: sl3-proposal-v1
+    document_family: sl3-cobalt-proposal
+    version_label: v1
+    source_path: datasets/larkstead/raw/sales-crm/proposal/sl3-proposal-v1.md
+    source_sha256: a0ed36f10cd8fa6f13446199b702afda2330b9a72b7fac50a8de15287999e6f6
+    processed_path: datasets/larkstead/processed/sales-crm/sources/proposal-sl3-proposal-v1.md
+    processed_sha256: 8c808b293d3692516bdd4fa076dcca94ed09a9db1101f76e5dfc71eb5b02ae90
+    declared_effective_from: 2025-09-18
+    declared_effective_to: 2025-10-19
+    role: proposal
+    authority: transactional

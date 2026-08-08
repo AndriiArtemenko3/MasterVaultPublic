@@ -135,6 +135,24 @@ Runtime and evaluator contracts are deliberately separate:
   claim-pair classifications, `DEPENDS_ON` edge truth, affected-document
   labels, minimal patches, and review decisions. `COEXISTS` and `UNRELATED`
   are no-edge dispositions rather than graph relationships.
+- `change_control/sl2_prechange.yaml` is a separate runtime-safe inventory for
+  constructing the state immediately before Returns Policy v2 arrives. It
+  contains only selected source identities, hashes, source-declared dates,
+  roles, and authority. It carries no relationship, inferred currentness,
+  impact, patch, or review answer.
+
+The ordinary shipped vault cannot serve as that pre-change demo because it
+already contains the v2 canonical source note. The pre-change materializer
+therefore copies only seven hash-verified real sources and notes into a
+disposable workspace and leaves the shipped current-state corpus untouched.
+Returns Policy v1 deliberately has no runtime `declared_effective_to` in this
+seed; the future change workflow must discover any supersession from the
+incoming v2 evidence. Declared intervals use an inclusive
+`declared_effective_from` and exclusive `declared_effective_to`. Any later
+inferred closure is a reviewed temporal projection, not a rewrite of this
+source inventory. The proposal phrase `Valid through 2025-10-18` includes that
+calendar day, so the runtime manifest normalizes it to the exclusive bound
+`2025-10-19`.
 
 Source-semantic anchors are derived from normalized source content and remain
 stable across the four layouts. They are not sequential render IDs. The

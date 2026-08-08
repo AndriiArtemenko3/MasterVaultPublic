@@ -86,12 +86,33 @@ for MIGRATION in \
   'mastervault/storage/migrations/pg/003_structural_records.sql' \
   'mastervault/storage/migrations/sqlite/001_init.sql' \
   'mastervault/storage/migrations/sqlite/002_migration_ledger.sql' \
-  'mastervault/storage/migrations/sqlite/003_structural_records.sql'
+  'mastervault/storage/migrations/sqlite/003_structural_records.sql' \
+  'mastervault/change_control/migrations/sqlite/001_change_control_aggregate.sql' \
+  'mastervault/change_control/migrations/sqlite/002_authoritative_human_review.sql'
 do
   grep -q "$MIGRATION" "$WORK/wheel.txt" \
     || fail "wheel is missing an ordered schema migration ($MIGRATION)"
 done
-printf '  wheel ships every ordered SQLite and PostgreSQL migration\n'
+printf '  wheel ships every ordered index and change-control migration\n'
+
+grep -q 'mastervault/change_control/workflow.py' "$WORK/wheel.txt" \
+  || fail "wheel is missing the temporal-review workflow seam"
+grep -q 'docs/decisions/0007-langgraph-durable-temporal-review-wait.md' "$WORK/sdist.txt" \
+  || fail "sdist is missing the LangGraph temporal-review ADR"
+unzip -p "$WHEEL" '*/METADATA' > "$WORK/metadata.txt"
+grep -q '^Requires-Dist: langgraph==1.2.9$' "$WORK/metadata.txt" \
+  || fail "wheel metadata is missing the pinned direct LangGraph dependency"
+grep -q '^Requires-Dist: langgraph-checkpoint-sqlite==3.1.0$' "$WORK/metadata.txt" \
+  || fail "wheel metadata is missing the pinned direct SQLite checkpoint dependency"
+if grep -qE '^Requires-Dist: langchain(-core)?([;<=> ]|$)' "$WORK/metadata.txt"; then
+  fail "wheel metadata declares a forbidden direct langchain dependency"
+fi
+unzip -p "$WHEEL" 'mastervault/change_control/workflow.py' > "$WORK/workflow.py"
+if grep -qE '(^|[[:space:]])(from|import)[[:space:]]+langchain(_core)?([[:space:].]|$)' \
+  "$WORK/workflow.py"; then
+  fail "temporal-review workflow imports langchain or langchain_core directly"
+fi
+printf '  workflow seam, ADR and pinned direct dependencies are shipped\n'
 
 # The prompt files are package data too; without them every contract dies.
 grep -q 'mastervault/prompts/grounded_synthesis/v1.md' "$WORK/wheel.txt" \
@@ -128,6 +149,161 @@ for package in ("docling", "docling_core", "docling_ibm_models", "torch", "torch
         raise SystemExit(f"unexpected optional package in core install: {package}")
 PY
 printf '  core install contains no Docling, torch or torchvision packages\n'
+
+# Exercise the authority/checkpoint split from the installed wheel only. This
+# is a library smoke: no temporal-review CLI is claimed in this milestone.
+(
+  cd "$WORK"
+  PYTHONPATH= "$VENV/bin/python" - <<'PY'
+from datetime import date
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from mastervault.change_control import (
+    ChangeControlAggregate,
+    ClaimRevisionRegistry,
+    ClaimSourceReference,
+    ComparableClaimPair,
+    DependencyRegistry,
+    DocumentAuthority,
+    DocumentReplacementAssessment,
+    DocumentReplacementSet,
+    DocumentRole,
+    DocumentVersionMetadata,
+    DocumentVersionRegistry,
+    HumanReviewDecisionCommand,
+    HumanReviewRequestCommand,
+    OrchestrationPhase,
+    PairDisposition,
+    RelationAssessment,
+    RelationGraph,
+    ReviewDecisionItem,
+    ReviewDisposition,
+    ReviewSubjectKind,
+    ReviewSubjectRef,
+    SqliteChangeControlStore,
+    TemporalConstraintSet,
+    TemporalConstraintStatus,
+    TemporalReviewWorkflow,
+    VersionedClaimRevision,
+)
+
+
+def document(document_id: str, version: str, effective: date, sha: str):
+    return DocumentVersionMetadata.create(
+        document_id=document_id,
+        document_family="operations.installed-wheel-policy",
+        version_label=version,
+        source_path=f"sources/{document_id}.md",
+        source_sha256=sha,
+        declared_effective_from=effective,
+        role=DocumentRole.POLICY,
+        authority=DocumentAuthority.PRIMARY,
+    )
+
+
+def claim(document_version, local_id: str, statement: str, sha: str):
+    return VersionedClaimRevision.create(
+        document=document_version,
+        source=ClaimSourceReference(
+            source_note_path=f"operations/sources/{document_version.document_id}.md",
+            source_note_sha256=sha,
+            source_claim_id=local_id,
+        ),
+        statement=statement,
+        declared_effective_from=document_version.declared_effective_from,
+        scopes=("installed-wheel-policy",),
+    )
+
+
+with TemporaryDirectory() as temporary:
+    workspace = Path(temporary)
+    state_path = workspace / "change_control" / "state.sqlite3"
+    checkpoint_path = workspace / "change_control" / "checkpoints.sqlite3"
+    old_document = document("policy-v1", "v1", date(2025, 1, 1), "a" * 64)
+    new_document = document("policy-v2", "v2", date(2026, 1, 1), "b" * 64)
+    old_claim = claim(old_document, "policy-v1-01", "The policy allows 30 days.", "c" * 64)
+    new_claim = claim(new_document, "policy-v2-01", "The policy allows 45 days.", "d" * 64)
+    relation = RelationAssessment.create(
+        pair=ComparableClaimPair.create(old_claim, new_claim),
+        disposition=PairDisposition.SUPERSEDES,
+        rationale="The later policy replaces the earlier policy.",
+        confidence=0.99,
+        newer_revision_id=new_claim.claim_revision_id,
+    )
+    replacement = DocumentReplacementAssessment.create(
+        newer_document=new_document,
+        older_document=old_document,
+        status=TemporalConstraintStatus.PROPOSED,
+        rationale="The whole policy replacement awaits human review.",
+        confidence=0.99,
+    )
+    aggregate = ChangeControlAggregate.create(
+        aggregate_id="installed-wheel",
+        documents=DocumentVersionRegistry.create((old_document, new_document)),
+        claims=ClaimRevisionRegistry.create((old_claim, new_claim)),
+        relation_graph=RelationGraph.create((relation,)),
+        dependencies=DependencyRegistry.create(()),
+        document_replacements=DocumentReplacementSet.create((replacement,)),
+        temporal_constraints=TemporalConstraintSet.create(()),
+    )
+    store = SqliteChangeControlStore(state_path)
+    store.init_schema()
+    seeded = store.create(aggregate, operation_id="installed-wheel-seed")
+    requested = store.create_review_request(
+        HumanReviewRequestCommand(
+            aggregate_id=aggregate.aggregate_id,
+            expected_revision=seeded.revision,
+            expected_aggregate_sha256=seeded.aggregate_sha256,
+            subjects=(
+                ReviewSubjectRef(
+                    kind=ReviewSubjectKind.DOCUMENT_REPLACEMENT,
+                    subject_id=replacement.relation_id,
+                ),
+            ),
+            requester_id="packaging@example.com",
+            rationale="Exercise the installed durable review wait seam.",
+        ),
+        operation_id="installed-wheel-request",
+    )
+    store.close()
+    with TemporalReviewWorkflow(
+        requested.request,
+        authority_path=state_path,
+        checkpoint_path=checkpoint_path,
+    ) as workflow:
+        assert workflow.start().phase == OrchestrationPhase.WAITING
+    store = SqliteChangeControlStore(state_path)
+    snapshot = requested.request.subjects[0]
+    decided = store.decide_review(
+        HumanReviewDecisionCommand(
+            request_id=requested.request.request_id,
+            reviewer_id="packaging-reviewer@example.com",
+            rationale="Reject the packaging-only proposed replacement.",
+            items=(
+                ReviewDecisionItem(
+                    kind=snapshot.kind,
+                    subject_id=snapshot.subject_id,
+                    original_subject_sha256=snapshot.subject_sha256,
+                    disposition=ReviewDisposition.REJECTED,
+                ),
+            ),
+        ),
+        operation_id="installed-wheel-decision",
+    )
+    store.close()
+    with TemporalReviewWorkflow(
+        requested.request,
+        authority_path=state_path,
+        checkpoint_path=checkpoint_path,
+    ) as workflow:
+        assert workflow.status().phase == OrchestrationPhase.RECONCILIATION_PENDING
+        status = workflow.resume()
+        assert status.phase == OrchestrationPhase.COMPLETE
+        assert status.decision == decided.decision
+PY
+) || fail "installed wheel temporal-review workflow smoke"
+printf '  installed wheel temporal-review wait/reconcile smoke OK\n'
 
 # ---------------------------------------------------------------------------
 step "CLI smoke flow from the installed artifact"

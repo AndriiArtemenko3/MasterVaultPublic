@@ -2,6 +2,14 @@
 
 This folder is the trust boundary that keeps ingested evidence from silently overwriting wiki concepts and other vault files. Producers (ingest routing, lint) do not edit targets directly: they enqueue a proposed change as one markdown file per item, and a human approves it before `apply` touches the target. Every apply re-checks that the target has not drifted since the proposal was written, so a stale or conflicting change is flagged for review instead of being applied.
 
+Its authority is limited to canonical-file patch actions. Temporal document
+replacement and temporal-constraint decisions are separate typed actions whose
+authority lives in `change_control/state.sqlite3`; neither system may decide the
+other's action. A later unified review facade may present both without merging
+their persistence or atomicity boundaries. LangGraph temporal-review waits use
+only sibling `change_control/checkpoints.sqlite3` cursors and never read from or
+write to this Markdown queue.
+
 ## Files
 
 | File | Responsibility |

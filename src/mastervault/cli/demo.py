@@ -78,7 +78,9 @@ def _init_backend(settings: Settings):
 @demo_app.command("load")
 def load_cmd(
     workspace: str | None = typer.Option(
-        None, "--workspace", help="Target workspace directory (default: configured paths.workspace)."
+        None,
+        "--workspace",
+        help="Target workspace directory (default: configured paths.workspace).",
     ),
     force: bool = typer.Option(
         False, "--force", help="Re-copy domain directories even if the workspace already has them."
@@ -208,7 +210,9 @@ def _expected_counts(dataset_dir: Path) -> dict[str, int]:
 @demo_app.command("status")
 def status_cmd(
     workspace: str | None = typer.Option(
-        None, "--workspace", help="Target workspace directory (default: configured paths.workspace)."
+        None,
+        "--workspace",
+        help="Target workspace directory (default: configured paths.workspace).",
     ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON instead of a table."),
 ) -> None:
@@ -263,7 +267,9 @@ def status_cmd(
     for key, label in _COUNT_ROWS:
         loaded_v = live.get(key, 0)
         expected_v = expected.get(key, 0)
-        table.add_row(label, str(loaded_v), str(expected_v), "ok" if loaded_v == expected_v else "differs")
+        table.add_row(
+            label, str(loaded_v), str(expected_v), "ok" if loaded_v == expected_v else "differs"
+        )
     _console.print(table)
     typer.echo(f"workspace: {settings.paths.workspace}")
     typer.echo(f"embedding: {settings.embedding.provider} / {stats.get('embedding_model')}")
@@ -273,7 +279,9 @@ def status_cmd(
     if live_embeddings <= 0:
         typer.echo("embeddings: none imported — run `mvault demo load`")
     elif live_embeddings != expected_embeddings:
-        typer.echo("embeddings: present but count differs from the shipped sidecar (partial load or local edits)")
+        typer.echo(
+            "embeddings: present but count differs from the shipped sidecar (partial load or local edits)"
+        )
     else:
         typer.echo("embeddings: fully imported, matches the shipped sidecar")
 
@@ -281,7 +289,9 @@ def status_cmd(
 @demo_app.command("reset")
 def reset_cmd(
     workspace: str | None = typer.Option(
-        None, "--workspace", help="Target workspace directory (default: configured paths.workspace)."
+        None,
+        "--workspace",
+        help="Target workspace directory (default: configured paths.workspace).",
     ),
     yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt."),
 ) -> None:
@@ -308,18 +318,19 @@ def reset_cmd(
         )
 
     backend, provider = _init_backend(settings)
-    backend.wipe()
-
-    for generated_dir in (
-        settings.paths.review_pending,
-        settings.paths.review_archive,
-        settings.paths.assets_dir,
-        settings.paths.parsed_documents_dir,
-    ):
-        if generated_dir.exists():
-            shutil.rmtree(generated_dir)
-
     try:
+        backend.wipe()
+
+        for generated_dir in (
+            settings.paths.review_pending,
+            settings.paths.review_archive,
+            settings.paths.assets_dir,
+            settings.paths.parsed_documents_dir,
+            settings.paths.change_control_db_path.parent,
+        ):
+            if generated_dir.exists():
+                shutil.rmtree(generated_dir)
+
         report = load_demo_dataset(
             dataset_dir=DATASET_DIR,
             vault_dir=settings.paths.vault_dir,
@@ -344,7 +355,9 @@ def reset_cmd(
 @demo_app.command("delete")
 def delete_cmd(
     workspace: str | None = typer.Option(
-        None, "--workspace", help="Target workspace directory (default: configured paths.workspace)."
+        None,
+        "--workspace",
+        help="Target workspace directory (default: configured paths.workspace).",
     ),
     yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt."),
 ) -> None:
