@@ -94,6 +94,34 @@ and cross-page table stitching are outside the slice. See [ADR 0001](docs/decisi
 for the immutable substrate and [ADR 0002](docs/decisions/0002-optional-docling-schema-v2.md)
 for the optional dependency, artifact identity, schema-v2, and measured limits.
 
+The change-control substrate also has a deliberately narrow reviewed-snapshot
+boundary. After an exact temporal proposal has been durably committed and its
+complete human review has produced revision 4, a caller supplies only the
+persisted analysis-manifest ID/SHA and decided request ID. MasterVault reopens
+the manifest and inference batches, reproduces the proposal, replays the exact
+SQLite revision-2-to-3 receipt to reconstruct its commit, reconstructs the
+immutable mixed review decision, and freshly proves that the document, claim,
+and canonical SourceNote roots are unchanged. It returns the complete
+process-local authority chain and a non-serializable capability for the exact
+revision-4 inventory.
+
+That sealed authority can now generate a pure, deterministic actual-impact
+**workload** through `build_impact_workload`. Its frozen public contracts are
+`AcceptedGoverningChange`, `ImpactExclusionReason`, and
+`ImpactInferenceShard`. Governing changes come only from accepted or edited claim-level
+review subjects whose accepted revision-4 constraint is based on an exact
+changed-to-older `SUPERSEDES` relation. The workload records the complete
+governing-change × revision-4-document product: each pair is either one
+current-document question or a typed, pair-specific exclusion. Every selected
+document is supplied as one complete canonical SourceNote shard; discovery
+attention is regenerated and retained as root-specific context, so an
+unreached, historical-reference-only, or claim-free current document is not
+silently omitted. Exact count/byte projection fails before question or shard
+IDs are minted. Content-derived IDs and authority-backed regeneration make the
+boundary tamper-evident without performing I/O. This does **not** yet run an impact
+provider, define result dispositions, create another review authority, stage
+patches, or orchestrate the flow with LangGraph.
+
 ## Quickstart
 
 No API keys required. SQLite is the default backend, so there is no database

@@ -1,0 +1,8 @@
+# Repository-review authority for the one fixed SL2 returns-v2 fixture.
+# The reviewed claim alignment is rebuilt from sealed runtime inputs; it is not
+# copied into this file and is not a claim of general semantic entailment.
+schema_version: 1
+attestation_id: sl2-returns-v2-alignment-v1
+alignment_policy_version: fixture-reviewed-extractive-alignment-v1
+claim_scope_policy_version: claim-scopes-v1
+payload_sha256: f7eb41ed4825e36f3e74bbb5c79c0b2b68c50f8791d977a05dffa46c19c2facd

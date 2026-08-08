@@ -11,6 +11,13 @@ The long-form design documents and architecture decision records behind the root
 | `decisions/0001-page-grounded-pdf-substrate.md` | Why the first v0.3 slice establishes immutable byte identity and exact page/block evidence with a deliberately coarse `pypdf` baseline. |
 | `decisions/0002-optional-docling-schema-v2.md` | The measured optional Docling dependency/artifact contract, fixed offline profile, MasterVault-owned schema-v2 and Markdown, structural evidence, compatibility boundary, and explicit deferrals. |
 | `decisions/0003-grounded-structural-retrieval.md` | Cryptographically owner/parse-bound schema-v2 structural records, row-span-aware table evidence, atomic projection replacement, exact hydrated citations, legacy compatibility, and bounded limitations. |
+| `decisions/0004-temporal-change-control-foundation.md` | The runtime temporal model, verified pre-change seed boundary, and separation between declared source dates and derived temporal state. |
+| `decisions/0005-transactional-sqlite-change-control-aggregate.md` | The dedicated transactional SQLite aggregate, content-addressed roots, compare-and-swap persistence, and migration/recovery invariants. |
+| `decisions/0006-authoritative-temporal-human-review.md` | SQLite-authoritative review of temporal replacements and constraints, including immutable requests, all-subject decisions, replay, and stale-head protection. |
+| `decisions/0007-langgraph-durable-temporal-review-wait.md` | The strict LangGraph checkpoint boundary where checkpoints are disposable workflow cursors and SQLite remains the sole review authority. |
+| `decisions/0008-deterministic-advisory-change-discovery.md` | Bounded, deterministic relationship and dependency candidate discovery with content-addressed inputs, evidence bindings, and evaluator isolation. |
+| `decisions/0009-managed-revision-review-bundle.md` | The two-PR managed-change boundary: SQLite-authoritative all-target review, create-only raw and SourceNote revisions, wake-only LangGraph reconciliation, and generation-gated activation without in-place evidence mutation. |
+| `decisions/0010-durable-temporal-analysis-authority.md` | Create-only committed inference batches, restart-reproducible temporal-analysis evidence, fresh repository SourceNote verification, and the evidence-before-SQLite revision-2 to revision-3 authority boundary. |
 
 ## How it fits
 

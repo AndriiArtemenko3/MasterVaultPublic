@@ -1,6 +1,7 @@
 # `mastervault.change_control`
 
-Runtime-only temporal contracts for MasterVault's knowledge-change workflow.
+Temporal contracts and bounded runtime authorities for MasterVault's
+knowledge-change workflow.
 
 - `models.py` defines document versions, versioned claim revisions, canonical
   claim pairs, relation/dependency assessments, explicit reviewed document
@@ -9,6 +10,24 @@ Runtime-only temporal contracts for MasterVault's knowledge-change workflow.
 - `store.py` owns the dedicated, transactional SQLite aggregate store at the
   caller-selected change-control path. It never writes the rebuildable search
   index database.
+- `managed_store.py` adds ADR 0009's PR-A-only generation-zero and managed
+  review authority as a typed subclass over that same database. It stores
+  immutable bundles, normalized targets, requests, decisions, append-only
+  delivery receipts, and successor manifests created inactive without
+  publishing files, advancing authority, or touching the serving index.
+  Repository bytes,
+  approved inference contracts, patch reconstruction, and SourceNote
+  projection validation cross an injected `ManagedReviewRepositoryResolver`;
+  no production registry is invented before the classifier/service seam owns
+  those reviewed records. The store-owned lifecycle is `open`, `stale`, or
+  `decided`, while the pure bundle view intentionally remains `open/decided`.
+  A managed bundle's temporal prerequisite names the exact authoritative
+  ADR 0006 decision that produced its review-open aggregate head; it does not
+  require that decision to contain a temporal-constraint outcome specifically.
+  The managed run operation is the exact generic CAS transition from its frozen
+  analysis head to that temporal request's base head. Manifest activity is
+  derived from the active-generation pointer; `created_inactive` records only
+  the immutable state in which a managed overlay was first committed.
 - `review.py` defines strict request, canonical subject-snapshot, per-subject
   outcome, immutable decision, lifecycle, view, and receipt contracts for
   authoritative temporal human review.
@@ -19,9 +38,152 @@ Runtime-only temporal contracts for MasterVault's knowledge-change workflow.
   and ranks current downstream attention candidates from canonical relation,
   dependency, and temporal facts in the supplied validated snapshot. Its
   outputs are advisory projections—not classifications or impact verdicts.
+- `classification.py` rederives that exhaustive candidate inventory, creates a
+  content-addressed selected/excluded ledger with no silent top-k truncation,
+  and emits per-changed-root inference shards that retain both exact claim
+  revisions and complete candidate temporality. Its frozen v1 selector keeps
+  all same-identity/family/scope pairs, then adds bounded lexical policy-slot
+  comparisons and neutral deterministic coverage samples. Exact results are
+  partitioned one-for-one into content-addressed per-changed-root output
+  shards; every input shard, output shard, and the compact result index stays
+  below the 256 KiB managed-artifact ceiling. The result-index SHA—not an
+  in-memory envelope containing all bodies—is the downstream classification
+  result binding. Classifications remain advisory; only model-valid
+  assessments are exposed for graph materialization, while cross-family
+  contradictions remain advisory-only and `SUPERSEDES` requires a strictly
+  later same-family endpoint.
+- `dependency_analysis.py` takes every graph-valid changed-to-older
+  `SUPERSEDES` result from the complete validated classification result and
+  exhaustively crosses those old-claim roots with a sealed, in-memory
+  canonical-SourceNote inventory covering every aggregate document. Claim
+  neighbours are retained as evidence bindings but never define document
+  coverage, so body-only dependencies remain visible. The complete cross
+  product fails closed above 64 questions. Changed documents and each old
+  claim's own document are explicitly ledgered exclusions. One input shard per
+  downstream document carries its full UTF-8 note, claims, temporal state, and
+  all compact old-root questions; each shard is at most 256 KiB, at most 32
+  shards/1 MiB total are allowed, and output shards mirror the same document
+  partition. `DEPENDS_ON` requires an exact body span and dependency kind;
+  `NOT_DEPENDENT` carries no edge fields. Exact character slicing is reopened
+  during validation before positive results can become
+  `DependencyAssessment` values. The pure module never resolves repository
+  paths itself: it accepts only a verified capability over exact bytes and body
+  boundaries.
+- `source_note_inventory.py` is the repository adapter for that capability. It
+  reloads the exact allowlisted pre-change and incoming roots, proves they
+  reproduce the authenticated revision-2 bootstrap snapshot, and checks exact
+  coverage of all eight SourceNotes and all 79 claim bindings. Resolution is
+  the only filesystem phase. The resulting HMAC-sealed capability is
+  non-serializable and its `verify` method performs only in-memory validation
+  against the supplied snapshot.
+- `recorded_inference.py` is the bounded execution boundary for classification
+  and dependency shards. A LIVE request gives the injected provider the exact
+  prompt, response schema, and typed input-shard bytes; semantic model output
+  is converted deterministically into the domain output shard. One
+  schema/semantic correction retry is allowed, and rejected raw output plus the
+  bounded validation error remain content-addressed execution evidence. REPLAY
+  performs no provider call and accepts only an exact prior LIVE outcome whose
+  receipt, input contract, raw output, and canonical validated output all
+  revalidate.
+  Provider requests are capped at 3 MiB, provider responses at 256 KiB, and the
+  exact seven- or eight-artifact outcome at 2 MiB of content/13 MiB canonical.
+  This seam carries evidence in memory; it does not persist artifacts, mutate
+  aggregate authority, adjudicate impact, stage patches, or add LangGraph
+  orchestration.
+- `inference_repository.py` is the concrete create-only durability boundary for
+  those outcomes. A batch marker is linked and directory-synced last; receipts
+  become replay authority only through membership in a valid committed batch.
+  Exact retries re-sync existing files and their parent directories before
+  returning authority, and bounded regular temporary residue from interrupted
+  writes is cleaned under the repository lock while unsafe residue fails
+  closed. Fresh-process capability reminting re-syncs the batch marker and
+  parent and then reopens the complete batch again before granting authority.
+  REPLAY persistence independently reopens an already committed LIVE source
+  and revalidates receipt, execution, contract, input, and output lineage.
+  Aggregate artifact/outcome/manifest limits bound repository work, and runtime
+  inference inputs reject evaluator/golden path or metadata shapes. The
+  implementation deliberately fails before mutation on platforms without its
+  required POSIX `flock`, `dir_fd`, `O_DIRECTORY`, and `O_NOFOLLOW` guarantees;
+  this is a feature-level portability constraint, not a claim that the rest of
+  MasterVault is POSIX-only.
+- `temporal_proposal.py` composes the exact validated classification and
+  dependency results into an inert revision-3 proposal: graph-valid relations,
+  positive dependencies, one proposed document replacement, proposed temporal
+  constraints, and complete review-subject coverage. It does not itself own a
+  provider, filesystem repository, or authoritative commit.
+- `temporal_analysis.py` is the bounded 16 MiB reproduction manifest for that
+  proposal. It stores the exact revision-2 aggregate, SourceNote inventory,
+  candidate and workload ledgers, compact result indices, replacement
+  candidate, proposal, and durable batch references. Provider output/artifact
+  bytes remain solely in the inference batches. Reopening reconstructs both
+  typed result sets from those batches and must reproduce the proposal exactly.
+- `temporal_commit.py` is the evidence-first revision-2 to revision-3 authority.
+  It freshly re-resolves canonical SourceNotes from repository roots, verifies
+  sealed classification and dependency batches from the same evidence
+  repository, persists and reopens the canonical temporal manifest, and only
+  then issues SQLite compare-and-swap under
+  `temporal-commit:<manifest-sha256>`. The filesystem and SQLite cannot share an
+  atomic transaction: a crash before CAS may leave an immutable inert manifest,
+  while a committed revision is never accepted if that manifest is later
+  missing or corrupt. Exact lost-ack retry reuses the same manifest and database
+  operation receipt.
+- `reviewed_snapshot.py` is the revision-4 continuity authority for downstream
+  analysis. It reopens the exact temporal manifest and inference batches,
+  reconstructs the revision-3 commit from its SQLite operation receipt,
+  verifies the complete immutable human decision, and freshly proves that the
+  document, claim, and canonical SourceNote roots are unchanged. The returned
+  complete lineage and its SourceNote inventory are independently
+  non-serializable and process-local HMAC-sealed. This seam classifies no
+  impact, opens no review, and grants no write authority.
+- `impact_analysis.py` consumes only that exact reviewed authority and exposes
+  the frozen pure workload API: `build_impact_workload`,
+  `AcceptedGoverningChange`, `ImpactExclusionReason`, and
+  `ImpactInferenceShard`. Accepted or edited claim-level review outcomes are
+  intersected with accepted revision-4 constraints and exact
+  changed-to-older `SUPERSEDES` edges. Every accepted governing change is
+  crossed with every revision-4 document, leaving each pair either selected or
+  ledgered with pair-specific and temporal exclusion reasons. Revision-4
+  attention is regenerated after review but is root-specific, bounded context:
+  no root path is `UNREACHED`, an eligible root path is `RANKED`, and
+  historical-reference-only root paths are `DISCOVERY_EXCLUDED`; none of these
+  statuses removes a current document. Before question or shard IDs are
+  minted, the builder preflights the 64-question/16-document limits, duplicate
+  logical current targets, exact 256 KiB per-shard projection, and 1 MiB total
+  projection using fixed-length identity placeholders. It performs no I/O,
+  provider execution, impact adjudication, review creation, staging, mutation,
+  or orchestration.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
+- `incoming.py` verifies the one fixed SL2 returns-v2 fixture. Before exposing
+  grounded claims, it rebuilds a canonical manifest/raw/SourceNote alignment
+  payload and checks it against an exact-path, bounded, code-hash-pinned
+  repository-review attestation.
+- `claim_scopes.py` owns the strict `claim-scopes-v1` policy: the sorted unique
+  union of a document family and separately reviewed claim `affects` routing
+  annotations. This mechanical policy does not infer semantic relevance.
+- `bootstrap.py` deterministically resolves the sealed 7-document/69-claim
+  pre-change aggregate, persists it as revision 1, CAS-adds the sealed incoming
+  document and 10 claim roots as revision 2, and returns the exact reloaded
+  snapshot plus both store receipts. The dependency-neutral
+  `analysis_binding.py` owns the one pure content-addressed binding model;
+  `create_verified_analysis_bootstrap_binding` is the separately named
+  repository-backed constructor and returns that exact pure model, not a
+  service subclass. Binding equivalence is established by its validated ID and
+  SHA rather than Python class identity. The binding retains a
+  digest of the complete incoming grounded-claim evidence and exact alignment
+  attestation, while its result keeps the sealed incoming capability for later
+  evidence-consuming analysis. The binding factory derives aggregate hashes,
+  evidence SHA, and changed roots from the supplied exact aggregates and sealed
+  event rather than accepting caller-authored derivative hashes.
+
+The alignment attestation is repository-review authority only for the exact
+hash-pinned SL2 fixture. It approves the recorded one-span extractive pairings
+and `affects` routing annotations; it is not a general semantic-entailment
+algorithm or a reusable trust decision for other documents. Capability HMACs
+detect accidental or untrusted-object mutation inside one trusted Python
+process. They are not durable signatures and do not defend against hostile code
+running in that same process.
 
 Identity and mutable binding are deliberately separate:
 
@@ -145,7 +307,8 @@ corrupt checkpoints fail closed without deletion. The owned connection and
 lock support synchronous callers in one process only; they make no
 multi-process or production-scaling claim.
 
-Deliberately deferred: relationship classifiers, actual-impact adjudication,
-background workers, review UI/CLI integration,
-multi-document apply/recovery, index updates, record-level evidence binding,
-PostgreSQL change-control persistence, and impact evaluation.
+Deliberately deferred: concrete hosted/local provider adapters and model
+dependencies, actual-impact provider execution and adjudication, background
+workers, review UI/CLI integration, multi-document apply/recovery, index
+updates, record-level evidence binding, PostgreSQL change-control persistence,
+and impact evaluation.

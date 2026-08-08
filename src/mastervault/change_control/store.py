@@ -63,7 +63,7 @@ from mastervault.change_control.review import (
 from mastervault.document_intelligence.models import EvidenceRef, StructuralEvidenceRef
 
 _STORE_IDENTITY = "mastervault.change-control.sqlite"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MODEL_SCHEMA_VERSION = 1
 _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "sqlite"
 _MIGRATION_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
@@ -99,8 +99,24 @@ _REVIEW_TABLES = {
     "change_control_review_decisions",
     "change_control_review_decision_items",
 }
-_EXPECTED_TABLES = _V1_EXPECTED_TABLES | _REVIEW_TABLES
-_EXPECTED_TABLES_BY_VERSION = {1: _V1_EXPECTED_TABLES, 2: _EXPECTED_TABLES}
+_V2_EXPECTED_TABLES = _V1_EXPECTED_TABLES | _REVIEW_TABLES
+_MANAGED_REVIEW_TABLES = {
+    "change_control_generation_manifests",
+    "change_control_active_generation",
+    "change_control_managed_review_bundles",
+    "change_control_managed_review_targets",
+    "change_control_managed_review_request_records",
+    "change_control_managed_review_request_delivery_receipts",
+    "change_control_managed_review_decisions",
+    "change_control_managed_review_decision_items",
+    "change_control_managed_review_decision_delivery_receipts",
+}
+_EXPECTED_TABLES = _V2_EXPECTED_TABLES | _MANAGED_REVIEW_TABLES
+_EXPECTED_TABLES_BY_VERSION = {
+    1: _V1_EXPECTED_TABLES,
+    2: _V2_EXPECTED_TABLES,
+    3: _EXPECTED_TABLES,
+}
 
 
 class ChangeControlStoreError(RuntimeError):
@@ -539,6 +555,7 @@ class SqliteChangeControlStore:
             self._assert_foreign_keys()
             self._validate_receipts()
             self._validate_reviews()
+            self._validate_global_operation_ownership()
             head = self.conn.execute(
                 "SELECT * FROM change_control_aggregates WHERE aggregate_id = ?",
                 (aggregate_id,),
@@ -614,6 +631,12 @@ class SqliteChangeControlStore:
             self._assert_foreign_keys()
             self._validate_receipts()
             self._validate_reviews()
+            self._validate_global_operation_ownership()
+            operation_owner = self._global_operation_owner(operation_id)
+            if operation_owner is not None and operation_owner[0] != "legacy":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another authority"
+                )
             head = self.conn.execute(
                 "SELECT * FROM change_control_aggregates WHERE aggregate_id = ?",
                 (replacement.aggregate_id,),
@@ -757,6 +780,77 @@ class SqliteChangeControlStore:
         if decision is not None:
             return "decision"
         return None
+
+    def _global_operation_owner(self, operation_id: str) -> tuple[str, str] | None:
+        """Resolve one operation ID across every v3 write authority."""
+
+        matches: list[tuple[str, str]] = []
+        queries = (
+            ("legacy", "change_control_operations", "operation_id", "operation_id"),
+            (
+                "generation-zero",
+                "change_control_active_generation",
+                "initialization_operation_id",
+                "aggregate_id",
+            ),
+            (
+                "managed-request",
+                "change_control_managed_review_request_records",
+                "operation_id",
+                "request_id",
+            ),
+            (
+                "managed-decision",
+                "change_control_managed_review_decisions",
+                "operation_id",
+                "request_id",
+            ),
+        )
+        tables = self._user_tables()
+        for owner, table, operation_column, identity_column in queries:
+            if table not in tables:
+                continue
+            row = self.conn.execute(
+                f"SELECT {identity_column} AS identity FROM {table} WHERE {operation_column}=?",
+                (operation_id,),
+            ).fetchone()
+            if row is not None:
+                matches.append((owner, str(row["identity"])))
+        if len(matches) > 1:
+            raise ChangeControlCorruptionError("operation_id has multiple authoritative owners")
+        return matches[0] if matches else None
+
+    def _validate_global_operation_ownership(self) -> None:
+        tables = self._user_tables()
+        selects = ["SELECT operation_id, 'legacy' AS owner FROM change_control_operations"]
+        if "change_control_active_generation" in tables:
+            selects.append(
+                "SELECT initialization_operation_id, 'generation-zero' "
+                "FROM change_control_active_generation"
+            )
+        if "change_control_managed_review_request_records" in tables:
+            selects.append(
+                "SELECT operation_id, 'managed-request' "
+                "FROM change_control_managed_review_request_records"
+            )
+        if "change_control_managed_review_decisions" in tables:
+            selects.append(
+                "SELECT operation_id, 'managed-decision' "
+                "FROM change_control_managed_review_decisions"
+            )
+        rows = self.conn.execute(
+            "SELECT operation_id, owner FROM ("
+            + " UNION ALL ".join(selects)
+            + ") ORDER BY operation_id, owner"
+        ).fetchall()
+        seen: set[str] = set()
+        for row in rows:
+            operation_id = str(row["operation_id"])
+            if _require_operation_id(operation_id) != operation_id or operation_id in seen:
+                raise ChangeControlCorruptionError(
+                    "operation ownership is invalid or non-unique across authorities"
+                )
+            seen.add(operation_id)
 
     @staticmethod
     def _review_subject_map(aggregate: ChangeControlAggregate) -> dict[tuple[str, str], Any]:
@@ -984,6 +1078,12 @@ class SqliteChangeControlStore:
             self._assert_foreign_keys()
             self._validate_receipts()
             self._validate_reviews()
+            self._validate_global_operation_ownership()
+            operation_owner = self._global_operation_owner(operation_id)
+            if operation_owner is not None and operation_owner[0] != "legacy":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another authority"
+                )
             receipt = self.conn.execute(
                 "SELECT * FROM change_control_operations WHERE operation_id=?", (operation_id,)
             ).fetchone()
@@ -1220,6 +1320,12 @@ class SqliteChangeControlStore:
             self._assert_foreign_keys()
             self._validate_receipts()
             self._validate_reviews()
+            self._validate_global_operation_ownership()
+            operation_owner = self._global_operation_owner(operation_id)
+            if operation_owner is not None and operation_owner[0] != "legacy":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another authority"
+                )
             receipt = self.conn.execute(
                 "SELECT * FROM change_control_operations WHERE operation_id=?", (operation_id,)
             ).fetchone()

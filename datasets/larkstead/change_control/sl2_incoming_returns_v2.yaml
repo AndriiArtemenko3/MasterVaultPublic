@@ -1,0 +1,122 @@
+schema_version: 1
+event_id: sl2-returns-policy-v2
+storyline: SL2
+arrived_on: 2026-01-12
+
+# Runtime source inventory only. Relationships, impact labels, patches, and
+# review outcomes remain exclusively in evaluator data.
+document:
+  document_id: sl2-policy-returns-v2
+  document_family: customer-support.returns-policy
+  version_label: v2
+  source_path: datasets/larkstead/raw/customer-support/policy/sl2-policy-returns-v2.md
+  source_sha256: d9ee838873469234faa0e5e435ab61cfda1b1cff32daf7d792f7b1e8d673bb6d
+  processed_path: datasets/larkstead/processed/customer-support/sources/policy-sl2-policy-returns-v2.md
+  processed_sha256: 8788c42e9d74a47ba44d9d37cd6557751994220c9c9596ff02da4d084dc89bd1
+  declared_effective_from: 2026-01-12
+  declared_effective_to: null
+  role: policy
+  authority: primary
+  claim_bindings:
+    - source_claim_id: policy-sl2-policy-returns-v2-01
+      statement_sha256: 9056074f5743074b7dc1525222c2969101ad580219489cc60f53e8c30c924ce5
+      evidence:
+        - quote: Customers may return any item within 45 days of the delivery date.
+          start_char: 234
+          end_char: 300
+          start_byte: 234
+          end_byte: 300
+    - source_claim_id: policy-sl2-policy-returns-v2-02
+      statement_sha256: 8360b59b00815330e7b879ff1d3e76cb282e158b148d404c912790a4395e1c11
+      evidence:
+        - quote: |-
+            The
+            delivery date is the carrier-confirmed date recorded in ParcelPoint.
+          start_char: 301
+          end_char: 373
+          start_byte: 301
+          end_byte: 373
+    - source_claim_id: policy-sl2-policy-returns-v2-03
+      statement_sha256: feb787cf30f215dec5bb938f058a004d1eb8e9ae9fd9ca978123b264e49f3384
+      evidence:
+        - quote: |-
+            This 45-day window has been running since 2025-11-03 as a holiday
+            exception.
+          start_char: 375
+          end_char: 451
+          start_byte: 375
+          end_byte: 451
+    - source_claim_id: policy-sl2-policy-returns-v2-04
+      statement_sha256: 2755ad1e12a6df58f33e27e1c9ac7fc7974a8a8f71cd87627e492570cc310975
+      evidence:
+        - quote: |-
+            This
+            version makes 45 days permanent policy.
+          start_char: 1919
+          end_char: 1963
+          start_byte: 1919
+          end_byte: 1963
+    - source_claim_id: policy-sl2-policy-returns-v2-05
+      statement_sha256: a53be05aef88dde76b21cf11c46115c98383e38fad22468194ba7ced182c273e
+      evidence:
+        - quote: |-
+            As of the effective date above, it is permanent and applies
+            to every order year-round, not just holiday-season deliveries.
+          start_char: 452
+          end_char: 574
+          start_byte: 452
+          end_byte: 574
+    - source_claim_id: policy-sl2-policy-returns-v2-06
+      statement_sha256: 58b54d8e32039559cede9facf1c6f2b5f0b3fee81f5398bc4fb2de18671b3db7
+      evidence:
+        - quote: |-
+            It
+            applies the same way across every product category, from small
+            accessories up through desks and bundles; there is no shorter window
+            for opened accessories and no longer window for large furniture.
+          start_char: 575
+          end_char: 774
+          start_byte: 575
+          end_byte: 774
+    - source_claim_id: policy-sl2-policy-returns-v2-07
+      statement_sha256: c3b239d0f415c92f7a8d1521b2eed97ce6d09b15204c017811b8d01f6650ecb5
+      evidence:
+        - quote: |-
+            Unused items returned in their original packaging receive a full
+            refund.
+          start_char: 808
+          end_char: 880
+          start_byte: 808
+          end_byte: 880
+    - source_claim_id: policy-sl2-policy-returns-v2-08
+      statement_sha256: cb8dde1047e21348a1034e1bc4e9e6d5a33e3171a028a4241c174a92537636c2
+      evidence:
+        - quote: |-
+            Opened, non-defective returns carry a 10% restocking fee,
+            deducted from the refund total.
+          start_char: 881
+          end_char: 970
+          start_byte: 881
+          end_byte: 970
+    - source_claim_id: policy-sl2-policy-returns-v2-09
+      statement_sha256: b6d5ddede5e740c5b4a0539e65cea8c8116cb08132f2f1c52a758055a5a336e6
+      evidence:
+        - quote: |-
+            The restocking fee is waived on B2B orders of 10 or more units, per the
+            2025-06-02 restocking update, which remains in force and is unchanged
+            by this version.
+
+          start_char: 972
+          end_char: 1130
+          start_byte: 972
+          end_byte: 1130
+    - source_claim_id: policy-sl2-policy-returns-v2-10
+      statement_sha256: 1779815320fc0accd5acb1f2ce15fd66c307fbfe5cf79c95eb2f30bab1b92921
+      evidence:
+        - quote: |-
+            Defective items are refunded or replaced at no charge, and Larkstead
+            covers return shipping.
+          start_char: 1155
+          end_char: 1247
+          start_byte: 1155
+          end_byte: 1247
