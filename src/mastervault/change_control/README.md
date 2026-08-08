@@ -127,6 +127,31 @@ knowledge-change workflow.
   while a committed revision is never accepted if that manifest is later
   missing or corrupt. Exact lost-ack retry reuses the same manifest and database
   operation receipt.
+- `reviewed_snapshot.py` is the revision-4 continuity authority for downstream
+  analysis. It reopens the exact temporal manifest and inference batches,
+  reconstructs the revision-3 commit from its SQLite operation receipt,
+  verifies the complete immutable human decision, and freshly proves that the
+  document, claim, and canonical SourceNote roots are unchanged. The returned
+  complete lineage and its SourceNote inventory are independently
+  non-serializable and process-local HMAC-sealed. This seam classifies no
+  impact, opens no review, and grants no write authority.
+- `impact_analysis.py` consumes only that exact reviewed authority and exposes
+  the frozen pure workload API: `build_impact_workload`,
+  `AcceptedGoverningChange`, `ImpactExclusionReason`, and
+  `ImpactInferenceShard`. Accepted or edited claim-level review outcomes are
+  intersected with accepted revision-4 constraints and exact
+  changed-to-older `SUPERSEDES` edges. Every accepted governing change is
+  crossed with every revision-4 document, leaving each pair either selected or
+  ledgered with pair-specific and temporal exclusion reasons. Revision-4
+  attention is regenerated after review but is root-specific, bounded context:
+  no root path is `UNREACHED`, an eligible root path is `RANKED`, and
+  historical-reference-only root paths are `DISCOVERY_EXCLUDED`; none of these
+  statuses removes a current document. Before question or shard IDs are
+  minted, the builder preflights the 64-question/16-document limits, duplicate
+  logical current targets, exact 256 KiB per-shard projection, and 1 MiB total
+  projection using fixed-length identity placeholders. It performs no I/O,
+  provider execution, impact adjudication, review creation, staging, mutation,
+  or orchestration.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -283,6 +308,7 @@ lock support synchronous callers in one process only; they make no
 multi-process or production-scaling claim.
 
 Deliberately deferred: concrete hosted/local provider adapters and model
-dependencies, actual-impact adjudication, background workers, review UI/CLI integration,
-multi-document apply/recovery, index updates, record-level evidence binding,
-PostgreSQL change-control persistence, and impact evaluation.
+dependencies, actual-impact provider execution and adjudication, background
+workers, review UI/CLI integration, multi-document apply/recovery, index
+updates, record-level evidence binding, PostgreSQL change-control persistence,
+and impact evaluation.

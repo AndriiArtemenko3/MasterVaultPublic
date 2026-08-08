@@ -184,6 +184,27 @@ if TYPE_CHECKING:
     from mastervault.change_control.bootstrap import (
         verify_generation_zero_authority as verify_generation_zero_authority,
     )
+    from mastervault.change_control.impact_analysis import (
+        MAX_IMPACT_DOCUMENT_SHARDS_V1,
+        MAX_IMPACT_INDEX_CANONICAL_BYTES_V1,
+        MAX_IMPACT_INPUT_SHARD_CANONICAL_BYTES_V1,
+        MAX_IMPACT_QUESTIONS_V1,
+        MAX_IMPACT_TOTAL_INPUT_BYTES_V1,
+        AcceptedGoverningChange,
+        ExcludedImpactQuestion,
+        ImpactAnalysisLimitError,
+        ImpactAttentionStatus,
+        ImpactExclusionReason,
+        ImpactExclusionRef,
+        ImpactInferenceShard,
+        ImpactQuestion,
+        ImpactQuestionRef,
+        ImpactWorkload,
+        ImpactWorkloadBinding,
+        ImpactWorkloadIndex,
+        build_impact_workload,
+        validate_impact_workload,
+    )
     from mastervault.change_control.inference_repository import (
         MAX_COMMITTED_BATCH_MANIFESTS_V1,
         MAX_COMMITTED_BATCH_SCAN_BYTES_V1,
@@ -248,6 +269,13 @@ if TYPE_CHECKING:
         ReplayEvidenceResolver,
         run_classification_inference,
         run_dependency_inference,
+    )
+    from mastervault.change_control.reviewed_snapshot import (
+        RepositoryVerifiedReviewedSourceNoteInventoryCapability,
+        ReviewedTemporalSnapshotAuthority,
+        ReviewedTemporalSnapshotAuthorityError,
+        ReviewedTemporalSnapshotBinding,
+        resolve_reviewed_temporal_snapshot,
     )
     from mastervault.change_control.seed import (
         PrechangeSeedDocument as PrechangeSeedDocument,
@@ -374,6 +402,30 @@ if TYPE_CHECKING:
 
 _LAZY_EXPORTS = {
     **{
+        name: ("mastervault.change_control.impact_analysis", name)
+        for name in (
+            "MAX_IMPACT_DOCUMENT_SHARDS_V1",
+            "MAX_IMPACT_INDEX_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_INPUT_SHARD_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_QUESTIONS_V1",
+            "MAX_IMPACT_TOTAL_INPUT_BYTES_V1",
+            "ExcludedImpactQuestion",
+            "AcceptedGoverningChange",
+            "ImpactAnalysisLimitError",
+            "ImpactAttentionStatus",
+            "ImpactExclusionReason",
+            "ImpactExclusionRef",
+            "ImpactInferenceShard",
+            "ImpactQuestion",
+            "ImpactQuestionRef",
+            "ImpactWorkload",
+            "ImpactWorkloadBinding",
+            "ImpactWorkloadIndex",
+            "build_impact_workload",
+            "validate_impact_workload",
+        )
+    },
+    **{
         name: ("mastervault.change_control.analysis_binding", name)
         for name in (
             "ANALYSIS_AGGREGATE_ID",
@@ -414,6 +466,16 @@ _LAZY_EXPORTS = {
             "incoming_claim_evidence_sha256",
             "verify_analysis_bootstrap_snapshot",
             "verify_generation_zero_authority",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.reviewed_snapshot", name)
+        for name in (
+            "RepositoryVerifiedReviewedSourceNoteInventoryCapability",
+            "ReviewedTemporalSnapshotAuthority",
+            "ReviewedTemporalSnapshotAuthorityError",
+            "ReviewedTemporalSnapshotBinding",
+            "resolve_reviewed_temporal_snapshot",
         )
     },
     **{
@@ -577,6 +639,11 @@ __all__ = [
     "MAX_CLASSIFIER_INFERENCE_SHARD_CANONICAL_BYTES_V1",
     "MAX_CLASSIFIER_OUTPUT_SHARD_CANONICAL_BYTES_V1",
     "MAX_CLASSIFIER_WORKLOAD_PAIRS_V1",
+    "MAX_IMPACT_DOCUMENT_SHARDS_V1",
+    "MAX_IMPACT_INDEX_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_INPUT_SHARD_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_QUESTIONS_V1",
+    "MAX_IMPACT_TOTAL_INPUT_BYTES_V1",
     "MAX_PAIR_CLASSIFICATION_CANONICAL_BYTES_V1",
     "AnalysisBootstrapBinding",
     "AnalysisBootstrapError",
@@ -626,6 +693,18 @@ __all__ = [
     "DocumentVersionRegistry",
     "EndpointEvidenceBinding",
     "ExcludedCandidateRef",
+    "ExcludedImpactQuestion",
+    "AcceptedGoverningChange",
+    "ImpactAnalysisLimitError",
+    "ImpactAttentionStatus",
+    "ImpactExclusionReason",
+    "ImpactExclusionRef",
+    "ImpactInferenceShard",
+    "ImpactQuestion",
+    "ImpactQuestionRef",
+    "ImpactWorkload",
+    "ImpactWorkloadBinding",
+    "ImpactWorkloadIndex",
     "DocumentAttentionCandidate",
     "DocumentAttentionRanking",
     "HumanReviewDecision",
@@ -747,9 +826,11 @@ __all__ = [
     "SourceNoteInventory",
     "VerifiedSourceNoteInventoryCapability",
     "generate_dependency_workload",
+    "build_impact_workload",
     "materialize_dependencies",
     "validate_dependency_results",
     "validate_dependency_workload",
+    "validate_impact_workload",
     "PRECHANGE_MANIFEST_RELATIVE_PATH",
     "RepositorySourceNoteInventoryResolver",
     "RepositoryVerifiedSourceNoteInventoryCapability",
@@ -776,8 +857,13 @@ __all__ = [
     "RecordedInferenceProvider",
     "RecordedInferenceTask",
     "ReplayEvidenceResolver",
+    "RepositoryVerifiedReviewedSourceNoteInventoryCapability",
+    "ReviewedTemporalSnapshotAuthority",
+    "ReviewedTemporalSnapshotAuthorityError",
+    "ReviewedTemporalSnapshotBinding",
     "run_classification_inference",
     "run_dependency_inference",
+    "resolve_reviewed_temporal_snapshot",
     "FilesystemInferenceEvidenceRepository",
     "InferenceEvidenceConflictError",
     "InferenceEvidenceRepositoryError",
