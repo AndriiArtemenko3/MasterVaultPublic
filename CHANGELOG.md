@@ -8,6 +8,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Recorded actual-impact inference for reviewed Step 10a workloads. Providers
+  return only semantic decisions and character offsets; exact SourceNote spans,
+  provenance, and content identities are derived locally. Non-empty LIVE or
+  REPLAY outcomes commit through the existing durable evidence repository and
+  Step 10b is reconstructed only from freshly reopened committed outcomes,
+  while a zero-question workload creates neither a provider call nor a fake
+  evidence batch.
+
 - The first v0.3 document-intelligence vertical slice for clean digital PDFs:
   full-byte SHA-256 source identity, immutable content-addressed assets,
   deterministic schema-v1 page/block artefacts, and explicit rejection of

@@ -20,6 +20,7 @@ from mastervault.change_control.bootstrap import (
 )
 from mastervault.change_control.classification import (
     ClaimPairClassification,
+    ClassificationOutputShard,
     ClassificationResultSet,
     GraphMaterializationStatus,
     materialize_relation_assessments,
@@ -27,6 +28,7 @@ from mastervault.change_control.classification import (
 )
 from mastervault.change_control.dependency_analysis import (
     DependencyClassificationResultSet,
+    DependencyOutputShard,
     DependencyWorkload,
     VerifiedSourceNoteInventoryCapability,
     materialize_dependencies,
@@ -130,8 +132,15 @@ class InferenceExecutionRef(_StrictFrozenModel):
     @classmethod
     def create(cls, outcome: RecordedInferenceOutcome) -> Self:
         validated = RecordedInferenceOutcome.model_validate(outcome.model_dump(mode="python"))
-        output = validated.classification_output or validated.dependency_output
-        assert output is not None
+        output: ClassificationOutputShard | DependencyOutputShard | None
+        if validated.execution.task == RecordedInferenceTask.CLASSIFICATION:
+            output = validated.classification_output
+        elif validated.execution.task == RecordedInferenceTask.DEPENDENCY:
+            output = validated.dependency_output
+        else:
+            raise ValueError("temporal execution refs cannot bind actual-impact inference")
+        if output is None:
+            raise ValueError("temporal execution ref omits its exact typed output")
         input_shard_id = output.input_shard_id
         input_shard_sha256 = output.input_shard_sha256
         output_shard_id = output.output_shard_id
@@ -463,6 +472,11 @@ def _validated_execution_refs(
     outcomes: tuple[RecordedInferenceOutcome, ...],
     expected_outputs: tuple[Any, ...],
 ) -> tuple[InferenceExecutionRef, ...]:
+    if task not in {
+        RecordedInferenceTask.CLASSIFICATION,
+        RecordedInferenceTask.DEPENDENCY,
+    }:
+        raise ValueError("temporal proposals cannot consume actual-impact inference")
     validated = tuple(
         RecordedInferenceOutcome.model_validate(item.model_dump(mode="python")) for item in outcomes
     )

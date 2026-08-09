@@ -106,7 +106,7 @@ process-local authority chain and a non-serializable capability for the exact
 revision-4 inventory.
 
 That sealed authority can now generate a pure, deterministic actual-impact
-**workload** through `build_impact_workload`. Its frozen public contracts are
+**workload** through `build_impact_workload`. Its frozen workload contracts are
 `AcceptedGoverningChange`, `ImpactExclusionReason`, and
 `ImpactInferenceShard`. Governing changes come only from accepted or edited claim-level
 review subjects whose accepted revision-4 constraint is based on an exact
@@ -118,9 +118,17 @@ attention is regenerated and retained as root-specific context, so an
 unreached, historical-reference-only, or claim-free current document is not
 silently omitted. Exact count/byte projection fails before question or shard
 IDs are minted. Content-derived IDs and authority-backed regeneration make the
-boundary tamper-evident without performing I/O. This does **not** yet run an impact
-provider, define result dispositions, create another review authority, stage
-patches, or orchestrate the flow with LangGraph.
+boundary tamper-evident without performing I/O. Actual-impact dispositions are
+now recorded through strict LIVE/REPLAY inference that lets a provider return
+only question IDs, semantic dispositions, character offsets, optional exact
+context IDs, and bounded rationale. MasterVault derives quotes, paths, hashes,
+and content IDs locally, persists every non-empty workload as one existing
+inference-evidence batch, freshly reopens that committed batch, and only then
+reconstructs and validates `ImpactResultSet`. A zero-question workload is a
+canonical empty result and makes no provider call or evidence batch. This does
+**not** create another review authority, plan or stage revisions, publish files,
+activate a generation, update an index, add CLI commands, or orchestrate the
+flow with LangGraph.
 
 ## Quickstart
 

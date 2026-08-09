@@ -76,8 +76,8 @@ knowledge-change workflow.
   the only filesystem phase. The resulting HMAC-sealed capability is
   non-serializable and its `verify` method performs only in-memory validation
   against the supplied snapshot.
-- `recorded_inference.py` is the bounded execution boundary for classification
-  and dependency shards. A LIVE request gives the injected provider the exact
+- `recorded_inference.py` is the bounded execution boundary for classification,
+  dependency, and actual-impact shards. A LIVE request gives the injected provider the exact
   prompt, response schema, and typed input-shard bytes; semantic model output
   is converted deterministically into the domain output shard. One
   schema/semantic correction retry is allowed, and rejected raw output plus the
@@ -88,7 +88,7 @@ knowledge-change workflow.
   Provider requests are capped at 3 MiB, provider responses at 256 KiB, and the
   exact seven- or eight-artifact outcome at 2 MiB of content/13 MiB canonical.
   This seam carries evidence in memory; it does not persist artifacts, mutate
-  aggregate authority, adjudicate impact, stage patches, or add LangGraph
+  aggregate authority, plan revisions, stage patches, or add LangGraph
   orchestration.
 - `inference_repository.py` is the concrete create-only durability boundary for
   those outcomes. A batch marker is linked and directory-synced last; receipts
@@ -127,6 +127,11 @@ knowledge-change workflow.
   while a committed revision is never accepted if that manifest is later
   missing or corrupt. Exact lost-ack retry reuses the same manifest and database
   operation receipt.
+- `reviewed_snapshot_binding.py` owns the dependency-neutral serializable
+  revision-2-to-4 audit binding. `reviewed_snapshot.py` re-exports the same
+  public model; separating it from repository-backed resolution lets pure
+  downstream workload/output models share the binding without import cycles or
+  changing its canonical payload.
 - `reviewed_snapshot.py` is the revision-4 continuity authority for downstream
   analysis. It reopens the exact temporal manifest and inference batches,
   reconstructs the revision-3 commit from its SQLite operation receipt,
@@ -171,6 +176,16 @@ knowledge-change workflow.
   zero-root/zero-question workload has one valid empty result index. This seam
   performs no provider execution, I/O, persistence, review, staging, mutation,
   publication, CLI, or orchestration work.
+- `impact_inference.py` is the thin synchronous Step 10 execution seam. Its
+  strict provider wire carries only question IDs, dispositions, character
+  offsets, optional exact context IDs, and bounded rationale; SourceNote paths,
+  hashes, quotes, and derived identities are reconstructed locally.
+  Every non-empty workload produces one output per input shard, commits all
+  outcomes through the existing evidence repository, freshly reopens and
+  verifies that batch, and reconstructs `ImpactResultSet` only from those
+  reopened outcomes before authority-backed validation. A zero-question
+  workload calls no provider and creates no evidence batch. This seam creates
+  no review, revision plan, staging object, publication, index, CLI, or graph.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.

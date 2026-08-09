@@ -1140,7 +1140,7 @@ class FilesystemInferenceEvidenceRepository:
     def persist_batch(
         self, outcomes: tuple[RecordedInferenceOutcome, ...]
     ) -> RepositoryVerifiedInferenceEvidenceBatch:
-        """Persist an exact classification/dependency shard evidence set."""
+        """Persist one exact non-empty recorded-inference shard evidence set."""
 
         prepared = self._prepare_batch(outcomes)
         execution_ids = tuple(item.outcome.execution.execution_id for item in prepared)

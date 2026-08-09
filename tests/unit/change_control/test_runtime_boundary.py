@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -74,3 +76,41 @@ def test_runtime_manifest_does_not_encode_gold_keys_or_labels():
             assert value not in forbidden_values
 
     walk(data)
+
+
+def test_public_impact_type_hints_resolve_in_a_fresh_interpreter() -> None:
+    source_root = PACKAGE_ROOT.parents[1]
+    script = f"""
+import sys
+from typing import get_type_hints
+
+sys.path.insert(0, {str(source_root)!r})
+
+from mastervault.change_control.impact_analysis import (
+    build_impact_workload,
+    validate_impact_workload,
+)
+from mastervault.change_control.impact_results import validate_impact_results
+from mastervault.change_control.review import HumanReviewDecision, HumanReviewRequest
+from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
+from mastervault.change_control.reviewed_snapshot_binding import ReviewedTemporalSnapshotBinding
+from mastervault.change_control.temporal_analysis import TemporalAnalysisEvidence
+from mastervault.change_control.temporal_proposal import TemporalProposalCommit
+
+binding_hints = get_type_hints(ReviewedTemporalSnapshotBinding.create)
+assert binding_hints["temporal_analysis"] is TemporalAnalysisEvidence
+assert binding_hints["commit"] is TemporalProposalCommit
+assert binding_hints["request"] is HumanReviewRequest
+assert binding_hints["decision"] is HumanReviewDecision
+
+assert get_type_hints(build_impact_workload)["authority"] is ReviewedTemporalSnapshotAuthority
+assert get_type_hints(validate_impact_workload)["authority"] is ReviewedTemporalSnapshotAuthority
+assert get_type_hints(validate_impact_results)["authority"] is ReviewedTemporalSnapshotAuthority
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
