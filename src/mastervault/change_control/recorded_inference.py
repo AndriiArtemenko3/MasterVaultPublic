@@ -7,7 +7,14 @@ import json
 from enum import StrEnum
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from mastervault.change_control.classification import (
     ClaimPairClassification,
@@ -21,6 +28,17 @@ from mastervault.change_control.dependency_analysis import (
     DependencyInferenceShard,
     DependencyOutputShard,
     DependencyWorkload,
+)
+from mastervault.change_control.impact_analysis import (
+    ImpactInferenceShard,
+    ImpactWorkload,
+)
+from mastervault.change_control.impact_results import (
+    MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1,
+    MAX_IMPACT_QUESTIONS_V1,
+    ImpactDecision,
+    ImpactDisposition,
+    ImpactOutputShard,
 )
 from mastervault.change_control.managed_review import (
     ContentAddressedInferenceReceipt,
@@ -62,6 +80,7 @@ class _StrictFrozenModel(BaseModel):
 class RecordedInferenceTask(StrEnum):
     CLASSIFICATION = "classification"
     DEPENDENCY = "dependency"
+    IMPACT = "impact"
 
 
 class ProviderCallResult(_StrictFrozenModel):
@@ -189,6 +208,42 @@ class DependencyWireResponse(_StrictFrozenModel):
     schema_version: Literal[1] = 1
     task: Literal[RecordedInferenceTask.DEPENDENCY] = RecordedInferenceTask.DEPENDENCY
     decisions: tuple[DependencyWireDecision, ...] = Field(min_length=1, max_length=64)
+
+
+class ImpactSpanWireDecision(_StrictFrozenModel):
+    """Provider-selected character offsets; provenance is derived locally."""
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.end_char <= self.start_char:
+            raise ValueError("impact evidence end must follow its start")
+        return self
+
+
+class ImpactWireDecision(_StrictFrozenModel):
+    """The complete semantic wire vocabulary for one actual-impact question."""
+
+    question_id: str = Field(pattern=r"^impactq:[0-9a-f]{64}$")
+    disposition: ImpactDisposition
+    spans: tuple[ImpactSpanWireDecision, ...] = Field(
+        default=(),
+        max_length=MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1,
+    )
+    attention_path_context_ids: tuple[str, ...] = ()
+    dependency_context_ids: tuple[str, ...] = ()
+    rationale: str = Field(min_length=1, max_length=4_000)
+
+
+class ImpactWireResponse(_StrictFrozenModel):
+    schema_version: Literal[1] = 1
+    task: Literal[RecordedInferenceTask.IMPACT] = RecordedInferenceTask.IMPACT
+    decisions: tuple[ImpactWireDecision, ...] = Field(
+        min_length=1,
+        max_length=MAX_IMPACT_QUESTIONS_V1,
+    )
 
 
 class InferenceArtifactPayload(_StrictFrozenModel):
@@ -387,10 +442,20 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
     execution: RecordedInferenceExecution
     classification_output: ClassificationOutputShard | None = None
     dependency_output: DependencyOutputShard | None = None
+    impact_output: ImpactOutputShard | None = None
     artifacts: tuple[InferenceArtifactPayload, ...] = Field(
         min_length=7,
         max_length=MAX_OUTCOME_ARTIFACTS_V1,
     )
+
+    @model_serializer(mode="wrap")
+    def _preserve_v1_two_task_bytes(self, handler: Any) -> Any:
+        """Omit the additive field when absent so old committed bytes stay exact."""
+
+        data = handler(self)
+        if self.impact_output is None:
+            data.pop("impact_output", None)
+        return data
 
     @field_validator("artifacts", mode="before")
     @classmethod
@@ -415,14 +480,20 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def _complete(self) -> Self:
-        if (self.execution.task == RecordedInferenceTask.CLASSIFICATION) != (
-            self.classification_output is not None and self.dependency_output is None
+        output = _task_output(
+            task=self.execution.task,
+            classification_output=self.classification_output,
+            dependency_output=self.dependency_output,
+            impact_output=self.impact_output,
+        )
+        envelope = self.execution.input_envelope
+        if (
+            envelope.workload_id != output.workload_id
+            or envelope.workload_sha256 != output.workload_sha256
+            or envelope.input_shard_id != output.input_shard_id
+            or envelope.input_shard_sha256 != output.input_shard_sha256
         ):
-            raise ValueError("classification execution requires only classification output")
-        if (self.execution.task == RecordedInferenceTask.DEPENDENCY) != (
-            self.dependency_output is not None and self.classification_output is None
-        ):
-            raise ValueError("dependency execution requires only dependency output")
+            raise ValueError("inference envelope differs from its exact typed output binding")
         refs = tuple(item.artifact for item in self.artifacts)
         if refs != tuple(sorted(refs, key=lambda item: item.artifact_id)):
             raise ValueError("artifact payloads must use canonical artifact-ID order")
@@ -444,8 +515,6 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
         artifact_payload = [item.model_dump(mode="json") for item in self.artifacts]
         if len(canonical_json_bytes(artifact_payload)) > (MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1):
             raise ValueError("outcome artifact envelope exceeds the 13 MiB canonical limit")
-        output = self.classification_output or self.dependency_output
-        assert output is not None
         output_bytes = output.canonical_bytes()
         payload = by_id[self.execution.validated_output_artifact.artifact_id]
         if payload.content_utf8.encode("utf-8") != output_bytes:
@@ -472,6 +541,45 @@ class InferenceExecutionFailed(RuntimeError):
         self.attempts = attempts
         self.artifacts = artifacts
         super().__init__(message)
+
+
+def _task_output(
+    *,
+    task: RecordedInferenceTask,
+    classification_output: ClassificationOutputShard | None,
+    dependency_output: DependencyOutputShard | None,
+    impact_output: ImpactOutputShard | None,
+) -> ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard:
+    outputs = {
+        RecordedInferenceTask.CLASSIFICATION: classification_output,
+        RecordedInferenceTask.DEPENDENCY: dependency_output,
+        RecordedInferenceTask.IMPACT: impact_output,
+    }
+    selected = outputs[task]
+    if selected is None or sum(item is not None for item in outputs.values()) != 1:
+        raise ValueError(f"{task.value} execution requires only its exact typed output")
+    return selected
+
+
+def _outcome_output_fields(
+    *,
+    task: RecordedInferenceTask,
+    output: ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard,
+) -> dict[str, Any]:
+    expected_type = {
+        RecordedInferenceTask.CLASSIFICATION: ClassificationOutputShard,
+        RecordedInferenceTask.DEPENDENCY: DependencyOutputShard,
+        RecordedInferenceTask.IMPACT: ImpactOutputShard,
+    }[task]
+    if type(output) is not expected_type:
+        raise TypeError("recorded inference task produced the wrong typed output shard")
+    return {
+        "classification_output": (
+            output if task == RecordedInferenceTask.CLASSIFICATION else None
+        ),
+        "dependency_output": output if task == RecordedInferenceTask.DEPENDENCY else None,
+        "impact_output": output if task == RecordedInferenceTask.IMPACT else None,
+    }
 
 
 def _sha256(payload: Any) -> str:
@@ -739,6 +847,52 @@ def _dependency_output(
     )
 
 
+def _impact_output(
+    *,
+    workload: ImpactWorkload,
+    shard: ImpactInferenceShard,
+    raw: str,
+) -> ImpactOutputShard:
+    if not any(item == shard for item in workload.input_shards):
+        raise ValueError("impact input shard is not an exact workload member")
+    response = ImpactWireResponse.model_validate_json(raw)
+    by_question = {item.question_id: item for item in response.decisions}
+    expected = {item.question_id: item for item in shard.questions}
+    if len(by_question) != len(response.decisions) or set(by_question) != set(expected):
+        raise ValueError("impact response must cover every input question exactly once")
+    note = shard.target_note
+    decisions: list[ImpactDecision] = []
+    for question_id in sorted(expected):
+        decision = by_question[question_id]
+        spans = tuple(
+            DocumentSpanReference(
+                document_version_id=note.document.document_version_id,
+                source_note_path=note.source_note_path,
+                source_note_sha256=note.source_note_sha256,
+                quote=note.source_note_utf8[item.start_char : item.end_char],
+                start_char=item.start_char,
+                end_char=item.end_char,
+            )
+            for item in decision.spans
+        )
+        decisions.append(
+            ImpactDecision.create(
+                input_shard=shard,
+                question=expected[question_id],
+                disposition=decision.disposition,
+                evidence_spans=spans,
+                attention_path_context_ids=decision.attention_path_context_ids,
+                dependency_context_ids=decision.dependency_context_ids,
+                rationale=decision.rationale,
+            )
+        )
+    return ImpactOutputShard.create(
+        workload=workload,
+        input_shard=shard,
+        decisions=tuple(decisions),
+    )
+
+
 def _dependency_output_shard(
     *,
     workload: DependencyWorkload,
@@ -885,6 +1039,48 @@ def _rehydrate_dependency_output(
     return output
 
 
+def _rehydrate_impact_output(
+    value: str,
+    *,
+    workload: ImpactWorkload,
+    shard: ImpactInferenceShard,
+) -> ImpactOutputShard:
+    payload = _canonical_payload(
+        value,
+        namespace="mastervault.actual-impact-output-shard.v1",
+    )
+    raw_decisions = payload.get("decisions")
+    if not isinstance(raw_decisions, list):
+        raise ValueError("impact replay payload requires a decision list")
+    questions = {item.question_id: item for item in shard.questions}
+    decisions: list[ImpactDecision] = []
+    for raw_decision in raw_decisions:
+        parsed = ImpactDecision.model_validate_json(canonical_json_bytes(raw_decision))
+        question = questions.get(parsed.question_id)
+        if question is None:
+            raise ValueError("impact replay decision is absent from the input shard")
+        reconstructed = ImpactDecision.create(
+            input_shard=shard,
+            question=question,
+            disposition=parsed.disposition,
+            evidence_spans=parsed.evidence_spans,
+            attention_path_context_ids=parsed.attention_path_context_ids,
+            dependency_context_ids=parsed.dependency_context_ids,
+            rationale=parsed.rationale,
+        )
+        if reconstructed != parsed:
+            raise ValueError("impact replay decision differs from exact local reconstruction")
+        decisions.append(reconstructed)
+    output = ImpactOutputShard.create(
+        workload=workload,
+        input_shard=shard,
+        decisions=tuple(decisions),
+    )
+    if output.canonical_bytes() != value.encode("utf-8"):
+        raise ValueError("impact replay payload differs from reconstructed output")
+    return output
+
+
 def _attempt(
     *,
     ordinal: int,
@@ -938,7 +1134,7 @@ def _execute_live(
     attempts: list[InferenceAttemptEvidence] = []
     artifacts = list(base_artifacts)
     correction: InferenceCorrection | None = None
-    output: ClassificationOutputShard | DependencyOutputShard | None = None
+    output: ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard | None = None
     final_call: ProviderCallResult | None = None
     for ordinal in range(1, MAX_ATTEMPTS_V1 + 1):
         request = _provider_request(
@@ -1087,11 +1283,11 @@ def _execute_live(
         execution_id=f"inference-exec:{digest}",
         execution_sha256=digest,
     )
+    output_fields = _outcome_output_fields(task=task, output=output)
     return RecordedInferenceOutcome(
         execution=execution,
-        classification_output=(output if isinstance(output, ClassificationOutputShard) else None),
-        dependency_output=(output if isinstance(output, DependencyOutputShard) else None),
         artifacts=tuple(sorted(artifacts, key=lambda item: item.artifact.artifact_id)),
+        **output_fields,
     )
 
 
@@ -1221,16 +1417,16 @@ def _execute_replay(
         execution_id=f"inference-exec:{digest}",
         execution_sha256=digest,
     )
+    output_fields = _outcome_output_fields(task=task, output=output)
     return RecordedInferenceOutcome(
         execution=execution,
-        classification_output=(output if isinstance(output, ClassificationOutputShard) else None),
-        dependency_output=(output if isinstance(output, DependencyOutputShard) else None),
         artifacts=tuple(
             sorted(
                 {item.artifact.artifact_id: item for item in artifacts}.values(),
                 key=lambda item: item.artifact.artifact_id,
             )
         ),
+        **output_fields,
     )
 
 
@@ -1366,12 +1562,81 @@ def run_dependency_inference(
     )
 
 
+def run_impact_inference(
+    *,
+    contract: ManagedInferenceContractBinding,
+    workload: ImpactWorkload,
+    input_shard: ImpactInferenceShard,
+    algorithm_manifest_bytes: bytes,
+    prompt_bytes: bytes,
+    response_schema_bytes: bytes,
+    provider: RecordedInferenceProvider | None = None,
+    replay_resolver: ReplayEvidenceResolver | None = None,
+    replay_source_receipt_artifact: ManagedArtifactRef | None = None,
+) -> RecordedInferenceOutcome:
+    if not any(item == input_shard for item in workload.input_shards):
+        raise ValueError("impact input shard is not an exact workload member")
+    input_bytes = input_shard.canonical_bytes()
+    envelope, artifacts = _input_envelope(
+        task=RecordedInferenceTask.IMPACT,
+        contract=contract,
+        workload_id=workload.index.workload_id,
+        workload_sha256=workload.index.workload_sha256,
+        input_shard_id=input_shard.shard_id,
+        input_shard_sha256=input_shard.shard_sha256,
+        input_bytes=input_bytes,
+        algorithm_manifest_bytes=algorithm_manifest_bytes,
+        prompt_bytes=prompt_bytes,
+        response_schema_bytes=response_schema_bytes,
+    )
+
+    def build(raw: str) -> ImpactOutputShard:
+        return _impact_output(workload=workload, shard=input_shard, raw=raw)
+
+    if contract.mode == InferenceExecutionMode.LIVE:
+        if (
+            provider is None
+            or replay_resolver is not None
+            or replay_source_receipt_artifact is not None
+        ):
+            raise ValueError("LIVE execution requires only one provider")
+        return _execute_live(
+            task=RecordedInferenceTask.IMPACT,
+            contract=contract,
+            envelope=envelope,
+            base_artifacts=artifacts,
+            prompt_bytes=prompt_bytes,
+            response_schema_bytes=response_schema_bytes,
+            input_bytes=input_bytes,
+            provider=provider,
+            build_output=build,
+        )
+    if provider is not None or replay_resolver is None or replay_source_receipt_artifact is None:
+        raise ValueError("REPLAY execution requires only resolver and exact source receipt")
+    return _execute_replay(
+        task=RecordedInferenceTask.IMPACT,
+        contract=contract,
+        envelope=envelope,
+        base_artifacts=artifacts,
+        resolver=replay_resolver,
+        source_receipt_artifact=replay_source_receipt_artifact,
+        validate_output=lambda value: _rehydrate_impact_output(
+            value,
+            workload=workload,
+            shard=input_shard,
+        ),
+    )
+
+
 __all__ = [
     "ClassificationWireDecision",
     "ClassificationWireResponse",
     "DependencySpanWireDecision",
     "DependencyWireDecision",
     "DependencyWireResponse",
+    "ImpactSpanWireDecision",
+    "ImpactWireDecision",
+    "ImpactWireResponse",
     "InferenceArtifactPayload",
     "InferenceAttemptEvidence",
     "InferenceCorrection",
@@ -1391,4 +1656,5 @@ __all__ = [
     "ReplayEvidenceResolver",
     "run_classification_inference",
     "run_dependency_inference",
+    "run_impact_inference",
 ]

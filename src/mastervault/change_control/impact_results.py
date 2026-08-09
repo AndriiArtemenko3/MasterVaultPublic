@@ -24,6 +24,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+import mastervault.change_control as change_control_types
 from mastervault.change_control.impact_analysis import (
     MAX_IMPACT_DOCUMENT_SHARDS_V1,
     MAX_IMPACT_QUESTIONS_V1,
@@ -37,7 +38,6 @@ from mastervault.change_control.models import (
     DocumentSpanReference,
     canonical_json_bytes,
 )
-from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
 
 MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1 = 64
 MAX_IMPACT_EVIDENCE_SPAN_CANONICAL_BYTES_V1 = 16 * 1024
@@ -704,7 +704,7 @@ class ImpactResultSet(_StrictFrozenModel):
 
 
 def validate_impact_results(
-    authority: ReviewedTemporalSnapshotAuthority,
+    authority: change_control_types.ReviewedTemporalSnapshotAuthority,
     *,
     workload: ImpactWorkload,
     results: ImpactResultSet,

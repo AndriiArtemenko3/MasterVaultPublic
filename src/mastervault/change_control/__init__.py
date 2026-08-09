@@ -205,6 +205,11 @@ if TYPE_CHECKING:
         build_impact_workload,
         validate_impact_workload,
     )
+    from mastervault.change_control.impact_inference import (
+        ImpactReplaySourceBinding,
+        RecordedImpactInferenceRun,
+        execute_impact_workload,
+    )
     from mastervault.change_control.impact_results import (
         MAX_IMPACT_DECISION_CANONICAL_BYTES_V1,
         MAX_IMPACT_EVIDENCE_SPAN_CANONICAL_BYTES_V1,
@@ -272,6 +277,9 @@ if TYPE_CHECKING:
         DependencySpanWireDecision,
         DependencyWireDecision,
         DependencyWireResponse,
+        ImpactSpanWireDecision,
+        ImpactWireDecision,
+        ImpactWireResponse,
         InferenceArtifactPayload,
         InferenceAttemptEvidence,
         InferenceCorrection,
@@ -286,6 +294,7 @@ if TYPE_CHECKING:
         ReplayEvidenceResolver,
         run_classification_inference,
         run_dependency_inference,
+        run_impact_inference,
     )
     from mastervault.change_control.reviewed_snapshot import (
         RepositoryVerifiedReviewedSourceNoteInventoryCapability,
@@ -463,6 +472,14 @@ _LAZY_EXPORTS = {
         )
     },
     **{
+        name: ("mastervault.change_control.impact_inference", name)
+        for name in (
+            "ImpactReplaySourceBinding",
+            "RecordedImpactInferenceRun",
+            "execute_impact_workload",
+        )
+    },
+    **{
         name: ("mastervault.change_control.analysis_binding", name)
         for name in (
             "ANALYSIS_AGGREGATE_ID",
@@ -532,6 +549,9 @@ _LAZY_EXPORTS = {
             "DependencySpanWireDecision",
             "DependencyWireDecision",
             "DependencyWireResponse",
+            "ImpactSpanWireDecision",
+            "ImpactWireDecision",
+            "ImpactWireResponse",
             "InferenceArtifactPayload",
             "InferenceAttemptEvidence",
             "InferenceCorrection",
@@ -551,6 +571,7 @@ _LAZY_EXPORTS = {
             "ReplayEvidenceResolver",
             "run_classification_inference",
             "run_dependency_inference",
+            "run_impact_inference",
         )
     },
     **{
@@ -756,6 +777,8 @@ __all__ = [
     "ImpactResultIndex",
     "ImpactResultLimitError",
     "ImpactResultSet",
+    "ImpactReplaySourceBinding",
+    "RecordedImpactInferenceRun",
     "DocumentAttentionCandidate",
     "DocumentAttentionRanking",
     "HumanReviewDecision",
@@ -883,6 +906,7 @@ __all__ = [
     "validate_dependency_workload",
     "validate_impact_workload",
     "validate_impact_results",
+    "execute_impact_workload",
     "PRECHANGE_MANIFEST_RELATIVE_PATH",
     "RepositorySourceNoteInventoryResolver",
     "RepositoryVerifiedSourceNoteInventoryCapability",
@@ -892,6 +916,9 @@ __all__ = [
     "DependencySpanWireDecision",
     "DependencyWireDecision",
     "DependencyWireResponse",
+    "ImpactSpanWireDecision",
+    "ImpactWireDecision",
+    "ImpactWireResponse",
     "InferenceArtifactPayload",
     "InferenceAttemptEvidence",
     "InferenceCorrection",
@@ -915,6 +942,7 @@ __all__ = [
     "ReviewedTemporalSnapshotBinding",
     "run_classification_inference",
     "run_dependency_inference",
+    "run_impact_inference",
     "resolve_reviewed_temporal_snapshot",
     "FilesystemInferenceEvidenceRepository",
     "InferenceEvidenceConflictError",

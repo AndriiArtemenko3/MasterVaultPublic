@@ -172,6 +172,27 @@ def test_live_persist_reopens_exact_artifacts_and_stable_batch_reference(
         )
 
 
+def test_pre_impact_outcome_shape_remains_exactly_reopenable_by_a_fresh_handle(
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    live: RecordedInferenceOutcome,
+) -> None:
+    capability = evidence_repository.persist_outcome(live)
+    manifest = (
+        evidence_repository.root
+        / "inference/evidence/outcomes"
+        / f"{capability.outcome_sha256s[0]}.json"
+    ).read_bytes()
+
+    assert b'"impact_output"' not in manifest
+    fresh = FilesystemInferenceEvidenceRepository(evidence_repository.root)
+    reopened, reminted = fresh.resolve_verified_batch(
+        batch_id=capability.batch_id,
+        batch_sha256=capability.batch_sha256,
+    )
+    assert reopened == (live,)
+    assert reminted.verify(repository=fresh, outcomes=reopened) == reopened
+
+
 def test_exact_idempotency_is_a_create_only_noop(
     evidence_repository: FilesystemInferenceEvidenceRepository,
     live: RecordedInferenceOutcome,

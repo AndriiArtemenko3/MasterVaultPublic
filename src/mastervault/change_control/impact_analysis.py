@@ -23,6 +23,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+import mastervault.change_control as change_control_types
 from mastervault.change_control.dependency_analysis import CanonicalSourceNoteSnapshot
 from mastervault.change_control.discovery import (
     AttentionPath,
@@ -50,10 +51,7 @@ from mastervault.change_control.review import (
     ReviewDisposition,
     ReviewSubjectKind,
 )
-from mastervault.change_control.reviewed_snapshot import (
-    ReviewedTemporalSnapshotAuthority,
-    ReviewedTemporalSnapshotBinding,
-)
+from mastervault.change_control.reviewed_snapshot_binding import ReviewedTemporalSnapshotBinding
 
 MAX_IMPACT_DOCUMENT_SHARDS_V1 = 16
 MAX_IMPACT_QUESTIONS_V1 = 64
@@ -835,15 +833,17 @@ class ImpactWorkload(_StrictFrozenModel):
 
 
 def _verify_authority(
-    authority: ReviewedTemporalSnapshotAuthority,
-) -> ReviewedTemporalSnapshotAuthority:
+    authority: change_control_types.ReviewedTemporalSnapshotAuthority,
+) -> change_control_types.ReviewedTemporalSnapshotAuthority:
+    from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
+
     if type(authority) is not ReviewedTemporalSnapshotAuthority:
         raise TypeError("impact workload requires the exact reviewed temporal authority")
     return authority.verify()
 
 
 def _derive_governing_changes(
-    authority: ReviewedTemporalSnapshotAuthority,
+    authority: change_control_types.ReviewedTemporalSnapshotAuthority,
     *,
     temporal_context: TemporalResolutionContext,
 ) -> tuple[AcceptedGoverningChange, ...]:
@@ -1029,7 +1029,9 @@ def _preflight_impact_inference(
     return projected_bytes
 
 
-def build_impact_workload(authority: ReviewedTemporalSnapshotAuthority) -> ImpactWorkload:
+def build_impact_workload(
+    authority: change_control_types.ReviewedTemporalSnapshotAuthority,
+) -> ImpactWorkload:
     """Build the exact closed-world workload from one sealed reviewed authority."""
 
     exact = _verify_authority(authority)
@@ -1262,7 +1264,7 @@ def build_impact_workload(authority: ReviewedTemporalSnapshotAuthority) -> Impac
 
 
 def validate_impact_workload(
-    authority: ReviewedTemporalSnapshotAuthority,
+    authority: change_control_types.ReviewedTemporalSnapshotAuthority,
     workload: ImpactWorkload,
 ) -> ImpactWorkload:
     """Reopen and exactly regenerate a workload from its sealed authority."""
