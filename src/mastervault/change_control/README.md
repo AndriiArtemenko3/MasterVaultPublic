@@ -152,6 +152,25 @@ knowledge-change workflow.
   projection using fixed-length identity placeholders. It performs no I/O,
   provider execution, impact adjudication, review creation, staging, mutation,
   or orchestration.
+- `impact_results.py` defines the separate pure Step 10b actual-impact result
+  contract. Its frozen dispositions are `AFFECTED`, `NO_CHANGE_REQUIRED`, and
+  `UNRESOLVED`; exactly one decision must cover every selected Step 10a
+  question, with no missing, duplicate, or surplus output. `AFFECTED` requires
+  at least one exact body span from the input shard's complete SourceNote.
+  `NO_CHANGE_REQUIRED` and `UNRESOLVED` may be spanless, while every span they
+  do carry is validated against that same exact note. Attention-path and
+  dependency IDs are optional context only and never evidence or label
+  authority. Per-document disposition is derived deterministically as any
+  `AFFECTED`, else any `UNRESOLVED`, else `NO_CHANGE_REQUIRED`. Decisions,
+  per-document output shards, and the compact result index are bounded and
+  content-addressed. Standalone model deserialization proves only locally
+  knowable structural/content integrity: exact grounding is established by
+  `ImpactDecision.create`, enclosing result validation, and ultimately
+  `validate_impact_results`, which first regenerates Step 10a from the sealed
+  reviewed authority and then canonically regenerates Step 10b. A
+  zero-root/zero-question workload has one valid empty result index. This seam
+  performs no provider execution, I/O, persistence, review, staging, mutation,
+  publication, CLI, or orchestration work.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.

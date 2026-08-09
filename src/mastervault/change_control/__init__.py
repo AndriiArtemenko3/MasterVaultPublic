@@ -205,6 +205,23 @@ if TYPE_CHECKING:
         build_impact_workload,
         validate_impact_workload,
     )
+    from mastervault.change_control.impact_results import (
+        MAX_IMPACT_DECISION_CANONICAL_BYTES_V1,
+        MAX_IMPACT_EVIDENCE_SPAN_CANONICAL_BYTES_V1,
+        MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1,
+        MAX_IMPACT_OUTPUT_SHARD_CANONICAL_BYTES_V1,
+        MAX_IMPACT_RATIONALE_UTF8_BYTES_V1,
+        MAX_IMPACT_RESULT_INDEX_CANONICAL_BYTES_V1,
+        MAX_IMPACT_TOTAL_OUTPUT_BYTES_V1,
+        ImpactDecision,
+        ImpactDisposition,
+        ImpactOutputShard,
+        ImpactOutputShardRef,
+        ImpactResultIndex,
+        ImpactResultLimitError,
+        ImpactResultSet,
+        validate_impact_results,
+    )
     from mastervault.change_control.inference_repository import (
         MAX_COMMITTED_BATCH_MANIFESTS_V1,
         MAX_COMMITTED_BATCH_SCAN_BYTES_V1,
@@ -426,6 +443,26 @@ _LAZY_EXPORTS = {
         )
     },
     **{
+        name: ("mastervault.change_control.impact_results", name)
+        for name in (
+            "MAX_IMPACT_DECISION_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_EVIDENCE_SPAN_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1",
+            "MAX_IMPACT_OUTPUT_SHARD_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_RATIONALE_UTF8_BYTES_V1",
+            "MAX_IMPACT_RESULT_INDEX_CANONICAL_BYTES_V1",
+            "MAX_IMPACT_TOTAL_OUTPUT_BYTES_V1",
+            "ImpactDecision",
+            "ImpactDisposition",
+            "ImpactOutputShard",
+            "ImpactOutputShardRef",
+            "ImpactResultIndex",
+            "ImpactResultLimitError",
+            "ImpactResultSet",
+            "validate_impact_results",
+        )
+    },
+    **{
         name: ("mastervault.change_control.analysis_binding", name)
         for name in (
             "ANALYSIS_AGGREGATE_ID",
@@ -644,6 +681,13 @@ __all__ = [
     "MAX_IMPACT_INPUT_SHARD_CANONICAL_BYTES_V1",
     "MAX_IMPACT_QUESTIONS_V1",
     "MAX_IMPACT_TOTAL_INPUT_BYTES_V1",
+    "MAX_IMPACT_DECISION_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_EVIDENCE_SPAN_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_EVIDENCE_SPANS_PER_DECISION_V1",
+    "MAX_IMPACT_OUTPUT_SHARD_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_RATIONALE_UTF8_BYTES_V1",
+    "MAX_IMPACT_RESULT_INDEX_CANONICAL_BYTES_V1",
+    "MAX_IMPACT_TOTAL_OUTPUT_BYTES_V1",
     "MAX_PAIR_CLASSIFICATION_CANONICAL_BYTES_V1",
     "AnalysisBootstrapBinding",
     "AnalysisBootstrapError",
@@ -705,6 +749,13 @@ __all__ = [
     "ImpactWorkload",
     "ImpactWorkloadBinding",
     "ImpactWorkloadIndex",
+    "ImpactDecision",
+    "ImpactDisposition",
+    "ImpactOutputShard",
+    "ImpactOutputShardRef",
+    "ImpactResultIndex",
+    "ImpactResultLimitError",
+    "ImpactResultSet",
     "DocumentAttentionCandidate",
     "DocumentAttentionRanking",
     "HumanReviewDecision",
@@ -831,6 +882,7 @@ __all__ = [
     "validate_dependency_results",
     "validate_dependency_workload",
     "validate_impact_workload",
+    "validate_impact_results",
     "PRECHANGE_MANIFEST_RELATIVE_PATH",
     "RepositorySourceNoteInventoryResolver",
     "RepositoryVerifiedSourceNoteInventoryCapability",
