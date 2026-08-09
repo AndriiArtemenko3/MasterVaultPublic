@@ -9,17 +9,23 @@ complete SourceNote bytes remain locally derived in a later implementation.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
+from datetime import date
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
+from mastervault.change_control._repository_files import canonical_repo_relative
 from mastervault.change_control.impact_results import (
     ImpactDisposition,
     ImpactResultSet,
 )
 from mastervault.change_control.models import (
+    DocumentVersionMetadata,
+    VersionedClaimRevision,
     canonical_json_bytes,
     normalize_logical_key,
     normalize_semantic_text,
@@ -43,6 +49,9 @@ _INPUT_SHARD_ID = r"^impactin:[0-9a-f]{64}$"
 _OUTPUT_SHARD_ID = r"^impactout:[0-9a-f]{64}$"
 _WORKLOAD_ID = r"^impactwork:[0-9a-f]{64}$"
 _RESULT_ID = r"^impactresult:[0-9a-f]{64}$"
+_REVISION_WORKLOAD_ID = r"^revisionwork:[0-9a-f]{64}$"
+_REVISION_INPUT_ID = r"^revisionin:[0-9a-f]{64}$"
+_REVISION_OUTPUT_ID = r"^revisionout:[0-9a-f]{64}$"
 _SHA256 = r"^[0-9a-f]{64}$"
 
 QuestionId = Annotated[str, Field(pattern=_QUESTION_ID)]
@@ -283,6 +292,13 @@ class AffectedRevisionWireResponse(_StrictFrozenModel):
         for rewrite in self.source_claim_statement_rewrites:
             if rewrite.edit_ordinals[-1] >= len(self.edits):
                 raise ValueError("source-claim rewrite names an absent edit ordinal")
+        covered_ordinals = tuple(
+            ordinal
+            for rewrite in self.source_claim_statement_rewrites
+            for ordinal in rewrite.edit_ordinals
+        )
+        if tuple(sorted(covered_ordinals)) != tuple(range(len(self.edits))):
+            raise ValueError("every revision edit must bind exactly one source-claim rewrite")
         return self
 
 
@@ -405,6 +421,315 @@ class RevisionPlanningEligibility(_StrictFrozenModel):
         if (self.status == RevisionPlanningEligibilityStatus.NO_WORK) != (not self.targets):
             raise ValueError("NO_WORK requires no targets and ELIGIBLE requires targets")
         return self
+
+
+class RevisionPlanningExistingClaimInput(_StrictFrozenModel):
+    """Exact predecessor claim semantics exposed to the planning provider."""
+
+    source_claim_id: str
+    claim_identity_id: str = Field(pattern=r"^claim:[0-9a-f]{64}$")
+    claim_revision_id: str = Field(pattern=r"^claimrev:[0-9a-f]{64}$")
+    statement: str = Field(min_length=8)
+    source_note_path: str
+    source_note_sha256: str = Field(pattern=_SHA256)
+    scopes: tuple[str, ...]
+
+    @field_validator("source_claim_id")
+    @classmethod
+    def _claim_key(cls, value: str) -> str:
+        return _exact_key(value, label="source_claim_id")
+
+    @field_validator("source_note_path")
+    @classmethod
+    def _note_path(cls, value: str) -> str:
+        return canonical_repo_relative(value)
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if values != tuple(sorted(set(values))):
+            raise ValueError("revision input claim scopes must be unique and canonical")
+        return values
+
+
+class RevisionPlanningInferenceShard(_StrictFrozenModel):
+    """One complete, content-addressed semantic planning input."""
+
+    schema_version: Literal[1] = 1
+    algorithm_version: Literal["recorded-revision-planning-v1"] = (
+        "recorded-revision-planning-v1"
+    )
+    run_id: str
+    impact_workload_id: str = Field(pattern=_WORKLOAD_ID)
+    impact_workload_sha256: str = Field(pattern=_SHA256)
+    impact_result_id: str = Field(pattern=_RESULT_ID)
+    impact_result_sha256: str = Field(pattern=_SHA256)
+    analysis_set_id: str = Field(pattern=r"^manalysis:[0-9a-f]{64}$")
+    analysis_set_sha256: str = Field(pattern=_SHA256)
+    analysis_as_of: date
+    target: RevisionPlanningTarget
+    predecessor: DocumentVersionMetadata
+    predecessor_raw_utf8: str
+    predecessor_source_note_path: str
+    predecessor_source_note_utf8: str
+    citation_inputs: RevisionPlanningCitationInputSet
+    existing_claims: tuple[RevisionPlanningExistingClaimInput, ...]
+    shard_id: str = Field(pattern=_REVISION_INPUT_ID)
+    shard_sha256: str = Field(pattern=_SHA256)
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "namespace": "mastervault.recorded-revision-planning-input.v1",
+            **self.model_dump(mode="json", exclude={"shard_id", "shard_sha256"}),
+        }
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_json_bytes(self._payload())
+
+    @model_validator(mode="after")
+    def _integrity(self) -> Self:
+        _exact_key(self.run_id, label="run_id")
+        if self.impact_workload_id != f"impactwork:{self.impact_workload_sha256}":
+            raise ValueError("revision input impact workload ID differs from its SHA")
+        if self.impact_result_id != f"impactresult:{self.impact_result_sha256}":
+            raise ValueError("revision input impact result ID differs from its SHA")
+        if self.analysis_set_id != f"manalysis:{self.analysis_set_sha256}":
+            raise ValueError("revision input analysis-set ID differs from its SHA")
+        if self.predecessor.document_id != self.target.target_key or (
+            self.predecessor.document_version_id != self.target.document_version_id
+        ):
+            raise ValueError("revision input predecessor differs from selected target")
+        canonical_repo_relative(self.predecessor_source_note_path)
+        claim_keys = tuple(item.source_claim_id for item in self.existing_claims)
+        if claim_keys != tuple(sorted(set(claim_keys))):
+            raise ValueError("revision input claims must be unique and canonical")
+        digest = hashlib.sha256(self.canonical_bytes()).hexdigest()
+        if self.shard_sha256 != digest or self.shard_id != f"revisionin:{digest}":
+            raise ValueError("revision input ID/SHA differs from its exact bytes")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        eligibility: RevisionPlanningEligibility,
+        run_id: str,
+        analysis_set_id: str,
+        analysis_set_sha256: str,
+        analysis_as_of: date,
+        target: RevisionPlanningTarget,
+        predecessor: DocumentVersionMetadata,
+        predecessor_raw_utf8: str,
+        predecessor_source_note_path: str,
+        predecessor_source_note_utf8: str,
+        citation_inputs: RevisionPlanningCitationInputSet,
+        existing_claim_revisions: tuple[VersionedClaimRevision, ...],
+    ) -> Self:
+        claims = tuple(
+            RevisionPlanningExistingClaimInput(
+                source_claim_id=item.source.source_claim_id,
+                claim_identity_id=item.claim_identity_id,
+                claim_revision_id=item.claim_revision_id,
+                statement=item.statement,
+                source_note_path=item.source.source_note_path,
+                source_note_sha256=item.source.source_note_sha256,
+                scopes=item.scopes,
+            )
+            for item in sorted(
+                existing_claim_revisions,
+                key=lambda value: value.source.source_claim_id,
+            )
+        )
+        values: dict[str, Any] = {
+            "schema_version": 1,
+            "algorithm_version": "recorded-revision-planning-v1",
+            "run_id": _exact_key(run_id, label="run_id"),
+            "impact_workload_id": eligibility.workload_id,
+            "impact_workload_sha256": eligibility.workload_sha256,
+            "impact_result_id": eligibility.result_id,
+            "impact_result_sha256": eligibility.result_sha256,
+            "analysis_set_id": analysis_set_id,
+            "analysis_set_sha256": analysis_set_sha256,
+            "analysis_as_of": analysis_as_of.isoformat(),
+            "target": target.model_dump(mode="json"),
+            "predecessor": predecessor.model_dump(mode="json"),
+            "predecessor_raw_utf8": predecessor_raw_utf8,
+            "predecessor_source_note_path": canonical_repo_relative(
+                predecessor_source_note_path
+            ),
+            "predecessor_source_note_utf8": predecessor_source_note_utf8,
+            "citation_inputs": citation_inputs.model_dump(mode="json"),
+            "existing_claims": [item.model_dump(mode="json") for item in claims],
+        }
+        payload = {
+            "namespace": "mastervault.recorded-revision-planning-input.v1",
+            **values,
+        }
+        digest = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        return cls.model_validate_json(
+            canonical_json_bytes(
+                {
+                    **values,
+                    "shard_id": f"revisionin:{digest}",
+                    "shard_sha256": digest,
+                }
+            )
+        )
+
+
+class RevisionPlanningWorkload(_StrictFrozenModel):
+    """Canonical all-target workload created only after the global gate passes."""
+
+    schema_version: Literal[1] = 1
+    eligibility: RevisionPlanningEligibility
+    input_shards: tuple[RevisionPlanningInferenceShard, ...]
+    workload_id: str = Field(pattern=_REVISION_WORKLOAD_ID)
+    workload_sha256: str = Field(pattern=_SHA256)
+
+    def _payload(self) -> dict[str, Any]:
+        return {
+            "namespace": "mastervault.recorded-revision-planning-workload.v1",
+            "schema_version": 1,
+            "eligibility": self.eligibility.model_dump(mode="json"),
+            "input_shard_refs": [
+                {"shard_id": item.shard_id, "shard_sha256": item.shard_sha256}
+                for item in self.input_shards
+            ],
+        }
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        target_pairs = tuple(
+            (item.target.target_key, item.target.document_version_id)
+            for item in self.input_shards
+        )
+        if target_pairs != tuple(sorted(set(target_pairs))):
+            raise ValueError("revision workload shards must be unique and canonical")
+        if (self.eligibility.status == RevisionPlanningEligibilityStatus.NO_WORK) != (
+            not self.input_shards
+        ):
+            raise ValueError("revision workload must preserve the eligibility gate")
+        if tuple(item.target for item in self.input_shards) != self.eligibility.targets:
+            raise ValueError("revision workload must cover every eligible target exactly once")
+        digest = hashlib.sha256(canonical_json_bytes(self._payload())).hexdigest()
+        if self.workload_sha256 != digest or self.workload_id != f"revisionwork:{digest}":
+            raise ValueError("revision workload ID/SHA differs from its exact ledger")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        eligibility: RevisionPlanningEligibility,
+        input_shards: tuple[RevisionPlanningInferenceShard, ...],
+    ) -> Self:
+        ordered = tuple(
+            sorted(
+                input_shards,
+                key=lambda item: (item.target.target_key, item.target.document_version_id),
+            )
+        )
+        payload = {
+            "namespace": "mastervault.recorded-revision-planning-workload.v1",
+            "schema_version": 1,
+            "eligibility": eligibility.model_dump(mode="json"),
+            "input_shard_refs": [
+                {"shard_id": item.shard_id, "shard_sha256": item.shard_sha256}
+                for item in ordered
+            ],
+        }
+        digest = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+        return cls(
+            eligibility=eligibility,
+            input_shards=ordered,
+            workload_id=f"revisionwork:{digest}",
+            workload_sha256=digest,
+        )
+
+
+class RevisionPlanningOutputShard(_StrictFrozenModel):
+    """Typed receipt-free output whose bytes are the exact C0 proposal envelope."""
+
+    schema_version: Literal[1] = 1
+    workload_id: str = Field(pattern=_REVISION_WORKLOAD_ID)
+    workload_sha256: str = Field(pattern=_SHA256)
+    input_shard_id: str = Field(pattern=_REVISION_INPUT_ID)
+    input_shard_sha256: str = Field(pattern=_SHA256)
+    target_key: str
+    document_version_id: str = Field(pattern=_DOCUMENT_VERSION_ID)
+    impact_output_shard_id: str = Field(pattern=_OUTPUT_SHARD_ID)
+    impact_output_shard_sha256: str = Field(pattern=_SHA256)
+    validated_response: RevisionPlanningWireResponse
+    proposal_output_utf8: str
+    output_shard_id: str = Field(pattern=_REVISION_OUTPUT_ID)
+    output_shard_sha256: str = Field(pattern=_SHA256)
+
+    @field_validator("target_key")
+    @classmethod
+    def _output_target(cls, value: str) -> str:
+        return _exact_key(value, label="target_key")
+
+    def canonical_bytes(self) -> bytes:
+        return self.proposal_output_utf8.encode("utf-8")
+
+    @model_validator(mode="after")
+    def _output_identity(self) -> Self:
+        if self.workload_id != f"revisionwork:{self.workload_sha256}":
+            raise ValueError("revision output workload ID differs from its SHA")
+        if self.input_shard_id != f"revisionin:{self.input_shard_sha256}":
+            raise ValueError("revision output input ID differs from its SHA")
+        if self.impact_output_shard_id != f"impactout:{self.impact_output_shard_sha256}":
+            raise ValueError("revision output impact shard ID differs from its SHA")
+        if self.validated_response.target_key != self.target_key:
+            raise ValueError("revision output response differs from its exact target")
+        try:
+            decoded = json.loads(self.proposal_output_utf8)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("revision proposal output is not JSON") from exc
+        if not isinstance(decoded, dict) or canonical_json_bytes(decoded) != self.canonical_bytes():
+            raise ValueError("revision proposal output must be exact canonical JSON")
+        expected_kind = (
+            "proposed-revision"
+            if self.validated_response.kind == "affected-revision"
+            else "no-change"
+        )
+        if decoded.get("kind") != expected_kind:
+            raise ValueError("revision proposal kind differs from validated semantic response")
+        digest = hashlib.sha256(self.canonical_bytes()).hexdigest()
+        if self.output_shard_sha256 != digest or (
+            self.output_shard_id != f"revisionout:{digest}"
+        ):
+            raise ValueError("revision output ID/SHA differs from exact proposal bytes")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        workload: RevisionPlanningWorkload,
+        input_shard: RevisionPlanningInferenceShard,
+        validated_response: RevisionPlanningWireResponse,
+        proposal_output_bytes: bytes,
+    ) -> Self:
+        try:
+            proposal_utf8 = proposal_output_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("revision proposal output must be UTF-8") from exc
+        digest = hashlib.sha256(proposal_output_bytes).hexdigest()
+        return cls(
+            workload_id=workload.workload_id,
+            workload_sha256=workload.workload_sha256,
+            input_shard_id=input_shard.shard_id,
+            input_shard_sha256=input_shard.shard_sha256,
+            target_key=input_shard.target.target_key,
+            document_version_id=input_shard.target.document_version_id,
+            impact_output_shard_id=input_shard.target.output_shard_id,
+            impact_output_shard_sha256=input_shard.target.output_shard_sha256,
+            validated_response=validated_response,
+            proposal_output_utf8=proposal_utf8,
+            output_shard_id=f"revisionout:{digest}",
+            output_shard_sha256=digest,
+        )
 
 
 class UnresolvedImpactForRevisionPlanningError(RuntimeError):
@@ -546,6 +871,35 @@ def validate_revision_planning_wire_response(
             raise ValueError("claim rewrite names a non-existing stable source claim")
         if rewrite.replacement_statement == current:
             raise ValueError("claim rewrite must change the existing statement")
+        replacements: list[tuple[int, int, str]] = []
+        for ordinal in rewrite.edit_ordinals:
+            edit = exact.edits[ordinal]
+            before = predecessor_raw_utf8[edit.start_char : edit.end_char]
+            if not before:
+                raise ValueError("claim-linked revision edits cannot be empty insertions")
+            first = current.find(before)
+            if first < 0 or current.find(before, first + 1) >= 0:
+                raise ValueError(
+                    "claim-linked edit before_text must occur exactly once in its predecessor claim"
+                )
+            replacements.append((first, first + len(before), edit.replacement_text))
+        ordered_replacements = sorted(replacements)
+        if any(
+            right[0] < left[1]
+            for left, right in zip(
+                ordered_replacements,
+                ordered_replacements[1:],
+                strict=False,
+            )
+        ):
+            raise ValueError("claim-linked revision edits overlap in predecessor claim text")
+        derived = current
+        for start, end, replacement in reversed(ordered_replacements):
+            derived = derived[:start] + replacement + derived[end:]
+        if derived != rewrite.replacement_statement:
+            raise ValueError(
+                "replacement_statement must equal the mechanically rewritten predecessor claim"
+            )
     return exact
 
 
@@ -570,7 +924,11 @@ __all__ = [
     "RevisionPlanningCitationSelector",
     "RevisionPlanningEligibility",
     "RevisionPlanningEligibilityStatus",
+    "RevisionPlanningExistingClaimInput",
+    "RevisionPlanningInferenceShard",
+    "RevisionPlanningOutputShard",
     "RevisionPlanningTarget",
+    "RevisionPlanningWorkload",
     "RevisionPlanningWireResponse",
     "StableSourceClaimStatementRewriteWire",
     "UnresolvedImpactForRevisionPlanningError",

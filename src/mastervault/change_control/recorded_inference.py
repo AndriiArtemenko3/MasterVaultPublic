@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Literal, Protocol, Self
 
@@ -11,6 +12,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
     model_serializer,
     model_validator,
@@ -48,6 +50,14 @@ from mastervault.change_control.managed_review import (
     ManagedArtifactRef,
     ManagedInferenceContractBinding,
 )
+from mastervault.change_control.managed_revision_planning import (
+    RevisionPlanningInferenceShard,
+    RevisionPlanningOutputShard,
+    RevisionPlanningWireResponse,
+    RevisionPlanningWorkload,
+    parse_revision_planning_wire_response,
+    validate_revision_planning_wire_response,
+)
 from mastervault.change_control.models import (
     SHA256_PATTERN,
     DependencyKind,
@@ -62,6 +72,10 @@ MAX_ATTEMPTS_V1 = 2
 MAX_VALIDATION_ERROR_BYTES_V1 = 2_000
 MAX_OUTCOME_ARTIFACTS_V1 = 8
 MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = MAX_OUTCOME_ARTIFACTS_V1 * 256 * 1024
+MAX_REVISION_OUTCOME_ARTIFACTS_V1 = 24
+MAX_REVISION_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = (
+    MAX_REVISION_OUTCOME_ARTIFACTS_V1 * 256 * 1024
+)
 # JSON may expand each content byte to a six-byte ``\uXXXX`` escape.  One MiB
 # above that 12 MiB worst case bounds the eight fixed reference wrappers.
 MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1 = 13 * 1024 * 1024
@@ -81,6 +95,7 @@ class RecordedInferenceTask(StrEnum):
     CLASSIFICATION = "classification"
     DEPENDENCY = "dependency"
     IMPACT = "impact"
+    REVISION_PLANNING = "revision-planning"
 
 
 class ProviderCallResult(_StrictFrozenModel):
@@ -274,7 +289,7 @@ class InferenceInputEnvelope(_StrictFrozenModel):
     workload_sha256: str = Field(pattern=SHA256_PATTERN)
     input_shard_id: str
     input_shard_sha256: str = Field(pattern=SHA256_PATTERN)
-    input_artifacts: tuple[ManagedArtifactRef, ...] = Field(min_length=4, max_length=4)
+    input_artifacts: tuple[ManagedArtifactRef, ...] = Field(min_length=4, max_length=20)
     envelope_id: str = Field(pattern=_ENVELOPE_ID)
     envelope_sha256: str = Field(pattern=SHA256_PATTERN)
 
@@ -287,7 +302,9 @@ class InferenceInputEnvelope(_StrictFrozenModel):
             sorted(self.input_artifacts, key=lambda item: item.artifact_id)
         ):
             raise ValueError("input artifacts must use canonical artifact-ID order")
-        if len({item.artifact_id for item in self.input_artifacts}) != 4:
+        if len({item.artifact_id for item in self.input_artifacts}) != len(
+            self.input_artifacts
+        ):
             raise ValueError("input artifacts must be unique")
         expected = {
             f"inference/algorithms/{self.algorithm_manifest_sha256}.json": (
@@ -298,10 +315,28 @@ class InferenceInputEnvelope(_StrictFrozenModel):
             f"inference/inputs/{self.input_shard_sha256}.json": self.input_shard_sha256,
         }
         observed = {item.path: item.sha256 for item in self.input_artifacts}
-        if observed != expected or any(
+        if any(observed.get(path) != digest for path, digest in expected.items()) or any(
             item.kind != ManagedArtifactKind.INFERENCE_INPUT for item in self.input_artifacts
         ):
-            raise ValueError("input artifacts do not bind the four exact contract/input locators")
+            raise ValueError("input artifacts do not bind the exact contract/input locators")
+        extras = set(observed) - set(expected)
+        if self.task != RecordedInferenceTask.REVISION_PLANNING and extras:
+            raise ValueError("legacy inference tasks cannot carry task-specific inputs")
+        if self.task == RecordedInferenceTask.REVISION_PLANNING and (
+            not extras
+            or any(
+                not (
+                    (path.startswith("inference/citations/") and path.endswith(".txt"))
+                    or (
+                        path.startswith("staging/managed-review/")
+                        and "/analysis-input-" in path
+                        and path.endswith(".json")
+                    )
+                )
+                for path in extras
+            )
+        ):
+            raise ValueError("revision planning has an invalid task-specific input locator")
         digest = _sha256(self._payload())
         if self.envelope_sha256 != digest or self.envelope_id != f"inference-input:{digest}":
             raise ValueError("input envelope ID/SHA does not match its exact content")
@@ -443,9 +478,10 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
     classification_output: ClassificationOutputShard | None = None
     dependency_output: DependencyOutputShard | None = None
     impact_output: ImpactOutputShard | None = None
+    revision_planning_output: RevisionPlanningOutputShard | None = None
     artifacts: tuple[InferenceArtifactPayload, ...] = Field(
         min_length=7,
-        max_length=MAX_OUTCOME_ARTIFACTS_V1,
+        max_length=MAX_REVISION_OUTCOME_ARTIFACTS_V1,
     )
 
     @model_serializer(mode="wrap")
@@ -455,14 +491,34 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
         data = handler(self)
         if self.impact_output is None:
             data.pop("impact_output", None)
+        if self.revision_planning_output is None:
+            data.pop("revision_planning_output", None)
         return data
 
     @field_validator("artifacts", mode="before")
     @classmethod
-    def _preflight_artifact_bounds(cls, value: Any) -> Any:
+    def _preflight_artifact_bounds(cls, value: Any, info: ValidationInfo) -> Any:
         if isinstance(value, list | tuple):
-            if not 7 <= len(value) <= MAX_OUTCOME_ARTIFACTS_V1:
-                raise ValueError("outcome must contain seven or eight exact v1 artifacts")
+            execution = info.data.get("execution")
+            is_revision_planning = (
+                isinstance(execution, RecordedInferenceExecution)
+                and execution.task == RecordedInferenceTask.REVISION_PLANNING
+            )
+            max_artifacts = (
+                MAX_REVISION_OUTCOME_ARTIFACTS_V1
+                if is_revision_planning
+                else MAX_OUTCOME_ARTIFACTS_V1
+            )
+            max_content_bytes = (
+                MAX_REVISION_OUTCOME_ARTIFACT_CONTENT_BYTES_V1
+                if is_revision_planning
+                else MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1
+            )
+            if not 7 <= len(value) <= max_artifacts:
+                raise ValueError(
+                    "outcome must contain seven or eight legacy artifacts, or the exact "
+                    "bounded revision-planning evidence set"
+                )
             content_bytes = 0
             for item in value:
                 content = (
@@ -474,8 +530,9 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
                 )
                 if isinstance(content, str):
                     content_bytes += len(content.encode("utf-8"))
-                    if content_bytes > MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1:
-                        raise ValueError("outcome artifact content exceeds the 2 MiB v1 limit")
+                    if content_bytes > max_content_bytes:
+                        limit = "6 MiB revision-planning" if is_revision_planning else "2 MiB v1"
+                        raise ValueError(f"outcome artifact content exceeds the {limit} limit")
         return tuple(value) if isinstance(value, list) else value
 
     @model_validator(mode="after")
@@ -485,6 +542,7 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
             classification_output=self.classification_output,
             dependency_output=self.dependency_output,
             impact_output=self.impact_output,
+            revision_planning_output=self.revision_planning_output,
         )
         envelope = self.execution.input_envelope
         if (
@@ -549,11 +607,18 @@ def _task_output(
     classification_output: ClassificationOutputShard | None,
     dependency_output: DependencyOutputShard | None,
     impact_output: ImpactOutputShard | None,
-) -> ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard:
+    revision_planning_output: RevisionPlanningOutputShard | None = None,
+) -> (
+    ClassificationOutputShard
+    | DependencyOutputShard
+    | ImpactOutputShard
+    | RevisionPlanningOutputShard
+):
     outputs = {
         RecordedInferenceTask.CLASSIFICATION: classification_output,
         RecordedInferenceTask.DEPENDENCY: dependency_output,
         RecordedInferenceTask.IMPACT: impact_output,
+        RecordedInferenceTask.REVISION_PLANNING: revision_planning_output,
     }
     selected = outputs[task]
     if selected is None or sum(item is not None for item in outputs.values()) != 1:
@@ -564,12 +629,18 @@ def _task_output(
 def _outcome_output_fields(
     *,
     task: RecordedInferenceTask,
-    output: ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard,
+    output: (
+        ClassificationOutputShard
+        | DependencyOutputShard
+        | ImpactOutputShard
+        | RevisionPlanningOutputShard
+    ),
 ) -> dict[str, Any]:
     expected_type = {
         RecordedInferenceTask.CLASSIFICATION: ClassificationOutputShard,
         RecordedInferenceTask.DEPENDENCY: DependencyOutputShard,
         RecordedInferenceTask.IMPACT: ImpactOutputShard,
+        RecordedInferenceTask.REVISION_PLANNING: RevisionPlanningOutputShard,
     }[task]
     if type(output) is not expected_type:
         raise TypeError("recorded inference task produced the wrong typed output shard")
@@ -579,6 +650,9 @@ def _outcome_output_fields(
         ),
         "dependency_output": output if task == RecordedInferenceTask.DEPENDENCY else None,
         "impact_output": output if task == RecordedInferenceTask.IMPACT else None,
+        "revision_planning_output": (
+            output if task == RecordedInferenceTask.REVISION_PLANNING else None
+        ),
     }
 
 
@@ -612,6 +686,41 @@ def _artifact(
         sha256=digest,
         byte_count=len(content),
     )
+
+
+def _revision_citation_payloads(
+    shard: RevisionPlanningInferenceShard,
+) -> tuple[InferenceArtifactPayload, ...]:
+    payloads: list[InferenceArtifactPayload] = []
+    for item in shard.citation_inputs.inputs:
+        content = item.text_utf8.encode("utf-8")
+        digest = _bytes_sha256(content)
+        artifact = ManagedArtifactRef.create(
+            kind=ManagedArtifactKind.INFERENCE_INPUT,
+            path=f"inference/citations/{item.role.value}/{digest}.txt",
+            sha256=digest,
+            byte_count=len(content),
+        )
+        payloads.append(
+            InferenceArtifactPayload(artifact=artifact, content_utf8=item.text_utf8)
+        )
+    return tuple(sorted(payloads, key=lambda value: value.artifact.artifact_id))
+
+
+def _revision_staged_input_payload(
+    shard: RevisionPlanningInferenceShard,
+) -> InferenceArtifactPayload:
+    content = shard.canonical_bytes()
+    artifact = ManagedArtifactRef.create(
+        kind=ManagedArtifactKind.INFERENCE_INPUT,
+        path=(
+            f"staging/managed-review/{shard.run_id}/{shard.target.target_key}/"
+            f"analysis-input-{shard.shard_sha256}.json"
+        ),
+        sha256=shard.shard_sha256,
+        byte_count=len(content),
+    )
+    return InferenceArtifactPayload(artifact=artifact, content_utf8=content.decode("utf-8"))
 
 
 def _receipt_artifact(receipt: ContentAddressedInferenceReceipt) -> ManagedArtifactRef:
@@ -686,6 +795,7 @@ def _input_envelope(
     algorithm_manifest_bytes: bytes,
     prompt_bytes: bytes,
     response_schema_bytes: bytes,
+    additional_inputs: tuple[InferenceArtifactPayload, ...] = (),
 ) -> tuple[InferenceInputEnvelope, tuple[InferenceArtifactPayload, ...]]:
     exact = (
         ("algorithms", "json", algorithm_manifest_bytes, contract.algorithm_manifest_sha256),
@@ -716,6 +826,7 @@ def _input_envelope(
     payloads.append(
         InferenceArtifactPayload(artifact=input_ref, content_utf8=input_bytes.decode("utf-8"))
     )
+    payloads.extend(additional_inputs)
     refs = tuple(sorted((item.artifact for item in payloads), key=lambda item: item.artifact_id))
     values = {
         "schema_version": 1,
@@ -1134,7 +1245,13 @@ def _execute_live(
     attempts: list[InferenceAttemptEvidence] = []
     artifacts = list(base_artifacts)
     correction: InferenceCorrection | None = None
-    output: ClassificationOutputShard | DependencyOutputShard | ImpactOutputShard | None = None
+    output: (
+        ClassificationOutputShard
+        | DependencyOutputShard
+        | ImpactOutputShard
+        | RevisionPlanningOutputShard
+        | None
+    ) = None
     final_call: ProviderCallResult | None = None
     for ordinal in range(1, MAX_ATTEMPTS_V1 + 1):
         request = _provider_request(
@@ -1341,7 +1458,14 @@ def _execute_replay(
     raw_payload = source_payloads[prior.raw_output_artifact.artifact_id]
     output_payload = source_payloads[prior.validated_output_artifact.artifact_id]
     source_receipt_payload = source_payloads[prior.receipt_artifact.artifact_id]
-    output = validate_output(output_payload.content_utf8)
+    source_output = _task_output(
+        task=task,
+        classification_output=source.classification_output,
+        dependency_output=source.dependency_output,
+        impact_output=source.impact_output,
+        revision_planning_output=source.revision_planning_output,
+    )
+    output = validate_output(output_payload.content_utf8, source_output)
     if output.canonical_bytes() != output_payload.content_utf8.encode("utf-8"):
         raise ValueError("replay validated bytes do not exactly rehydrate current output contract")
     output_ref = _artifact(
@@ -1488,7 +1612,7 @@ def run_classification_inference(
         base_artifacts=artifacts,
         resolver=replay_resolver,
         source_receipt_artifact=replay_source_receipt_artifact,
-        validate_output=lambda value: _rehydrate_classification_output(
+        validate_output=lambda value, _source: _rehydrate_classification_output(
             value,
             workload=workload,
             shard=input_shard,
@@ -1554,7 +1678,7 @@ def run_dependency_inference(
         base_artifacts=artifacts,
         resolver=replay_resolver,
         source_receipt_artifact=replay_source_receipt_artifact,
-        validate_output=lambda value: _rehydrate_dependency_output(
+        validate_output=lambda value, _source: _rehydrate_dependency_output(
             value,
             workload=workload,
             shard=input_shard,
@@ -1620,11 +1744,135 @@ def run_impact_inference(
         base_artifacts=artifacts,
         resolver=replay_resolver,
         source_receipt_artifact=replay_source_receipt_artifact,
-        validate_output=lambda value: _rehydrate_impact_output(
+        validate_output=lambda value, _source: _rehydrate_impact_output(
             value,
             workload=workload,
             shard=input_shard,
         ),
+    )
+
+
+def run_revision_planning_inference(
+    *,
+    contract: ManagedInferenceContractBinding,
+    workload: RevisionPlanningWorkload,
+    input_shard: RevisionPlanningInferenceShard,
+    algorithm_manifest_bytes: bytes,
+    prompt_bytes: bytes,
+    response_schema_bytes: bytes,
+    materialize_output: Callable[
+        [
+            RevisionPlanningWireResponse,
+            InferenceInputEnvelope,
+            tuple[InferenceArtifactPayload, ...],
+        ],
+        RevisionPlanningOutputShard,
+    ],
+    provider: RecordedInferenceProvider | None = None,
+    replay_resolver: ReplayEvidenceResolver | None = None,
+    replay_source_receipt_artifact: ManagedArtifactRef | None = None,
+) -> RecordedInferenceOutcome:
+    """Run one C0 semantic response through local proposal materialization."""
+
+    if not any(item == input_shard for item in workload.input_shards):
+        raise ValueError("revision planning input shard is not an exact workload member")
+    input_bytes = input_shard.canonical_bytes()
+    citation_payloads = (
+        *_revision_citation_payloads(input_shard),
+        _revision_staged_input_payload(input_shard),
+    )
+    envelope, artifacts = _input_envelope(
+        task=RecordedInferenceTask.REVISION_PLANNING,
+        contract=contract,
+        workload_id=workload.workload_id,
+        workload_sha256=workload.workload_sha256,
+        input_shard_id=input_shard.shard_id,
+        input_shard_sha256=input_shard.shard_sha256,
+        input_bytes=input_bytes,
+        algorithm_manifest_bytes=algorithm_manifest_bytes,
+        prompt_bytes=prompt_bytes,
+        response_schema_bytes=response_schema_bytes,
+        additional_inputs=citation_payloads,
+    )
+
+    existing = {item.source_claim_id: item.statement for item in input_shard.existing_claims}
+
+    def materialize(response: RevisionPlanningWireResponse) -> RevisionPlanningOutputShard:
+        output = materialize_output(response, envelope, artifacts)
+        if (
+            output.workload_id != workload.workload_id
+            or output.workload_sha256 != workload.workload_sha256
+            or output.input_shard_id != input_shard.shard_id
+            or output.input_shard_sha256 != input_shard.shard_sha256
+            or output.target_key != input_shard.target.target_key
+            or output.document_version_id != input_shard.target.document_version_id
+            or output.impact_output_shard_id != input_shard.target.output_shard_id
+            or output.impact_output_shard_sha256 != input_shard.target.output_shard_sha256
+            or output.validated_response != response
+        ):
+            raise ValueError("materialized revision output substitutes its exact input binding")
+        return output
+
+    def build(raw: str) -> RevisionPlanningOutputShard:
+        response = validate_revision_planning_wire_response(
+            parse_revision_planning_wire_response(raw),
+            target=input_shard.target,
+            predecessor_raw_utf8=input_shard.predecessor_raw_utf8,
+            citation_inputs=input_shard.citation_inputs,
+            existing_claim_statements=existing,
+        )
+        return materialize(response)
+
+    if contract.mode == InferenceExecutionMode.LIVE:
+        if provider is None or replay_resolver is not None or (
+            replay_source_receipt_artifact is not None
+        ):
+            raise ValueError("LIVE execution requires only one provider")
+        return _execute_live(
+            task=RecordedInferenceTask.REVISION_PLANNING,
+            contract=contract,
+            envelope=envelope,
+            base_artifacts=artifacts,
+            prompt_bytes=prompt_bytes,
+            response_schema_bytes=response_schema_bytes,
+            input_bytes=input_bytes,
+            provider=provider,
+            build_output=build,
+        )
+    if provider is not None or replay_resolver is None or replay_source_receipt_artifact is None:
+        raise ValueError("REPLAY execution requires only resolver and exact source receipt")
+
+    def rehydrate(
+        value: str,
+        source_output: (
+            ClassificationOutputShard
+            | DependencyOutputShard
+            | ImpactOutputShard
+            | RevisionPlanningOutputShard
+        ),
+    ) -> RevisionPlanningOutputShard:
+        if type(source_output) is not RevisionPlanningOutputShard:
+            raise ValueError("revision replay source omits its typed output")
+        response = validate_revision_planning_wire_response(
+            source_output.validated_response,
+            target=input_shard.target,
+            predecessor_raw_utf8=input_shard.predecessor_raw_utf8,
+            citation_inputs=input_shard.citation_inputs,
+            existing_claim_statements=existing,
+        )
+        rebuilt = materialize(response)
+        if rebuilt != source_output or rebuilt.canonical_bytes() != value.encode("utf-8"):
+            raise ValueError("revision replay differs from deterministic local materialization")
+        return rebuilt
+
+    return _execute_replay(
+        task=RecordedInferenceTask.REVISION_PLANNING,
+        contract=contract,
+        envelope=envelope,
+        base_artifacts=artifacts,
+        resolver=replay_resolver,
+        source_receipt_artifact=replay_source_receipt_artifact,
+        validate_output=rehydrate,
     )
 
 
@@ -1657,4 +1905,5 @@ __all__ = [
     "run_classification_inference",
     "run_dependency_inference",
     "run_impact_inference",
+    "run_revision_planning_inference",
 ]

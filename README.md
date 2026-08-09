@@ -125,10 +125,18 @@ context IDs, and bounded rationale. MasterVault derives quotes, paths, hashes,
 and content IDs locally, persists every non-empty workload as one existing
 inference-evidence batch, freshly reopens that committed batch, and only then
 reconstructs and validates `ImpactResultSet`. A zero-question workload is a
-canonical empty result and makes no provider call or evidence batch. This does
-**not** create another review authority, plan or stage revisions, publish files,
-activate a generation, update an index, add CLI commands, or orchestrate the
-flow with LangGraph.
+canonical empty result and makes no provider call or evidence batch.
+
+That exact Step 10b run can now drive recorded revision planning. A provider
+returns only bounded semantic edits or explicit no-change evidence; one
+correction retry is available in LIVE mode, while REPLAY reuses exact committed
+LIVE evidence without another model call. MasterVault deterministically derives
+the complete candidate plan or no-change payload, byte-grounded citations,
+successor Markdown SourceNote, claims, paths, and hashes, then records one
+all-target inference batch and a create-only, manifest-gated inert staging set.
+This still does **not** create managed-review authority, publish files, activate
+a generation, update an index, add CLI commands, close the v0.3 loop, or expand
+the existing LangGraph orchestration.
 
 ## Quickstart
 

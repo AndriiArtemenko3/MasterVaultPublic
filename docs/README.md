@@ -20,6 +20,7 @@ The long-form design documents and architecture decision records behind the root
 | `decisions/0010-durable-temporal-analysis-authority.md` | Create-only committed inference batches, restart-reproducible temporal-analysis evidence, fresh repository SourceNote verification, and the evidence-before-SQLite revision-2 to revision-3 authority boundary. |
 | `decisions/0011-recorded-actual-impact-inference.md` | Strict provider semantics with locally derived SourceNote grounding, LIVE/REPLAY impact execution, committed-batch-only Step 10b reconstruction, and the truthful zero-question no-batch path. |
 | `decisions/0012-managed-revision-planning-contract-freeze.md` | Durable Step 10b evidence in v2 managed analysis, exact per-document review coverage, v1 byte compatibility, and the pure locally selected affected/no-change revision-planning wire boundary. |
+| `decisions/0013-deterministic-recorded-revision-planning-and-inert-staging.md` | Exact Step 10b-to-planning execution, role-qualified recorded evidence, deterministic Markdown plan/no-change materialization, byte-compatible target-analysis v2, and manifest-gated inert staging without review authority. |
 
 ## How it fits
 

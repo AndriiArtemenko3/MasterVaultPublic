@@ -2078,7 +2078,7 @@ class ManagedAnalysisSetBinding(_StrictFrozenModel):
 
 
 class TargetAnalysisBinding(_StrictFrozenModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[1, 2] = 1
     target_analysis_id: str = Field(pattern=_ID_PATTERNS["mtargetanalysis"].pattern)
     target_key: str
     analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
@@ -2087,6 +2087,7 @@ class TargetAnalysisBinding(_StrictFrozenModel):
     target_result_sha256: str = Field(pattern=SHA256_PATTERN)
     inference_input: ManagedArtifactRef
     input_envelope_sha256: str = Field(pattern=SHA256_PATTERN)
+    staged_input_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
     @field_validator("target_key")
     @classmethod
@@ -2095,6 +2096,13 @@ class TargetAnalysisBinding(_StrictFrozenModel):
 
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"target_analysis_id"})
+
+    @model_serializer(mode="wrap")
+    def _preserve_v1_bytes(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.schema_version == 1:
+            values.pop("staged_input_sha256", None)
+        return values
 
     def _envelope_payload(self) -> dict[str, Any]:
         return self.model_dump(
@@ -2106,13 +2114,24 @@ class TargetAnalysisBinding(_StrictFrozenModel):
     def _identity(self) -> Self:
         if self.inference_input.kind != ManagedArtifactKind.INFERENCE_INPUT:
             raise ValueError("target analysis must bind an inference-input artifact")
-        envelope_bytes = canonical_json_bytes(self._envelope_payload())
-        envelope_sha = hashlib.sha256(envelope_bytes).hexdigest()
-        if self.input_envelope_sha256 != envelope_sha or (
-            self.inference_input.sha256 != envelope_sha
-            or self.inference_input.byte_count != len(envelope_bytes)
+        if self.schema_version == 1:
+            if self.staged_input_sha256 is not None:
+                raise ValueError("target analysis v1 cannot carry staged input identity")
+            envelope_bytes = canonical_json_bytes(self._envelope_payload())
+            envelope_sha = hashlib.sha256(envelope_bytes).hexdigest()
+            if self.input_envelope_sha256 != envelope_sha or (
+                self.inference_input.sha256 != envelope_sha
+                or self.inference_input.byte_count != len(envelope_bytes)
+            ):
+                raise ValueError("target analysis input envelope SHA does not bind provenance")
+        elif (
+            self.staged_input_sha256 != self.inference_input.sha256
+            or "/analysis-input-" not in self.inference_input.path
+            or not self.inference_input.path.endswith(
+                f"analysis-input-{self.staged_input_sha256}.json"
+            )
         ):
-            raise ValueError("target analysis input envelope SHA does not bind exact provenance")
+            raise ValueError("target analysis v2 does not bind its exact staged input")
         if self.target_analysis_id != _content_id("mtargetanalysis", self._payload()):
             raise ValueError("target analysis ID does not bind exact provenance")
         return self
@@ -2147,6 +2166,34 @@ class TargetAnalysisBinding(_StrictFrozenModel):
         }
         return _validate_canonical_json(
             cls, {"target_analysis_id": _content_id("mtargetanalysis", values), **values}
+        )
+
+    @classmethod
+    def create_recorded(
+        cls,
+        *,
+        target_key: str,
+        analysis_set: ManagedAnalysisSetBinding,
+        target_result_sha256: str,
+        inference_input: ManagedArtifactRef,
+        input_envelope_sha256: str,
+    ) -> Self:
+        values = {
+            "schema_version": 2,
+            "target_key": _exact_logical_key(target_key, label="target_key"),
+            "analysis_set_id": analysis_set.analysis_set_id,
+            "analysis_set_sha256": analysis_set.analysis_set_sha256,
+            "impact_result_sha256": analysis_set.impact_result_sha256,
+            "target_result_sha256": target_result_sha256,
+            "inference_input": inference_input.model_dump(mode="json"),
+            "input_envelope_sha256": _exact_sha256(
+                input_envelope_sha256, label="input_envelope_sha256"
+            ),
+            "staged_input_sha256": inference_input.sha256,
+        }
+        return _validate_canonical_json(
+            cls,
+            {"target_analysis_id": _content_id("mtargetanalysis", values), **values},
         )
 
 
@@ -2475,7 +2522,7 @@ class ManagedRevisionPlan(_StrictFrozenModel):
             or self.analysis.inference_input.path
             != (
                 f"staging/managed-review/{self.run_id}/{self.target_key}/analysis-input-"
-                f"{self.analysis.input_envelope_sha256}.json"
+                f"{self.analysis.inference_input.sha256}.json"
             )
         ):
             raise ValueError("plan inference receipt does not bind exact target input envelope")
@@ -2718,7 +2765,7 @@ class NoChangeImpactCard(_StrictFrozenModel):
             or self.analysis.inference_input.path
             != (
                 f"staging/managed-review/{self.run_id}/{self.target_key}/analysis-input-"
-                f"{self.analysis.input_envelope_sha256}.json"
+                f"{self.analysis.inference_input.sha256}.json"
             )
             or invalid_citation
         ):

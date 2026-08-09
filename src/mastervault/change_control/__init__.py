@@ -248,6 +248,12 @@ if TYPE_CHECKING:
         InferenceEvidenceUnsupportedPlatformError,
         RepositoryVerifiedInferenceEvidenceBatch,
     )
+    from mastervault.change_control.managed_staging_repository import (
+        ManagedStagingCompletionBinding,
+        ManagedStagingManifest,
+        ManagedStagingRepository,
+        VerifiedManagedStagingCapability,
+    )
     from mastervault.change_control.managed_store import (
         ManagedReviewAuthorityError as ManagedReviewAuthorityError,
     )
@@ -295,6 +301,7 @@ if TYPE_CHECKING:
         run_classification_inference,
         run_dependency_inference,
         run_impact_inference,
+        run_revision_planning_inference,
     )
     from mastervault.change_control.reviewed_snapshot import (
         RepositoryVerifiedReviewedSourceNoteInventoryCapability,
@@ -302,6 +309,13 @@ if TYPE_CHECKING:
         ReviewedTemporalSnapshotAuthorityError,
         ReviewedTemporalSnapshotBinding,
         resolve_reviewed_temporal_snapshot,
+    )
+    from mastervault.change_control.revision_planning_inference import (
+        RecordedRevisionPlanningInferenceRun,
+        RevisionPlanningPredecessorSnapshot,
+        RevisionPlanningReplaySourceBinding,
+        RevisionPlanningSubject,
+        execute_revision_planning,
     )
     from mastervault.change_control.seed import (
         PrechangeSeedDocument as PrechangeSeedDocument,
@@ -572,6 +586,26 @@ _LAZY_EXPORTS = {
             "run_classification_inference",
             "run_dependency_inference",
             "run_impact_inference",
+            "run_revision_planning_inference",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.revision_planning_inference", name)
+        for name in (
+            "RecordedRevisionPlanningInferenceRun",
+            "RevisionPlanningPredecessorSnapshot",
+            "RevisionPlanningReplaySourceBinding",
+            "RevisionPlanningSubject",
+            "execute_revision_planning",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_staging_repository", name)
+        for name in (
+            "ManagedStagingCompletionBinding",
+            "ManagedStagingManifest",
+            "ManagedStagingRepository",
+            "VerifiedManagedStagingCapability",
         )
     },
     **{
@@ -943,6 +977,16 @@ __all__ = [
     "run_classification_inference",
     "run_dependency_inference",
     "run_impact_inference",
+    "run_revision_planning_inference",
+    "RecordedRevisionPlanningInferenceRun",
+    "RevisionPlanningPredecessorSnapshot",
+    "RevisionPlanningReplaySourceBinding",
+    "RevisionPlanningSubject",
+    "execute_revision_planning",
+    "ManagedStagingCompletionBinding",
+    "ManagedStagingManifest",
+    "ManagedStagingRepository",
+    "VerifiedManagedStagingCapability",
     "resolve_reviewed_temporal_snapshot",
     "FilesystemInferenceEvidenceRepository",
     "InferenceEvidenceConflictError",

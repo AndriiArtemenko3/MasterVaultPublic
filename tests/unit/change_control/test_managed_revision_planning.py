@@ -270,7 +270,13 @@ def test_wire_uses_python_character_ranges_for_unicode_without_normalization() -
                 citations=(_selector(start_char=1, end_char=5),),
             ),
         ),
-        source_claim_statement_rewrites=(),
+        source_claim_statement_rewrites=(
+            StableSourceClaimStatementRewriteWire(
+                source_claim_id="faq-return-window",
+                replacement_statement="Prefix 45 days suffix.",
+                edit_ordinals=(0,),
+            ),
+        ),
         rationale="Unicode offsets refer to Python characters in exact input text.",
     )
 
@@ -279,7 +285,9 @@ def test_wire_uses_python_character_ranges_for_unicode_without_normalization() -
         target=_target(),
         predecessor_raw_utf8=predecessor,
         citation_inputs=_citation_inputs(governing=evidence),
-        existing_claim_statements={},
+        existing_claim_statements={
+            "faq-return-window": "Prefix 😀e\u0301漢 suffix."
+        },
     )
 
     assert predecessor[validated.edits[0].start_char : validated.edits[0].end_char] == "😀e\u0301漢"
@@ -317,7 +325,13 @@ def test_local_validation_rejects_nonempty_and_empty_no_op_edits() -> None:
                 citations=(_selector(),),
             ),
         ),
-        source_claim_statement_rewrites=(),
+        source_claim_statement_rewrites=(
+            StableSourceClaimStatementRewriteWire(
+                source_claim_id="faq-return-window",
+                replacement_statement="An inserted change.",
+                edit_ordinals=(0,),
+            ),
+        ),
         rationale="An empty insertion cannot be accepted as a semantic revision.",
     )
     with pytest.raises(ValueError, match="must change the exact predecessor"):
@@ -326,7 +340,56 @@ def test_local_validation_rejects_nonempty_and_empty_no_op_edits() -> None:
             target=_target(),
             predecessor_raw_utf8="012345",
             citation_inputs=_citation_inputs(),
-            existing_claim_statements={},
+            existing_claim_statements={"faq-return-window": "Current statement."},
+        )
+
+
+def test_affected_revision_requires_complete_mechanical_claim_rewrites() -> None:
+    affected = _affected()
+    coherent_claim = {
+        "faq-return-window": "Premium returns are accepted for 12 days."
+    }
+    assert (
+        validate_revision_planning_wire_response(
+            affected,
+            target=_target(),
+            predecessor_raw_utf8="012345",
+            citation_inputs=_citation_inputs(),
+            existing_claim_statements=coherent_claim,
+        )
+        == affected
+    )
+
+    omitted = affected.model_copy(update={"source_claim_statement_rewrites": ()})
+    with pytest.raises(ValidationError, match="every revision edit"):
+        validate_revision_planning_wire_response(
+            omitted,
+            target=_target(),
+            predecessor_raw_utf8="012345",
+            citation_inputs=_citation_inputs(),
+            existing_claim_statements=coherent_claim,
+        )
+
+    fabricated = affected.model_copy(
+        update={
+            "source_claim_statement_rewrites": (
+                affected.source_claim_statement_rewrites[0].model_copy(
+                    update={
+                        "replacement_statement": (
+                            "Premium returns are accepted for 90 days."
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="mechanically rewritten"):
+        validate_revision_planning_wire_response(
+            fabricated,
+            target=_target(),
+            predecessor_raw_utf8="012345",
+            citation_inputs=_citation_inputs(),
+            existing_claim_statements=coherent_claim,
         )
 
 
