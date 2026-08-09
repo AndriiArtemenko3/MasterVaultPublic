@@ -28,8 +28,10 @@ from mastervault.change_control.managed_review import (
     GenerationZeroOriginBasis,
     GroundedArtifactCitation,
     InferenceExecutionMode,
+    ManagedAnalysisSetBinding,
     ManagedArtifactRef,
     ManagedGenerationManifestBinding,
+    ManagedImpactAnalysisEvidenceBinding,
     ManagedInferenceContractBinding,
     ManagedRevisionDecisionCommand,
     ManagedRevisionDecisionReceipt,
@@ -78,6 +80,10 @@ class ManagedReviewRepositoryResolver(Protocol):
     def resolve_approved_inference_contract(
         self, binding: ManagedInferenceContractBinding
     ) -> ManagedInferenceContractBinding: ...
+
+    def resolve_impact_analysis_evidence(
+        self, binding: ManagedImpactAnalysisEvidenceBinding
+    ) -> ManagedImpactAnalysisEvidenceBinding: ...
 
     def open_artifact(self, artifact: ManagedArtifactRef) -> bytes: ...
 
@@ -207,6 +213,20 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
         contract = next(iter(contracts.values()))
         try:
+            analyses = {
+                item.analysis_set_id: item
+                for item in models
+                if isinstance(item, ManagedAnalysisSetBinding)
+            }
+            if len(analyses) != 1:
+                raise ValueError("managed evidence must bind exactly one analysis set")
+            analysis = next(iter(analyses.values()))
+            impact_evidence = analysis.impact_evidence
+            if analysis.schema_version != 2 or impact_evidence is None:
+                raise ValueError("new managed review authority requires v2 impact evidence")
+            resolved_impact = resolver.resolve_impact_analysis_evidence(impact_evidence)
+            if resolved_impact != impact_evidence:
+                raise ValueError("resolved impact evidence differs from the managed analysis")
             approved = resolver.resolve_approved_inference_contract(contract)
             if approved != contract:
                 raise ValueError("approved inference contract differs from the run binding")

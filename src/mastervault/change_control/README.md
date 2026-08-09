@@ -186,6 +186,24 @@ knowledge-change workflow.
   reopened outcomes before authority-backed validation. A zero-question
   workload calls no provider and creates no evidence batch. This seam creates
   no review, revision plan, staging object, publication, index, CLI, or graph.
+- `managed_impact_evidence.py` converts one verified, non-empty recorded-impact
+  run into a dependency-neutral durable binding over the exact repository,
+  committed batch members, workload/result identities, and ordered Step 10b
+  output refs. `ManagedAnalysisSetBinding` v2 carries that authority into
+  managed review; legacy v1 payloads remain byte-identical and readable, but
+  the managed store will not accept a new v1 request. Every create/read/decide/
+  replay boundary re-resolves the exact binding through the injected resolver.
+- `managed_revision_planning.py` freezes the next pure provider wire without
+  executing it. Step 10b selects affected versus no-change locally, empty work
+  returns `NO_WORK`, and any unresolved target blocks the complete set.
+  Affected responses contain only ordered Python-character edits, citation
+  selectors, and statement-only rewrites of existing stable source-claim keys;
+  no-change responses contain rationale plus citations. Citation selectors
+  resolve through a typed local `governing-evidence`/`target-evidence`
+  allowlist; roles, non-whitespace spans, content IDs, no-op edits, and claim
+  statement normalization are checked locally. Paths, hashes,
+  provenance, identities, dates, scopes, confidence, complete SourceNotes,
+  staging, review creation, and orchestration remain outside this module.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.

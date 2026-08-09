@@ -15,6 +15,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Step 10b is reconstructed only from freshly reopened committed outcomes,
   while a zero-question workload creates neither a provider call nor a fake
   evidence batch.
+- A v2 managed-analysis binding that carries exact committed actual-impact
+  evidence into all-target review, while preserving v1 canonical bytes for
+  historical reads. Managed review now requires one exact output per target
+  and re-resolves that evidence at every SQLite authority boundary.
+- Pure revision-planning eligibility and provider-wire contracts: impact
+  selects affected/no-change locally, unresolved work blocks the whole set,
+  and providers can return only bounded Unicode-character edits or explicit
+  no-change evidence. Execution, staging, review creation, publication, and
+  activation remain deferred.
 
 - The first v0.3 document-intelligence vertical slice for clean digital PDFs:
   full-byte SHA-256 source identity, immutable content-addressed assets,

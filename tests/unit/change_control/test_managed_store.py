@@ -29,6 +29,9 @@ from mastervault.change_control.managed_review import (
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedBundleOutcome,
+    ManagedImpactAnalysisEvidenceBinding,
+    ManagedImpactBatchMemberBinding,
+    ManagedImpactOutputRefBinding,
     ManagedInferenceContractBinding,
     ManagedReviewBaseBinding,
     ManagedRevisionDecisionCommand,
@@ -119,11 +122,13 @@ class _Resolver:
         artifacts: dict[str, bytes],
         *,
         approved_projection_ids: set[str] | None = None,
+        impact_evidence: ManagedImpactAnalysisEvidenceBinding | None = None,
     ) -> None:
         self.contract = contract
         self.manifest = manifest
         self.artifacts = artifacts
         self.approved_projection_ids = approved_projection_ids or set()
+        self.impact_evidence = impact_evidence
 
     def open_algorithm_manifest(self, binding):
         if binding != self.contract:
@@ -132,6 +137,11 @@ class _Resolver:
 
     def resolve_approved_inference_contract(self, binding):
         return self.contract
+
+    def resolve_impact_analysis_evidence(self, binding):
+        if self.impact_evidence is None:
+            raise ValueError("impact evidence is not approved")
+        return self.impact_evidence
 
     def open_artifact(self, artifact):
         return self.artifacts[artifact.path]
@@ -397,12 +407,44 @@ def _no_change_scenario(path: Path) -> _Scenario:
         prompt_sha256=prompt_sha,
         response_schema_sha256=response_schema_sha,
     )
-    analysis_set = ManagedAnalysisSetBinding.create(
+    target_key = newer.document_id
+    target_result_sha = hashlib.sha256(target_key.encode()).hexdigest()
+    impact_result_sha = hashlib.sha256(b"impact").hexdigest()
+    impact_batch_sha = hashlib.sha256(b"impact-batch").hexdigest()
+    impact_workload_sha = hashlib.sha256(b"impact-workload").hexdigest()
+    impact_evidence = ManagedImpactAnalysisEvidenceBinding.create(
+        repository_id=hashlib.sha256(b"impact-repository").hexdigest(),
+        batch_id=f"inference-batch:{impact_batch_sha}",
+        batch_sha256=impact_batch_sha,
+        batch_members=(
+            ManagedImpactBatchMemberBinding(
+                execution_id="inference-exec:" + hashlib.sha256(b"impact-exec").hexdigest(),
+                receipt_artifact_id="martifact:" + hashlib.sha256(b"impact-receipt").hexdigest(),
+                outcome_sha256=hashlib.sha256(b"impact-outcome").hexdigest(),
+            ),
+        ),
+        workload_id=f"impactwork:{impact_workload_sha}",
+        workload_sha256=impact_workload_sha,
+        result_id=f"impactresult:{impact_result_sha}",
+        result_sha256=impact_result_sha,
+        output_shards=(
+            ManagedImpactOutputRefBinding(
+                document_version_id=newer.document_version_id,
+                input_shard_id="impactin:" + hashlib.sha256(b"impact-input").hexdigest(),
+                input_shard_sha256=hashlib.sha256(b"impact-input").hexdigest(),
+                output_shard_id=f"impactout:{target_result_sha}",
+                output_shard_sha256=target_result_sha,
+                decision_count=1,
+                document_disposition="NO_CHANGE_REQUIRED",
+            ),
+        ),
+    )
+    analysis_set = ManagedAnalysisSetBinding.create_with_impact_evidence(
         analysis_bootstrap=bootstrap.binding,
         candidate_result_sha256=hashlib.sha256(b"candidates").hexdigest(),
         classification_result_sha256=hashlib.sha256(b"classifications").hexdigest(),
         attention_result_sha256=hashlib.sha256(b"attention").hexdigest(),
-        impact_result_sha256=hashlib.sha256(b"impact").hexdigest(),
+        impact_evidence=impact_evidence,
         global_relevant_claim_revision_ids=bootstrap.binding.changed_claim_revision_ids,
     )
     run = ManagedRunBinding.create(
@@ -418,8 +460,6 @@ def _no_change_scenario(path: Path) -> _Scenario:
         inference_contract=contract,
         analysis_set=analysis_set,
     )
-    target_key = newer.document_id
-    target_result_sha = hashlib.sha256(target_key.encode()).hexdigest()
     envelope = {
         "schema_version": 1,
         "target_key": target_key,
@@ -568,6 +608,7 @@ def _no_change_scenario(path: Path) -> _Scenario:
             replay_artifact.path: live_bytes,
         },
         approved_projection_ids={projection.projection_id},
+        impact_evidence=impact_evidence,
     )
     request_command = ManagedRevisionReviewRequestCommand.create(
         bundle=bundle,
@@ -945,6 +986,285 @@ def _additional_no_change_card(
     )
 
 
+def _rebind_scenario_impact_subjects(
+    scenario: _Scenario,
+    subjects: tuple[ManagedRevisionPlan | NoChangeImpactCard, ...],
+    dispositions: tuple[str, ...],
+    *,
+    request_operation_id: str,
+    request_rationale: str,
+) -> _Scenario:
+    """Test-only reproduction of subjects after the exact Step 10b evidence changes."""
+
+    assert len(subjects) == len(dispositions)
+    original_analysis = scenario.bundle.run_binding.analysis_set
+    result_sha = original_analysis.impact_result_sha256
+    batch_sha = hashlib.sha256(
+        canonical_json_bytes(
+            [
+                (subject.target_key, disposition)
+                for subject, disposition in zip(subjects, dispositions, strict=True)
+            ]
+        )
+    ).hexdigest()
+    workload_sha = hashlib.sha256(("workload:" + batch_sha).encode()).hexdigest()
+    members = tuple(
+        ManagedImpactBatchMemberBinding(
+            execution_id="inference-exec:"
+            + hashlib.sha256(f"execution:{subject.target_key}".encode()).hexdigest(),
+            receipt_artifact_id="martifact:"
+            + hashlib.sha256(f"receipt:{subject.target_key}".encode()).hexdigest(),
+            outcome_sha256=hashlib.sha256(f"outcome:{subject.target_key}".encode()).hexdigest(),
+        )
+        for subject in subjects
+    )
+    outputs = tuple(
+        ManagedImpactOutputRefBinding(
+            document_version_id=subject.predecessor.document_version_id,
+            input_shard_id="impactin:"
+            + hashlib.sha256(f"input:{subject.target_key}".encode()).hexdigest(),
+            input_shard_sha256=hashlib.sha256(f"input:{subject.target_key}".encode()).hexdigest(),
+            output_shard_id=f"impactout:{subject.analysis.target_result_sha256}",
+            output_shard_sha256=subject.analysis.target_result_sha256,
+            decision_count=1,
+            document_disposition=disposition,
+        )
+        for subject, disposition in zip(subjects, dispositions, strict=True)
+    )
+    evidence = ManagedImpactAnalysisEvidenceBinding.create(
+        repository_id=hashlib.sha256(b"impact-repository").hexdigest(),
+        batch_id=f"inference-batch:{batch_sha}",
+        batch_sha256=batch_sha,
+        batch_members=members,
+        workload_id=f"impactwork:{workload_sha}",
+        workload_sha256=workload_sha,
+        result_id=f"impactresult:{result_sha}",
+        result_sha256=result_sha,
+        output_shards=outputs,
+    )
+    analysis = ManagedAnalysisSetBinding.create_with_impact_evidence(
+        analysis_bootstrap=original_analysis.analysis_bootstrap,
+        candidate_result_sha256=original_analysis.candidate_result_sha256,
+        classification_result_sha256=original_analysis.classification_result_sha256,
+        attention_result_sha256=original_analysis.attention_result_sha256,
+        impact_evidence=evidence,
+        global_relevant_claim_revision_ids=original_analysis.global_relevant_claim_revision_ids,
+    )
+    old_run = scenario.bundle.run_binding
+    run = ManagedRunBinding.create(
+        run_id=old_run.run_id,
+        operation_id=old_run.operation_id,
+        prechange_head=old_run.prechange_head,
+        analysis_head=old_run.analysis_head,
+        algorithm_manifest_sha256=old_run.algorithm_manifest_sha256,
+        inference_contract=old_run.inference_contract,
+        analysis_set=analysis,
+    )
+    artifacts = dict(scenario.resolver.artifacts)
+    rebound: list[ManagedRevisionPlan | NoChangeImpactCard] = []
+    for subject in subjects:
+        target_result_sha = subject.analysis.target_result_sha256
+        envelope = {
+            "schema_version": 1,
+            "target_key": subject.target_key,
+            "analysis_set_id": analysis.analysis_set_id,
+            "analysis_set_sha256": analysis.analysis_set_sha256,
+            "impact_result_sha256": analysis.impact_result_sha256,
+            "target_result_sha256": target_result_sha,
+        }
+        envelope_bytes = canonical_json_bytes(envelope)
+        envelope_sha = hashlib.sha256(envelope_bytes).hexdigest()
+        inference_input = _artifact(
+            ManagedArtifactKind.INFERENCE_INPUT,
+            (
+                f"staging/managed-review/{run.run_id}/{subject.target_key}/"
+                f"analysis-input-{envelope_sha}.json"
+            ),
+            envelope_bytes,
+        )
+        target_analysis = TargetAnalysisBinding.create(
+            target_key=subject.target_key,
+            analysis_set=analysis,
+            target_result_sha256=target_result_sha,
+            inference_input=inference_input,
+        )
+        artifacts[inference_input.path] = envelope_bytes
+
+        def rebound_citation(
+            citation: GroundedArtifactCitation,
+            *,
+            expected_artifact_id: str = subject.analysis.inference_input.artifact_id,
+            rebound_artifact: ManagedArtifactRef = inference_input,
+        ) -> GroundedArtifactCitation:
+            assert citation.artifact_id == expected_artifact_id
+            return GroundedArtifactCitation.create(
+                artifact=rebound_artifact,
+                start_byte=citation.start_byte,
+                quote=citation.quote,
+            )
+
+        if isinstance(subject, NoChangeImpactCard):
+            semantic = {
+                "run_id": subject.run_id,
+                "target_key": subject.target_key,
+                "predecessor": subject.predecessor,
+                "predecessor_raw": subject.predecessor_raw,
+                "predecessor_note": subject.predecessor_note,
+                "predecessor_projection": subject.predecessor_projection,
+                "analysis": target_analysis,
+                "rationale": subject.rationale,
+                "citations": tuple(rebound_citation(item) for item in subject.citations),
+            }
+            output_bytes = NoChangeImpactCard.proposal_output_bytes(**semantic)
+            output_kind = NoChangeImpactCard
+        else:
+            hunks = tuple(
+                ManagedSemanticHunk.create(
+                    semantic_key=hunk.semantic_key,
+                    base_artifact=subject.predecessor_raw,
+                    result_artifact=subject.proposed_raw,
+                    start_byte=hunk.start_byte,
+                    before_text=hunk.before_text,
+                    replacement_text=hunk.replacement_text,
+                    citations=tuple(rebound_citation(item) for item in hunk.citations),
+                )
+                for hunk in subject.hunks
+            )
+            patch = PatchReconstructionAttestation.create_from_verifier_output(
+                base_artifact=subject.predecessor_raw,
+                result_artifact=subject.proposed_raw,
+                hunks=hunks,
+                complete_diff_sha256=subject.patch_attestation.complete_diff_sha256,
+            )
+            semantic = {
+                "run_id": subject.run_id,
+                "target_key": subject.target_key,
+                "predecessor": subject.predecessor,
+                "predecessor_raw": subject.predecessor_raw,
+                "predecessor_note": subject.predecessor_note,
+                "successor": subject.successor,
+                "proposed_raw": subject.proposed_raw,
+                "proposed_note": subject.proposed_note,
+                "raw_destination": subject.raw_destination,
+                "note_destination": subject.note_destination,
+                "analysis": target_analysis,
+                "predecessor_projection": subject.predecessor_projection,
+                "successor_projection": subject.successor_projection,
+                "patch_attestation": patch,
+                "claim_reconciliation": subject.claim_reconciliation,
+                "rationale": subject.rationale,
+                "hunks": hunks,
+            }
+            output_bytes = ManagedRevisionPlan.proposal_output_bytes(**semantic)
+            output_kind = ManagedRevisionPlan
+        output = _artifact(
+            ManagedArtifactKind.INFERENCE_OUTPUT,
+            (
+                f"staging/managed-review/{run.run_id}/{subject.target_key}/validated-output-"
+                f"{hashlib.sha256(output_bytes).hexdigest()}.json"
+            ),
+            output_bytes,
+        )
+        contract = run.inference_contract
+        live = ContentAddressedInferenceReceipt.create(
+            contract_id=contract.contract_id,
+            contract_version=contract.contract_version,
+            mode=InferenceExecutionMode.LIVE,
+            provider=contract.provider,
+            model=contract.model,
+            provider_request_id=f"fixture:rebound:{subject.target_key}",
+            replay_source_receipt_sha256=None,
+            replay_source_receipt_artifact=None,
+            prompt_sha256=contract.prompt_sha256,
+            response_schema_sha256=contract.response_schema_sha256,
+            input_artifacts=(inference_input,),
+            input_envelope_sha256=target_analysis.input_envelope_sha256,
+            raw_output_sha256=output.sha256,
+            validated_output_sha256=output.sha256,
+            usage=InferenceUsage(
+                input_tokens=1,
+                output_tokens=1,
+                cached_input_tokens=0,
+                cost_usd_micros=1,
+                latency_ms=1,
+            ),
+        )
+        live_bytes = canonical_json_bytes(live.model_dump(mode="json"))
+        replay_artifact = _artifact(
+            ManagedArtifactKind.INFERENCE_RECEIPT,
+            f"receipts/inference/{hashlib.sha256(live_bytes).hexdigest()}.json",
+            live_bytes,
+        )
+        replay = ContentAddressedInferenceReceipt.create(
+            contract_id=contract.contract_id,
+            contract_version=contract.contract_version,
+            mode=InferenceExecutionMode.REPLAY,
+            provider=contract.provider,
+            model=contract.model,
+            provider_request_id=None,
+            replay_source_receipt_sha256=replay_artifact.sha256,
+            replay_source_receipt_artifact=replay_artifact,
+            prompt_sha256=contract.prompt_sha256,
+            response_schema_sha256=contract.response_schema_sha256,
+            input_artifacts=(inference_input,),
+            input_envelope_sha256=target_analysis.input_envelope_sha256,
+            raw_output_sha256=output.sha256,
+            validated_output_sha256=output.sha256,
+            usage=InferenceUsage(
+                input_tokens=0,
+                output_tokens=0,
+                cached_input_tokens=0,
+                cost_usd_micros=0,
+                latency_ms=0,
+            ),
+        )
+        rebound.append(
+            output_kind.create(
+                **semantic,
+                inference_receipt=replay,
+                validated_output=output,
+            )
+        )
+        artifacts[output.path] = output_bytes
+        artifacts[replay_artifact.path] = live_bytes
+
+    bundle = ManagedRevisionReviewBundle.create(
+        run_binding=run,
+        review_base=scenario.bundle.review_base,
+        temporal_prerequisite=scenario.bundle.temporal_prerequisite,
+        targets=tuple(ManagedRevisionReviewTarget.create(item) for item in rebound),
+    )
+    projection_ids = {
+        item.predecessor_projection.projection_id for item in rebound
+    } | {
+        item.successor_projection.projection_id
+        for item in rebound
+        if isinstance(item, ManagedRevisionPlan)
+    }
+    resolver = _Resolver(
+        run.inference_contract,
+        scenario.resolver.manifest,
+        artifacts,
+        approved_projection_ids=projection_ids,
+        impact_evidence=evidence,
+    )
+    request = ManagedRevisionReviewRequestCommand.create(
+        bundle=bundle,
+        operation_id=request_operation_id,
+        requester_id="operator@example.test",
+        rationale=request_rationale,
+    )
+    return _Scenario(
+        store=scenario.store,
+        bootstrap=scenario.bootstrap,
+        prechange_head=scenario.prechange_head,
+        authority=scenario.authority,
+        resolver=resolver,
+        bundle=bundle,
+        request_command=request,
+    )
+
+
 def test_open_request_becomes_stale_but_exact_replay_survives_fresh_connection(
     tmp_path: Path,
 ) -> None:
@@ -987,7 +1307,9 @@ def test_open_request_becomes_stale_but_exact_replay_survives_fresh_connection(
     reopened.close()
 
 
-@pytest.mark.parametrize("failure", ("contract", "manifest", "missing", "tampered"))
+@pytest.mark.parametrize(
+    "failure", ("impact", "contract", "manifest", "missing", "tampered")
+)
 def test_repository_resolution_failure_creates_no_managed_review_rows(
     tmp_path: Path, failure: str
 ) -> None:
@@ -997,8 +1319,23 @@ def test_repository_resolution_failure_creates_no_managed_review_rows(
         scenario.resolver.manifest,
         dict(scenario.resolver.artifacts),
         approved_projection_ids=set(scenario.resolver.approved_projection_ids),
+        impact_evidence=scenario.resolver.impact_evidence,
     )
-    if failure == "contract":
+    if failure == "impact":
+        evidence = scenario.resolver.impact_evidence
+        assert evidence is not None
+        resolver.impact_evidence = ManagedImpactAnalysisEvidenceBinding.create(
+            repository_id="0" * 64,
+            batch_id=evidence.batch_id,
+            batch_sha256=evidence.batch_sha256,
+            batch_members=evidence.batch_members,
+            workload_id=evidence.workload_id,
+            workload_sha256=evidence.workload_sha256,
+            result_id=evidence.result_id,
+            result_sha256=evidence.result_sha256,
+            output_shards=evidence.output_shards,
+        )
+    elif failure == "contract":
         resolver.contract = resolver.contract.model_copy(update={"provider": "unapproved-provider"})
     elif failure == "manifest":
         resolver.manifest = b"tampered algorithm manifest"
@@ -1335,46 +1672,18 @@ def _activating_scenario(path: Path) -> _Scenario:
         inference_receipt=replay,
         validated_output=output_artifact,
     )
-    bundle = ManagedRevisionReviewBundle.create(
-        run_binding=scenario.bundle.run_binding,
-        review_base=scenario.bundle.review_base,
-        temporal_prerequisite=scenario.bundle.temporal_prerequisite,
-        targets=(ManagedRevisionReviewTarget.create(plan),),
-    )
-    artifacts = dict(scenario.resolver.artifacts)
-    artifacts.pop(card.validated_output.path)
-    artifacts.pop(card.inference_receipt.replay_source_receipt_artifact.path)  # type: ignore[union-attr]
-    artifacts.update(
+    scenario.resolver.artifacts.update(
         {
             proposed_raw.path: proposed_raw_bytes,
             proposed_note.path: proposed_note_bytes,
-            output_artifact.path: output_bytes,
-            replay_artifact.path: live_bytes,
         }
     )
-    resolver = _Resolver(
-        contract,
-        scenario.resolver.manifest,
-        artifacts,
-        approved_projection_ids={
-            card.predecessor_projection.projection_id,
-            successor_projection.projection_id,
-        },
-    )
-    request = ManagedRevisionReviewRequestCommand.create(
-        bundle=bundle,
-        operation_id="managed-store:activating-request",
-        requester_id="operator@example.test",
-        rationale="Review one exact create-only managed revision.",
-    )
-    return _Scenario(
-        store=scenario.store,
-        bootstrap=scenario.bootstrap,
-        prechange_head=scenario.prechange_head,
-        authority=scenario.authority,
-        resolver=resolver,
-        bundle=bundle,
-        request_command=request,
+    return _rebind_scenario_impact_subjects(
+        scenario,
+        (plan,),
+        ("AFFECTED",),
+        request_operation_id="managed-store:activating-request",
+        request_rationale="Review one exact create-only managed revision.",
     )
 
 
@@ -1408,29 +1717,14 @@ def _open_activating_decision(
 def _multi_target_scenario(path: Path) -> _Scenario:
     scenario = _activating_scenario(path)
     additional = _additional_no_change_card(scenario)
-    bundle = ManagedRevisionReviewBundle.create(
-        run_binding=scenario.bundle.run_binding,
-        review_base=scenario.bundle.review_base,
-        temporal_prerequisite=scenario.bundle.temporal_prerequisite,
-        targets=(
-            scenario.bundle.targets[0],
-            ManagedRevisionReviewTarget.create(additional),
+    return _rebind_scenario_impact_subjects(
+        scenario,
+        (scenario.bundle.targets[0].subject, additional),
+        ("AFFECTED", "NO_CHANGE_REQUIRED"),
+        request_operation_id="managed-store:multi-target-request",
+        request_rationale=(
+            "Review the activating plan and explicit no-change result atomically."
         ),
-    )
-    request = ManagedRevisionReviewRequestCommand.create(
-        bundle=bundle,
-        operation_id="managed-store:multi-target-request",
-        requester_id="operator@example.test",
-        rationale="Review the activating plan and explicit no-change result atomically.",
-    )
-    return _Scenario(
-        store=scenario.store,
-        bootstrap=scenario.bootstrap,
-        prechange_head=scenario.prechange_head,
-        authority=scenario.authority,
-        resolver=scenario.resolver,
-        bundle=bundle,
-        request_command=request,
     )
 
 
