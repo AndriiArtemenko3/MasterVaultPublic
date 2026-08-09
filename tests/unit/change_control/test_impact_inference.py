@@ -36,6 +36,9 @@ from mastervault.change_control.impact_results import (
     ImpactResultSet,
 )
 from mastervault.change_control.inference_repository import FilesystemInferenceEvidenceRepository
+from mastervault.change_control.managed_impact_evidence import (
+    bind_recorded_impact_inference_run,
+)
 from mastervault.change_control.managed_review import InferenceExecutionMode
 from mastervault.change_control.models import canonical_json_bytes
 from mastervault.change_control.recorded_inference import (
@@ -469,6 +472,14 @@ def test_live_workload_result_is_reconstructed_from_freshly_reopened_batch(
     assert run.evidence_batch.outcome_count == len(workload.input_shards)
     assert len(run.outcomes) == len(workload.input_shards)
     assert len(run.results.output_shards) == len(workload.input_shards)
+    managed_binding = bind_recorded_impact_inference_run(run)
+    assert managed_binding.batch_id == run.evidence_batch.batch_id
+    assert managed_binding.repository_id == run.evidence_batch.repository_id
+    assert managed_binding.workload_id == workload.index.workload_id
+    assert managed_binding.result_id == run.results.result_id
+    assert tuple(item.output_shard_id for item in managed_binding.output_shards) == tuple(
+        item.output_shard_id for item in run.results.result_index.output_shards
+    )
     fresh = FilesystemInferenceEvidenceRepository(repository.root)
     reopened, reminted = fresh.resolve_verified_batch(
         batch_id=run.evidence_batch.batch_id,
@@ -556,6 +567,8 @@ def test_zero_workload_calls_no_provider_and_creates_no_evidence_batch(
     assert run.evidence_batch is None
     assert run.results.result_index.decision_count == 0
     assert not (repository.root / "inference/evidence/batches").exists()
+    with pytest.raises(ValueError, match="empty impact inference has no durable batch"):
+        bind_recorded_impact_inference_run(run)
     with pytest.raises(ValueError, match=r"exactly outcomes=\(\)"):
         RecordedImpactInferenceRun(
             results=run.results,

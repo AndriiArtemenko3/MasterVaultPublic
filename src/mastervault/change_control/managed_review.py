@@ -14,9 +14,16 @@ import unicodedata
 from datetime import date, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
 from mastervault.change_control.models import (
@@ -51,6 +58,7 @@ MAX_MANAGED_CLAIM_TEXT_BYTES_V1 = 64 * 1024
 MAX_MANAGED_SCOPES_PER_CLAIM_V1 = 16
 MAX_MANAGED_EVIDENCE_REFS_PER_CLAIM_V1 = 16
 MAX_MANAGED_EVIDENCE_QUOTE_BYTES_V1 = 8 * 1024
+MAX_MANAGED_IMPACT_OUTPUT_REFS_V1 = 16
 
 _ID_PATTERNS = {
     name: re.compile(rf"^{name}:[0-9a-f]{{64}}$")
@@ -65,6 +73,7 @@ _ID_PATTERNS = {
         "mprojection",
         "mclaims",
         "manalysis",
+        "mimpactevidence",
         "mtargetanalysis",
         "mhead",
         "mgeneration",
@@ -1725,8 +1734,179 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
             )
 
 
-class ManagedAnalysisSetBinding(_StrictFrozenModel):
+class ManagedImpactBatchMemberBinding(_StrictFrozenModel):
+    """One exact member of the committed Stage B inference batch."""
+
+    execution_id: str = Field(pattern=r"^inference-exec:[0-9a-f]{64}$")
+    receipt_artifact_id: str = Field(pattern=_ID_PATTERNS["martifact"].pattern)
+    outcome_sha256: str = Field(pattern=SHA256_PATTERN)
+
+
+class ManagedImpactOutputRefBinding(_StrictFrozenModel):
+    """Dependency-neutral copy of one complete Step 10b output-shard identity."""
+
+    document_version_id: str = Field(pattern=r"^docv:[0-9a-f]{64}$")
+    input_shard_id: str = Field(pattern=r"^impactin:[0-9a-f]{64}$")
+    input_shard_sha256: str = Field(pattern=SHA256_PATTERN)
+    output_shard_id: str = Field(pattern=r"^impactout:[0-9a-f]{64}$")
+    output_shard_sha256: str = Field(pattern=SHA256_PATTERN)
+    decision_count: int = Field(gt=0, le=64)
+    document_disposition: Literal["AFFECTED", "NO_CHANGE_REQUIRED", "UNRESOLVED"]
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        if self.input_shard_id != f"impactin:{self.input_shard_sha256}":
+            raise ValueError("managed impact input shard ID differs from its SHA")
+        if self.output_shard_id != f"impactout:{self.output_shard_sha256}":
+            raise ValueError("managed impact output shard ID differs from its SHA")
+        return self
+
+
+class ManagedImpactAnalysisEvidenceBinding(_StrictFrozenModel):
+    """Durable, non-empty Stage B authority required by new managed review runs."""
+
     schema_version: Literal[1] = 1
+    evidence_binding_id: str = Field(pattern=_ID_PATTERNS["mimpactevidence"].pattern)
+    evidence_binding_sha256: str = Field(pattern=SHA256_PATTERN)
+    repository_id: str = Field(pattern=SHA256_PATTERN)
+    batch_id: str = Field(pattern=r"^inference-batch:[0-9a-f]{64}$")
+    batch_sha256: str = Field(pattern=SHA256_PATTERN)
+    batch_members: tuple[ManagedImpactBatchMemberBinding, ...] = Field(
+        min_length=1,
+        max_length=MAX_MANAGED_IMPACT_OUTPUT_REFS_V1,
+    )
+    workload_id: str = Field(pattern=r"^impactwork:[0-9a-f]{64}$")
+    workload_sha256: str = Field(pattern=SHA256_PATTERN)
+    result_id: str = Field(pattern=r"^impactresult:[0-9a-f]{64}$")
+    result_sha256: str = Field(pattern=SHA256_PATTERN)
+    output_shards: tuple[ManagedImpactOutputRefBinding, ...] = Field(
+        min_length=1,
+        max_length=MAX_MANAGED_IMPACT_OUTPUT_REFS_V1,
+    )
+
+    @field_validator("batch_members")
+    @classmethod
+    def _members(
+        cls, values: tuple[ManagedImpactBatchMemberBinding, ...]
+    ) -> tuple[ManagedImpactBatchMemberBinding, ...]:
+        identities = tuple(
+            (item.execution_id, item.receipt_artifact_id, item.outcome_sha256) for item in values
+        )
+        if identities != tuple(sorted(identities)):
+            raise ValueError("managed impact batch members must be canonically ordered")
+        if len({item.execution_id for item in values}) != len(values):
+            raise ValueError("managed impact batch execution IDs must be unique")
+        if len({item.receipt_artifact_id for item in values}) != len(values):
+            raise ValueError("managed impact batch receipt IDs must be unique")
+        if len({item.outcome_sha256 for item in values}) != len(values):
+            raise ValueError("managed impact batch outcome SHAs must be unique")
+        return values
+
+    @field_validator("output_shards")
+    @classmethod
+    def _outputs(
+        cls, values: tuple[ManagedImpactOutputRefBinding, ...]
+    ) -> tuple[ManagedImpactOutputRefBinding, ...]:
+        keys = tuple((item.document_version_id, item.input_shard_id) for item in values)
+        if keys != tuple(sorted(keys)):
+            raise ValueError("managed impact output refs must be canonically ordered")
+        if len({item.document_version_id for item in values}) != len(values):
+            raise ValueError("managed impact output refs require unique document versions")
+        if len({item.input_shard_id for item in values}) != len(values):
+            raise ValueError("managed impact output refs require unique input shards")
+        if len({item.output_shard_id for item in values}) != len(values):
+            raise ValueError("managed impact output refs require unique output shards")
+        return values
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(
+            mode="json", exclude={"evidence_binding_id", "evidence_binding_sha256"}
+        )
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        if self.batch_id != f"inference-batch:{self.batch_sha256}":
+            raise ValueError("managed impact batch ID differs from its SHA")
+        if self.workload_id != f"impactwork:{self.workload_sha256}":
+            raise ValueError("managed impact workload ID differs from its SHA")
+        if self.result_id != f"impactresult:{self.result_sha256}":
+            raise ValueError("managed impact result ID differs from its SHA")
+        if len(self.batch_members) != len(self.output_shards):
+            raise ValueError("managed impact batch and output-shard counts must match")
+        digest = _sha256(self._payload())
+        if (
+            self.evidence_binding_sha256 != digest
+            or self.evidence_binding_id != f"mimpactevidence:{digest}"
+        ):
+            raise ValueError("managed impact evidence identity differs from exact authority")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        repository_id: str,
+        batch_id: str,
+        batch_sha256: str,
+        batch_members: tuple[ManagedImpactBatchMemberBinding, ...],
+        workload_id: str,
+        workload_sha256: str,
+        result_id: str,
+        result_sha256: str,
+        output_shards: tuple[ManagedImpactOutputRefBinding, ...],
+    ) -> Self:
+        _preflight_collection(
+            batch_members,
+            label="managed impact batch members",
+            minimum=1,
+            maximum=MAX_MANAGED_IMPACT_OUTPUT_REFS_V1,
+            unique_key=lambda item: item.execution_id,
+        )
+        _preflight_collection(
+            output_shards,
+            label="managed impact output refs",
+            minimum=1,
+            maximum=MAX_MANAGED_IMPACT_OUTPUT_REFS_V1,
+            unique_key=lambda item: item.document_version_id,
+        )
+        members = tuple(
+            sorted(
+                batch_members,
+                key=lambda item: (
+                    item.execution_id,
+                    item.receipt_artifact_id,
+                    item.outcome_sha256,
+                ),
+            )
+        )
+        outputs = tuple(
+            sorted(output_shards, key=lambda item: (item.document_version_id, item.input_shard_id))
+        )
+        values = {
+            "schema_version": 1,
+            "repository_id": repository_id,
+            "batch_id": batch_id,
+            "batch_sha256": batch_sha256,
+            "batch_members": [item.model_dump(mode="json") for item in members],
+            "workload_id": workload_id,
+            "workload_sha256": workload_sha256,
+            "result_id": result_id,
+            "result_sha256": result_sha256,
+            "output_shards": [item.model_dump(mode="json") for item in outputs],
+        }
+        digest = _sha256(values)
+        return _validate_canonical_json(
+            cls,
+            {
+                "evidence_binding_id": f"mimpactevidence:{digest}",
+                "evidence_binding_sha256": digest,
+                **values,
+            },
+        )
+
+
+class ManagedAnalysisSetBinding(_StrictFrozenModel):
+    schema_version: Literal[1, 2] = 1
     analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
     analysis_set_sha256: str = Field(pattern=SHA256_PATTERN)
     analysis_bootstrap: AnalysisBootstrapBinding
@@ -1740,6 +1920,7 @@ class ManagedAnalysisSetBinding(_StrictFrozenModel):
     classification_result_sha256: str = Field(pattern=SHA256_PATTERN)
     attention_result_sha256: str = Field(pattern=SHA256_PATTERN)
     impact_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    impact_evidence: ManagedImpactAnalysisEvidenceBinding | None = None
     changed_claim_revision_ids: tuple[str, ...] = Field(max_length=MAX_MANAGED_CHANGED_CLAIMS_V1)
     global_relevant_claim_revision_ids: tuple[str, ...] = Field(
         max_length=MAX_MANAGED_GLOBAL_RELEVANT_CLAIMS_V1
@@ -1757,9 +1938,23 @@ class ManagedAnalysisSetBinding(_StrictFrozenModel):
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"analysis_set_id", "analysis_set_sha256"})
 
+    @model_serializer(mode="wrap")
+    def _serialize_without_legacy_null(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.impact_evidence is None:
+            values.pop("impact_evidence", None)
+        return values
+
     @model_validator(mode="after")
     def _identity(self) -> Self:
         bootstrap = self.analysis_bootstrap
+        if self.schema_version == 1:
+            if self.impact_evidence is not None:
+                raise ValueError("managed analysis v1 cannot carry impact evidence")
+        elif self.impact_evidence is None:
+            raise ValueError("managed analysis v2 requires durable impact evidence")
+        elif self.impact_result_sha256 != self.impact_evidence.result_sha256:
+            raise ValueError("managed analysis result SHA differs from durable impact evidence")
         if (
             self.incoming_logical_event_id != bootstrap.incoming_event_id
             or self.incoming_event_identity != bootstrap.incoming_event_identity
@@ -1826,6 +2021,58 @@ class ManagedAnalysisSetBinding(_StrictFrozenModel):
                 "analysis_set_sha256": digest,
                 **payload,
                 "analysis_bootstrap": analysis_bootstrap,
+            },
+        )
+
+    @classmethod
+    def create_with_impact_evidence(
+        cls,
+        *,
+        analysis_bootstrap: AnalysisBootstrapBinding,
+        candidate_result_sha256: str,
+        classification_result_sha256: str,
+        attention_result_sha256: str,
+        impact_evidence: ManagedImpactAnalysisEvidenceBinding,
+        global_relevant_claim_revision_ids: tuple[str, ...],
+    ) -> Self:
+        _preflight_collection(
+            analysis_bootstrap.changed_claim_revision_ids,
+            label="changed claim revision IDs",
+            maximum=MAX_MANAGED_CHANGED_CLAIMS_V1,
+            unique_key=lambda item: item,
+        )
+        _preflight_collection(
+            global_relevant_claim_revision_ids,
+            label="globally relevant claim revision IDs",
+            maximum=MAX_MANAGED_GLOBAL_RELEVANT_CLAIMS_V1,
+            unique_key=lambda item: item,
+        )
+        payload: dict[str, Any] = {
+            "schema_version": 2,
+            "analysis_bootstrap": analysis_bootstrap.model_dump(mode="json"),
+            "incoming_logical_event_id": analysis_bootstrap.incoming_event_id,
+            "incoming_event_identity": analysis_bootstrap.incoming_event_identity,
+            "incoming_manifest_sha256": analysis_bootstrap.incoming_manifest_sha256,
+            "incoming_claim_evidence_sha256": analysis_bootstrap.incoming_claim_evidence_sha256,
+            "analysis_bootstrap_binding_id": analysis_bootstrap.binding_id,
+            "analysis_bootstrap_binding_sha256": analysis_bootstrap.binding_sha256,
+            "candidate_result_sha256": candidate_result_sha256,
+            "classification_result_sha256": classification_result_sha256,
+            "attention_result_sha256": attention_result_sha256,
+            "impact_result_sha256": impact_evidence.result_sha256,
+            "impact_evidence": impact_evidence.model_dump(mode="json"),
+            "changed_claim_revision_ids": analysis_bootstrap.changed_claim_revision_ids,
+            "global_relevant_claim_revision_ids": global_relevant_claim_revision_ids,
+        }
+        digest = _sha256(payload)
+        return _validate_canonical_json(
+            cls,
+            {
+                "analysis_set_id": f"manalysis:{digest}",
+                "analysis_set_sha256": digest,
+                **payload,
+                "analysis_bootstrap": analysis_bootstrap,
+                "impact_evidence": impact_evidence,
             },
         )
 
@@ -2594,6 +2841,14 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"bundle_id", "bundle_sha256"})
 
+    def require_authoritative_impact_evidence(self) -> ManagedImpactAnalysisEvidenceBinding:
+        """Reject legacy analysis before any new managed-review authority is accepted."""
+
+        evidence = self.run_binding.analysis_set.impact_evidence
+        if self.run_binding.analysis_set.schema_version != 2 or evidence is None:
+            raise ValueError("new managed review requires v2 durable impact evidence")
+        return evidence
+
     @model_validator(mode="after")
     def _bindings_collision_size(self) -> Self:
         if self.review_base.review_open_head != self.temporal_prerequisite.review_open_head:
@@ -2607,6 +2862,35 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
             raise ValueError("review-open head must follow the incoming analysis head")
         analysis = self.run_binding.analysis_set
         inference_contract = self.run_binding.inference_contract
+        impact_evidence = analysis.impact_evidence
+        if impact_evidence is not None:
+            output_by_document = {
+                item.document_version_id: item for item in impact_evidence.output_shards
+            }
+            target_documents = tuple(
+                sorted(item.predecessor.document_version_id for item in self.targets)
+            )
+            if target_documents != tuple(sorted(output_by_document)):
+                raise ValueError(
+                    "managed review targets must exactly cover durable impact output documents"
+                )
+            for target in self.targets:
+                subject = target.subject
+                output = output_by_document[target.predecessor.document_version_id]
+                if subject.analysis.target_result_sha256 != output.output_shard_sha256:
+                    raise ValueError(
+                        "managed target analysis must bind the exact impact output shard SHA"
+                    )
+                if output.document_disposition == "UNRESOLVED":
+                    raise ValueError("unresolved impact output cannot enter managed review")
+                if output.document_disposition == "AFFECTED" and not isinstance(
+                    subject, ManagedRevisionPlan
+                ):
+                    raise ValueError("affected impact output requires a managed revision plan")
+                if output.document_disposition == "NO_CHANGE_REQUIRED" and not isinstance(
+                    subject, NoChangeImpactCard
+                ):
+                    raise ValueError("no-change impact output requires an explicit no-change card")
         predecessor_paths: list[str] = []
         staging_paths: list[str] = []
         destination_paths: list[str] = []
@@ -3741,6 +4025,7 @@ __all__ = [
     "MAX_MANAGED_HUNKS_PER_PLAN_V1",
     "MAX_MANAGED_INFERENCE_INPUTS_V1",
     "MAX_MANAGED_INFERENCE_INPUT_BYTES_V1",
+    "MAX_MANAGED_IMPACT_OUTPUT_REFS_V1",
     "MAX_MANAGED_LOGICAL_KEY_BYTES_V1",
     "MAX_MANAGED_PATH_BYTES_V1",
     "MAX_MANAGED_PROJECTION_CLAIMS_V1",
@@ -3769,6 +4054,9 @@ __all__ = [
     "ManagedArtifactRef",
     "ManagedBundleOutcome",
     "ManagedGenerationManifestBinding",
+    "ManagedImpactAnalysisEvidenceBinding",
+    "ManagedImpactBatchMemberBinding",
+    "ManagedImpactOutputRefBinding",
     "ManagedInferenceContractBinding",
     "ManagedDecisionOriginBasis",
     "ManagedReviewBaseBinding",
