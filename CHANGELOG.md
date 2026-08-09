@@ -19,11 +19,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   evidence into all-target review, while preserving v1 canonical bytes for
   historical reads. Managed review now requires one exact output per target
   and re-resolves that evidence at every SQLite authority boundary.
-- Pure revision-planning eligibility and provider-wire contracts: impact
-  selects affected/no-change locally, unresolved work blocks the whole set,
-  and providers can return only bounded Unicode-character edits or explicit
-  no-change evidence. Execution, staging, review creation, publication, and
-  activation remain deferred.
+- Recorded revision planning over the exact Step 10b run. Impact selects
+  affected/no-change locally, unresolved work blocks the whole set, and a
+  provider can return only bounded Unicode-character edits or explicit
+  no-change evidence. LIVE execution permits one correction retry; REPLAY
+  rematerializes exact prior LIVE evidence without a provider call. MasterVault
+  derives plans, no-change cards, byte-grounded citations, successor Markdown
+  SourceNotes, claim reconciliation, paths, and hashes locally, commits all
+  target outcomes as one existing evidence batch, and writes only create-only,
+  manifest-gated inert staging. Managed-review authority, publication,
+  activation, indexing, CLI integration, and LangGraph expansion remain
+  deferred.
 
 - The first v0.3 document-intelligence vertical slice for clean digital PDFs:
   full-byte SHA-256 source identity, immutable content-addressed assets,

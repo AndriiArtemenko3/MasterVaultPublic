@@ -315,6 +315,40 @@ def _target_analysis(
     )
 
 
+def test_target_analysis_v1_bytes_and_identity_remain_legacy_compatible() -> None:
+    context = _context()
+    key = "legacy-target-analysis"
+    binding = _target_analysis(key, context)
+    target_result_sha256 = hashlib.sha256(key.encode()).hexdigest()
+    envelope = {
+        "schema_version": 1,
+        "target_key": key,
+        "analysis_set_id": context.analysis_set.analysis_set_id,
+        "analysis_set_sha256": context.analysis_set.analysis_set_sha256,
+        "impact_result_sha256": context.analysis_set.impact_result_sha256,
+        "target_result_sha256": target_result_sha256,
+    }
+    envelope_bytes = canonical_json_bytes(envelope)
+    envelope_sha256 = hashlib.sha256(envelope_bytes).hexdigest()
+    legacy_values = {
+        **envelope,
+        "inference_input": binding.inference_input.model_dump(mode="json"),
+        "input_envelope_sha256": envelope_sha256,
+    }
+    expected_id = "mtargetanalysis:" + hashlib.sha256(
+        canonical_json_bytes(legacy_values)
+    ).hexdigest()
+    expected_bytes = canonical_json_bytes(
+        {"target_analysis_id": expected_id, **legacy_values}
+    )
+
+    assert binding.schema_version == 1
+    assert binding.target_analysis_id == expected_id
+    assert binding.staged_input_sha256 is None
+    assert canonical_json_bytes(binding.model_dump(mode="json")) == expected_bytes
+    assert b"staged_input_sha256" not in expected_bytes
+
+
 def _receipt_pair(
     analysis: TargetAnalysisBinding,
     *,
