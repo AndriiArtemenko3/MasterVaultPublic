@@ -21,6 +21,19 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+GENERATION_ACTIVATION_TEST = (
+    REPO_ROOT
+    / "tests"
+    / "unit"
+    / "change_control"
+    / "test_managed_generation_activation.py"
+)
+GENERATION_ACTIVATION_SHARDS = (
+    "generation_activation_a",
+    "generation_activation_b",
+    "generation_activation_c",
+    "generation_activation_d",
+)
 
 TEST_DIM = 8
 TEST_MODEL = "test-embed-v1"
@@ -109,7 +122,16 @@ def pg_test_url():
         conn.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
 
 
-@pytest.fixture(params=["sqlite", "postgres"])
+@pytest.fixture(
+    params=(
+        pytest.param("sqlite", id="sqlite"),
+        pytest.param(
+            "postgres",
+            id="postgres",
+            marks=pytest.mark.postgres_contract,
+        ),
+    )
+)
 def backend(request, tmp_path):
     """A schema-initialized StorageBackend, parametrized over both backends."""
     if request.param == "sqlite":
@@ -148,6 +170,47 @@ def _is_postgres_item(item: pytest.Item) -> bool:
     if callspec is not None and "postgres" in callspec.params.values():
         return True
     return "pg_test_url" in getattr(item, "fixturenames", ())
+
+
+def pytest_itemcollected(item: pytest.Item) -> None:
+    """Keep CI shard selection complete as the test suite evolves."""
+    item_path = Path(str(item.path)).resolve()
+    activation_markers = tuple(
+        name
+        for name in GENERATION_ACTIVATION_SHARDS
+        if item.get_closest_marker(name) is not None
+    )
+    if item_path == GENERATION_ACTIVATION_TEST:
+        if len(activation_markers) != 1:
+            raise pytest.UsageError(
+                f"{item.nodeid} must have exactly one managed-generation CI shard marker; "
+                f"found {activation_markers or 'none'}"
+            )
+    elif activation_markers:
+        raise pytest.UsageError(
+            f"{item.nodeid} uses a managed-generation CI shard marker outside its "
+            "reserved test module"
+        )
+
+    # The backend fixture's postgres parameter carries this marker explicitly.
+    # Direct pg_test_url consumers are PostgreSQL contracts too, so mark them
+    # before pytest's normal -m deselection pass.
+    postgres_marker = item.get_closest_marker("postgres_contract")
+    if (
+        postgres_marker is None
+        and "pg_test_url" in getattr(item, "fixturenames", ())
+    ):
+        item.add_marker("postgres_contract")
+        postgres_marker = item.get_closest_marker("postgres_contract")
+    is_postgres = _is_postgres_item(item)
+    if is_postgres and postgres_marker is None:
+        raise pytest.UsageError(
+            f"{item.nodeid} is PostgreSQL-backed but lacks postgres_contract"
+        )
+    if not is_postgres and postgres_marker is not None:
+        raise pytest.UsageError(
+            f"{item.nodeid} has postgres_contract but is not PostgreSQL-backed"
+        )
 
 
 @pytest.hookimpl(hookwrapper=True)

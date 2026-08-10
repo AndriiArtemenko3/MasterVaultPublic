@@ -63,6 +63,7 @@ from mastervault.providers import MockEmbedding
 from mastervault.storage.sqlite import SqliteBackend
 
 
+@pytest.mark.generation_activation_d
 def test_generation_repository_rejects_protected_nesting_before_creation(
     tmp_path: Path,
 ) -> None:
@@ -76,6 +77,7 @@ def test_generation_repository_rejects_protected_nesting_before_creation(
     assert not candidate.exists()
 
 
+@pytest.mark.generation_activation_d
 def test_generation_repository_mode_change_fails_before_index_creation(
     tmp_path: Path,
 ) -> None:
@@ -91,6 +93,7 @@ def test_generation_repository_mode_change_fails_before_index_creation(
     assert not (root / "generations").exists()
 
 
+@pytest.mark.generation_activation_d
 def test_generation_repository_rejects_case_alias_of_protected_root(
     tmp_path: Path,
 ) -> None:
@@ -107,6 +110,7 @@ def test_generation_repository_rejects_case_alias_of_protected_root(
     assert not (protected / ".evidence.lock").exists()
 
 
+@pytest.mark.generation_activation_d
 def test_generation_repository_creation_fsyncs_new_root_parent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -127,6 +131,7 @@ def test_generation_repository_creation_fsyncs_new_root_parent(
     assert parent_identity in synchronized
 
 
+@pytest.mark.generation_activation_d
 def test_pinned_index_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     repository = ManagedGenerationRepository(tmp_path / "generation-effects")
     generation_id = "mgeneration:" + "a" * 64
@@ -142,6 +147,7 @@ def test_pinned_index_rejects_fifo_without_blocking(tmp_path: Path) -> None:
         repository._open_pinned_index(relative, writable=False)
 
 
+@pytest.mark.generation_activation_d
 def test_reported_sqlite_locator_uses_inode_identity_not_path_text(tmp_path: Path) -> None:
     repository = ManagedGenerationRepository(tmp_path / "generation-effects")
     generation_id = "mgeneration:" + "b" * 64
@@ -179,6 +185,7 @@ def test_reported_sqlite_locator_uses_inode_identity_not_path_text(tmp_path: Pat
         pinned.close()
 
 
+@pytest.mark.generation_activation_d
 def test_pinned_index_write_and_open_ignore_intermediate_directory_swap(
     tmp_path: Path,
 ) -> None:
@@ -234,6 +241,7 @@ def test_pinned_index_write_and_open_ignore_intermediate_directory_swap(
         moved_parent.rename(index_path.parent)
 
 
+@pytest.mark.generation_activation_d
 def test_index_swap_during_ready_commit_cannot_leave_poisoned_ready(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -303,6 +311,7 @@ def test_index_swap_during_ready_commit_cannot_leave_poisoned_ready(
         pinned.close()
 
 
+@pytest.mark.generation_activation_d
 def test_publication_and_readiness_reopen_ignore_intermediate_directory_swap(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -470,6 +479,7 @@ def _activate(
     )
 
 
+@pytest.mark.generation_activation_a
 def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -666,6 +676,7 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_b
 def test_adoption_only_activation_records_no_fake_publication(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -696,6 +707,7 @@ def test_adoption_only_activation_records_no_fake_publication(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_d
 def test_second_managed_successor_fails_before_repository_or_effects(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -789,6 +801,7 @@ def test_second_managed_successor_fails_before_repository_or_effects(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_c
 def test_fully_rejected_decision_is_true_noop_without_repository_or_effect_rows(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -817,6 +830,7 @@ def test_fully_rejected_decision_is_true_noop_without_repository_or_effect_rows(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_c
 def test_unsupported_backend_fails_before_repository_or_effect_rows(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -848,6 +862,7 @@ def test_unsupported_backend_fails_before_repository_or_effect_rows(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_d
 def test_change_control_authority_directory_is_protected_by_default(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -875,6 +890,7 @@ def test_change_control_authority_directory_is_protected_by_default(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_c
 def test_publication_file_crash_reconciles_and_active_index_tamper_fails_closed(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -938,13 +954,34 @@ def test_publication_file_crash_reconciles_and_active_index_tamper_fails_closed(
 @pytest.mark.parametrize(
     "boundary",
     (
-        "intent-committed",
-        "publication-receipt:0",
-        "index-file-ready",
-        "index-receipt-committed",
-        "before-authority-cas",
-        "authority-updated-before-receipt",
-        "authority-cas-committed",
+        pytest.param(
+            "intent-committed",
+            marks=pytest.mark.generation_activation_d,
+        ),
+        pytest.param(
+            "publication-receipt:0",
+            marks=pytest.mark.generation_activation_d,
+        ),
+        pytest.param(
+            "index-file-ready",
+            marks=pytest.mark.generation_activation_b,
+        ),
+        pytest.param(
+            "index-receipt-committed",
+            marks=pytest.mark.generation_activation_c,
+        ),
+        pytest.param(
+            "before-authority-cas",
+            marks=pytest.mark.generation_activation_c,
+        ),
+        pytest.param(
+            "authority-updated-before-receipt",
+            marks=pytest.mark.generation_activation_b,
+        ),
+        pytest.param(
+            "authority-cas-committed",
+            marks=pytest.mark.generation_activation_a,
+        ),
     ),
 )
 def test_every_durable_activation_boundary_reconciles_exactly(
@@ -1023,6 +1060,7 @@ def test_every_durable_activation_boundary_reconciles_exactly(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_a
 def test_unsealed_index_crash_rebuilds_exact_rows_before_readiness(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -1157,6 +1195,7 @@ def test_unsealed_index_crash_rebuilds_exact_rows_before_readiness(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_d
 def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
@@ -1306,6 +1345,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
         scenario.store.close()
 
 
+@pytest.mark.generation_activation_b
 def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,

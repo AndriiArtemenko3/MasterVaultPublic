@@ -119,11 +119,17 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "integration: needs a storage backend (sqlite always; postgres when DATABASE_URL is reachable)",
+    "generation_activation_a: balanced CI shard A for managed-generation activation tests",
+    "generation_activation_b: balanced CI shard B for managed-generation activation tests",
+    "generation_activation_c: balanced CI shard C for managed-generation activation tests",
+    "generation_activation_d: balanced CI shard D for managed-generation activation tests",
+    "postgres_contract: requires the isolated PostgreSQL/pgvector test service",
 ]
 
 [tool.coverage.run]
 source = ["src/mastervault"]
 branch = true
+relative_files = true
 
 [tool.coverage.report]
 show_missing = true
