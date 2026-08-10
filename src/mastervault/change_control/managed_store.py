@@ -1,4 +1,4 @@
-"""Authoritative SQLite persistence for managed-revision review (ADR 0009 PR-A).
+"""Authoritative SQLite persistence for managed review and activation.
 
 This module deliberately owns no filesystem roots and no approved model registry.
 Callers inject a repository resolver which must reopen typed artifacts and resolve
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Protocol
@@ -19,6 +20,18 @@ from pydantic import BaseModel
 from mastervault.change_control.bootstrap import (
     VerifiedAnalysisBootstrapCapability,
     verify_generation_zero_authority,
+)
+from mastervault.change_control.managed_generation import (
+    ManagedActivationCommand,
+    ManagedActivationIntentRecord,
+    ManagedGenerationActivationReceipt,
+    ManagedIndexReadinessReceipt,
+    ManagedPublicationEvent,
+    derive_managed_generation_projection,
+    publication_set_sha256,
+)
+from mastervault.change_control.managed_generation_repository import (
+    RepositoryVerifiedManagedGenerationEffects,
 )
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
@@ -69,6 +82,7 @@ from mastervault.change_control.store import (
     _require_contiguous,
     _require_operation_id,
 )
+from mastervault.storage.base import SCHEMA_VERSION
 
 
 class ManagedReviewRepositoryResolver(Protocol):
@@ -124,6 +138,10 @@ class ManagedReviewRepositoryResolver(Protocol):
         proposed_note_bytes: bytes,
     ) -> SourceNoteProjectionBinding: ...
 
+    def resolve_reviewed_generation_source(
+        self, binding: ManagedGoverningSourceAdoptionBinding
+    ) -> Any: ...
+
 
 class ManagedReviewAuthorityError(ChangeControlConflictError):
     """Repository evidence does not authorize the proposed managed review."""
@@ -139,6 +157,14 @@ class ManagedReviewWriteVersionError(ManagedReviewAuthorityError):
 
 class ManagedRevisionEditDeferredError(ManagedReviewAuthorityError):
     """Managed EDIT remains decodable but is not an authorized PR-A write."""
+
+
+class ManagedGenerationActivationError(ManagedReviewAuthorityError):
+    """Managed generation effects do not authorize an exact authority transition."""
+
+
+class ManagedGenerationActivationStaleError(ManagedGenerationActivationError):
+    """A different managed successor won the exact expected-authority CAS."""
 
 
 class ManagedRevisionStoreLifecycle(StrEnum):
@@ -180,6 +206,16 @@ class ManagedRevisionReviewStoreView:
             decision_record=self.decision_record,
             receipt=self.receipt,
         )
+
+
+@dataclass(frozen=True)
+class ManagedGenerationActivationState:
+    """Exact durable evidence currently recorded for one activation operation."""
+
+    intent: ManagedActivationIntentRecord
+    publication_events: tuple[ManagedPublicationEvent, ...]
+    index_receipt: ManagedIndexReadinessReceipt | None
+    activation_receipt: ManagedGenerationActivationReceipt | None
 
 
 def _canonical_model_json(model: BaseModel) -> str:
@@ -266,7 +302,7 @@ def _subject_identity(subject: ManagedRevisionPlan | NoChangeImpactCard) -> tupl
 
 
 class SqliteManagedChangeControlStore(SqliteChangeControlStore):
-    """PR-A managed-review authority in the existing change-control database."""
+    """Managed review and generation authority in one change-control database."""
 
     def _operation_owner(self, operation_id: str) -> tuple[str, str] | None:
         return self._global_operation_owner(operation_id)
@@ -406,9 +442,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 if planning_admissions:
                     verified_note = resolver.verify_revision_plan_source_note(
                         plan,
-                        predecessor_note_bytes=artifact_bytes[
-                            plan.predecessor_note.artifact_id
-                        ],
+                        predecessor_note_bytes=artifact_bytes[plan.predecessor_note.artifact_id],
                         result_raw_bytes=result,
                         proposed_note_bytes=artifact_bytes[plan.proposed_note.artifact_id],
                     )
@@ -610,65 +644,164 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             str(row["authority_json"]),
             label="active generation authority",
         )
-        manifest_row = self.conn.execute(
-            "SELECT * FROM change_control_generation_manifests WHERE generation_id=?",
-            (authority.active_generation.generation_id,),
-        ).fetchone()
-        if manifest_row is None:
-            raise ChangeControlCorruptionError("active generation manifest is absent")
-        manifest = _decode_model(
-            GenerationZeroManifestBinding,
-            str(manifest_row["payload_json"]),
-            label="generation-zero manifest",
-        )
         if not (
             str(row["authority_id"]) == authority.authority_id
-            and int(row["authority_revision"]) == authority.authority_revision == 0
-            and str(row["origin_kind"])
-            == authority.origin_basis.origin_kind
-            == "verified-seed-bootstrap"
+            and int(row["authority_revision"]) == authority.authority_revision
+            and str(row["origin_kind"]) == authority.origin_basis.origin_kind
             and str(row["active_generation_id"]) == authority.active_generation.generation_id
             and int(row["active_generation_number"])
             == authority.active_generation.generation_number
-            == 0
-            and str(row["active_manifest_sha256"])
-            == authority.active_generation.manifest_sha256
-            == manifest.manifest_sha256
+            and str(row["active_manifest_sha256"]) == authority.active_generation.manifest_sha256
             and str(row["active_pointer_sha256"]) == authority.active_pointer_sha256
             and int(row["authority_schema_version"]) == authority.schema_version == 1
-            and str(manifest_row["manifest_id"]) == manifest.manifest_id
-            and str(manifest_row["aggregate_id"]) == aggregate_id == authority.aggregate_id
-            and str(manifest_row["generation_id"]) == authority.active_generation.generation_id
-            and int(manifest_row["generation_number"]) == 0
-            and str(manifest_row["manifest_sha256"]) == manifest.manifest_sha256
-            and str(manifest_row["manifest_kind"]) == "generation-zero"
-            and int(manifest_row["created_inactive"]) == 0
-            and manifest_row["source_request_id"] is None
-            and int(manifest_row["payload_schema_version"]) == 1
+            and aggregate_id == authority.aggregate_id
         ):
             raise ChangeControlCorruptionError(
                 "active generation columns differ from canonical authority evidence"
             )
-        _require_canonical_utc(str(row["initialized_at"]))
-        _require_canonical_utc(str(manifest_row["created_at"]))
-        if str(manifest_row["created_at"]) != str(row["initialized_at"]):
-            raise ChangeControlCorruptionError(
-                "generation-zero manifest and pointer creation times differ"
-            )
-        expected_operation_id = _require_operation_id(
-            f"managed-generation-zero:{authority.active_pointer_sha256}"
-        )
-        if str(row["initialization_operation_id"]) != expected_operation_id:
-            raise ChangeControlCorruptionError(
-                "generation-zero initialization operation is not deterministic"
-            )
-        self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
-        verify_generation_zero_authority(
-            authority=authority,
+        self._verify_authority_chain(
+            authority,
+            initialization_operation_id=str(row["initialization_operation_id"]),
+            initialized_at=_require_canonical_utc(str(row["initialized_at"])),
             verified_bootstrap=verified_bootstrap,
             prechange_head=prechange_head,
         )
         return authority
+
+    def _verify_stored_authority_chain(
+        self,
+        authority: AuthorityRevisionBinding,
+        *,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> None:
+        """Reopen any bounded historical authority through immutable evidence."""
+
+        row = self.conn.execute(
+            "SELECT initialization_operation_id, initialized_at "
+            "FROM change_control_active_generation WHERE aggregate_id=?",
+            (authority.aggregate_id,),
+        ).fetchone()
+        if row is None:
+            raise ChangeControlCorruptionError(
+                "authority chain has no initialized active-generation aggregate"
+            )
+        self._verify_authority_chain(
+            authority,
+            initialization_operation_id=str(row["initialization_operation_id"]),
+            initialized_at=_require_canonical_utc(str(row["initialized_at"])),
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
+
+    def _verify_authority_chain(
+        self,
+        authority: AuthorityRevisionBinding,
+        *,
+        initialization_operation_id: str,
+        initialized_at: str,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> None:
+        """Verify one authority through at most 32 exact managed successors."""
+
+        aggregate_id = authority.aggregate_id
+        current = authority
+        seen_authorities: set[str] = set()
+        seen_generations: set[str] = set()
+        for _depth in range(33):
+            if (
+                current.authority_id in seen_authorities
+                or current.active_generation.generation_id in seen_generations
+                or current.aggregate_id != aggregate_id
+            ):
+                raise ChangeControlCorruptionError(
+                    "managed active-authority chain is cyclic or cross-aggregate"
+                )
+            seen_authorities.add(current.authority_id)
+            seen_generations.add(current.active_generation.generation_id)
+            if isinstance(current.origin_basis, GenerationZeroOriginBasis):
+                manifest_row = self.conn.execute(
+                    "SELECT * FROM change_control_generation_manifests WHERE generation_id=?",
+                    (current.active_generation.generation_id,),
+                ).fetchone()
+                if manifest_row is None:
+                    raise ChangeControlCorruptionError(
+                        "generation-zero manifest is absent from authority chain"
+                    )
+                manifest = _decode_model(
+                    GenerationZeroManifestBinding,
+                    str(manifest_row["payload_json"]),
+                    label="generation-zero manifest",
+                )
+                if not (
+                    current.authority_revision == 0
+                    and current.active_generation.generation_number == 0
+                    and current.active_generation.manifest_sha256 == manifest.manifest_sha256
+                    and str(manifest_row["manifest_id"]) == manifest.manifest_id
+                    and str(manifest_row["aggregate_id"]) == aggregate_id
+                    and str(manifest_row["generation_id"])
+                    == current.active_generation.generation_id
+                    and int(manifest_row["generation_number"]) == 0
+                    and str(manifest_row["manifest_sha256"]) == manifest.manifest_sha256
+                    and str(manifest_row["manifest_kind"]) == "generation-zero"
+                    and int(manifest_row["created_inactive"]) == 0
+                    and manifest_row["source_request_id"] is None
+                    and int(manifest_row["payload_schema_version"]) == 1
+                    and _require_canonical_utc(str(manifest_row["created_at"])) == initialized_at
+                ):
+                    raise ChangeControlCorruptionError(
+                        "generation-zero authority chain evidence is inconsistent"
+                    )
+                expected_operation_id = _require_operation_id(
+                    f"managed-generation-zero:{current.active_pointer_sha256}"
+                )
+                if initialization_operation_id != expected_operation_id:
+                    raise ChangeControlCorruptionError(
+                        "generation-zero initialization operation is not deterministic"
+                    )
+                self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
+                verify_generation_zero_authority(
+                    authority=current,
+                    verified_bootstrap=verified_bootstrap,
+                    prechange_head=prechange_head,
+                )
+                return
+
+            origin = current.origin_basis
+            decision_row = self.conn.execute(
+                "SELECT request_id FROM change_control_managed_review_decisions "
+                "WHERE decision_id=? AND record_sha256=?",
+                (origin.decision_id, origin.decision_record_sha256),
+            ).fetchone()
+            if decision_row is None:
+                raise ChangeControlCorruptionError(
+                    "managed authority origin decision cannot be reopened"
+                )
+            decision = self._read_decision_record(str(decision_row["request_id"]))
+            prior = decision.command.expected_authority
+            try:
+                current.verify_managed_successor_origin(
+                    expected_authority=prior,
+                    decision_record=decision,
+                )
+            except ValueError as exc:
+                raise ChangeControlCorruptionError(
+                    "managed authority successor does not reproduce from its decision"
+                ) from exc
+            receipt = self._read_generation_activation_receipt_by_authority(current.authority_id)
+            if (
+                receipt.activated_authority != current
+                or receipt.prior_authority != prior
+                or receipt.decision_record_sha256 != decision.record_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "managed authority chain activation receipt is inconsistent"
+                )
+            current = prior
+        raise ChangeControlCorruptionError(
+            "managed active-authority chain exceeds the fixed 32-successor limit"
+        )
 
     def get_active_generation(
         self,
@@ -1230,9 +1363,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     )
                 self._initial_decision_receipt(existing)
                 self._assert_temporal_prerequisite(existing.command.bundle)
-                self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
-                verify_generation_zero_authority(
-                    authority=existing.command.expected_authority,
+                self._verify_stored_authority_chain(
+                    existing.command.expected_authority,
                     verified_bootstrap=verified_bootstrap,
                     prechange_head=prechange_head,
                 )
@@ -1530,9 +1662,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
     ) -> None:
         # Exact operation replay is a delivery fact, not a second attempt to
         # open the request. It remains replayable after aggregate staleness.
-        self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
-        verify_generation_zero_authority(
-            authority=record.command.bundle.review_base.authority,
+        self._verify_stored_authority_chain(
+            record.command.bundle.review_base.authority,
             verified_bootstrap=verified_bootstrap,
             prechange_head=prechange_head,
         )
@@ -1594,9 +1725,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             else:
                 self._resolve_contract_and_artifacts(decision.command, resolver)
                 self._assert_temporal_prerequisite(decision.command.bundle)
-                self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
-                verify_generation_zero_authority(
-                    authority=decision.command.expected_authority,
+                self._verify_stored_authority_chain(
+                    decision.command.expected_authority,
                     verified_bootstrap=verified_bootstrap,
                     prechange_head=prechange_head,
                 )
@@ -1617,8 +1747,820 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._rollback_operation_error(exc)
             raise
 
+    def _read_activation_intent(self, activation_id: str) -> ManagedActivationIntentRecord:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_managed_activation_intents WHERE activation_id=?",
+            (activation_id,),
+        ).fetchone()
+        if row is None:
+            raise ChangeControlReviewMissingError("managed activation intent does not exist")
+        record = _decode_model(
+            ManagedActivationIntentRecord,
+            str(row["payload_json"]),
+            label="managed activation intent",
+        )
+        command = record.command
+        authority = command.expected_authority
+        if not (
+            str(row["activation_id"]) == command.activation_id == activation_id
+            and str(row["activation_sha256"]) == command.activation_sha256
+            and str(row["operation_id"]) == command.operation_id
+            and str(row["request_id"]) == command.request_id
+            and str(row["decision_id"]) == command.decision_id
+            and str(row["decision_record_sha256"]) == command.decision_record_sha256
+            and str(row["manifest_id"]) == command.manifest_id
+            and str(row["manifest_sha256"]) == command.manifest_sha256
+            and str(row["generation_id"]) == command.projection.generation_id
+            and str(row["expected_authority_id"]) == authority.authority_id
+            and int(row["expected_authority_revision"]) == authority.authority_revision
+            and str(row["expected_active_pointer_sha256"]) == authority.active_pointer_sha256
+            and str(row["projection_id"]) == command.projection.projection_id
+            and str(row["projection_sha256"]) == command.projection.projection_sha256
+            and str(row["generation_repository_id"]) == command.generation_repository_id
+            and int(row["payload_schema_version"]) == record.schema_version == 1
+            and _require_canonical_utc(str(row["created_at"])) == record.created_at
+        ):
+            raise ChangeControlCorruptionError(
+                "managed activation intent columns differ from canonical evidence"
+            )
+        return record
+
+    def _read_activation_intent_by_operation(
+        self, operation_id: str
+    ) -> ManagedActivationIntentRecord | None:
+        row = self.conn.execute(
+            "SELECT activation_id FROM change_control_managed_activation_intents "
+            "WHERE operation_id=?",
+            (operation_id,),
+        ).fetchone()
+        return None if row is None else self._read_activation_intent(str(row["activation_id"]))
+
+    def _read_publication_events(self, activation_id: str) -> tuple[ManagedPublicationEvent, ...]:
+        intent = self._read_activation_intent(activation_id)
+        rows = self.conn.execute(
+            "SELECT * FROM change_control_revision_publication_events "
+            "WHERE activation_id=? ORDER BY ordinal",
+            (activation_id,),
+        ).fetchall()
+        _require_contiguous(rows, "ordinal")
+        decision = self._read_decision_record(intent.command.request_id)
+        manifest = decision.command.generation_manifest
+        if not isinstance(manifest, ManagedGenerationManifestBindingV2):
+            raise ChangeControlCorruptionError(
+                "managed publication events require a v2 generation manifest"
+            )
+        events: list[ManagedPublicationEvent] = []
+        for ordinal, row in enumerate(rows):
+            event = _decode_model(
+                ManagedPublicationEvent,
+                str(row["payload_json"]),
+                label="managed publication event",
+            )
+            destination = event.publication.destination
+            if not (
+                event.activation_id == activation_id
+                and event.ordinal == ordinal
+                and str(row["event_id"]) == event.event_id
+                and str(row["event_sha256"]) == event.event_sha256
+                and str(row["destination_id"]) == destination.destination_id
+                and str(row["repository_relative_path"]) == event.repository_relative_path
+                and str(row["published_sha256"]) == event.published_sha256
+                and int(row["published_byte_count"]) == event.published_byte_count
+                and int(row["payload_schema_version"]) == event.schema_version == 1
+                and _require_canonical_utc(str(row["published_at"])) == event.published_at
+            ):
+                raise ChangeControlCorruptionError(
+                    "managed publication columns differ from canonical evidence"
+                )
+            expected_path = (
+                f"generations/{intent.command.projection.generation_id}/canonical/"
+                f"{event.publication.destination.path}"
+            )
+            if event.repository_relative_path != expected_path:
+                raise ChangeControlCorruptionError(
+                    "managed publication event has a non-canonical generation path"
+                )
+            if ordinal >= len(manifest.publication_delta) or (
+                event.publication != manifest.publication_delta[ordinal]
+            ):
+                raise ChangeControlCorruptionError(
+                    "managed publication event differs from its manifest ordinal"
+                )
+            events.append(event)
+        if len(events) > len(manifest.publication_delta):
+            raise ChangeControlCorruptionError(
+                "managed publication set exceeds its bounded manifest"
+            )
+        if any(event.activation_id != intent.command.activation_id for event in events):
+            raise ChangeControlCorruptionError(
+                "managed publication event belongs to another activation"
+            )
+        return tuple(events)
+
+    def _read_index_receipt(self, activation_id: str) -> ManagedIndexReadinessReceipt | None:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_index_generation_receipts WHERE activation_id=?",
+            (activation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        receipt = _decode_model(
+            ManagedIndexReadinessReceipt,
+            str(row["payload_json"]),
+            label="managed index readiness receipt",
+        )
+        if not (
+            receipt.activation_id == activation_id
+            and str(row["receipt_id"]) == receipt.receipt_id
+            and str(row["receipt_sha256"]) == receipt.receipt_sha256
+            and str(row["generation_id"]) == receipt.generation_id
+            and str(row["manifest_sha256"]) == receipt.manifest_sha256
+            and str(row["projection_id"]) == receipt.projection_id
+            and str(row["projection_sha256"]) == receipt.projection_sha256
+            and str(row["index_relative_path"]) == receipt.index_relative_path
+            and str(row["index_file_sha256"]) == receipt.index_file_sha256
+            and str(row["logical_index_fingerprint"]) == receipt.logical_index_fingerprint
+            and int(row["payload_schema_version"]) == receipt.schema_version == 1
+            and _require_canonical_utc(str(row["ready_at"])) == receipt.ready_at
+        ):
+            raise ChangeControlCorruptionError(
+                "managed index readiness columns differ from canonical evidence"
+            )
+        return receipt
+
+    def _read_activation_receipt(
+        self, activation_id: str
+    ) -> ManagedGenerationActivationReceipt | None:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_generation_activation_receipts WHERE activation_id=?",
+            (activation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        receipt = _decode_model(
+            ManagedGenerationActivationReceipt,
+            str(row["payload_json"]),
+            label="managed generation activation receipt",
+        )
+        if not (
+            receipt.activation_id == activation_id
+            and str(row["receipt_id"]) == receipt.receipt_id
+            and str(row["receipt_sha256"]) == receipt.receipt_sha256
+            and str(row["generation_id"])
+            == receipt.activated_authority.active_generation.generation_id
+            and str(row["authority_id"]) == receipt.activated_authority.authority_id
+            and int(row["authority_revision"]) == receipt.activated_authority.authority_revision
+            and str(row["publication_set_sha256"]) == receipt.publication_set_sha256
+            and int(row["publication_count"]) == receipt.publication_count
+            and str(row["index_receipt_id"]) == receipt.index_receipt_id
+            and str(row["index_receipt_sha256"]) == receipt.index_receipt_sha256
+            and int(row["payload_schema_version"]) == receipt.schema_version == 1
+            and _require_canonical_utc(str(row["activated_at"])) == receipt.activated_at
+        ):
+            raise ChangeControlCorruptionError(
+                "managed generation activation columns differ from canonical evidence"
+            )
+        intent = self._read_activation_intent(activation_id)
+        decision = self._read_decision_record(intent.command.request_id)
+        index_receipt = self._read_index_receipt(activation_id)
+        events = self._read_publication_events(activation_id)
+        if index_receipt is None or not (
+            receipt.operation_id == intent.command.operation_id
+            and receipt.decision_record_sha256 == decision.record_sha256
+            and receipt.prior_authority == intent.command.expected_authority
+            and receipt.index_receipt_id == index_receipt.receipt_id
+            and receipt.index_receipt_sha256 == index_receipt.receipt_sha256
+            and receipt.publication_count == len(events)
+            and receipt.publication_set_sha256 == publication_set_sha256(events)
+        ):
+            raise ChangeControlCorruptionError(
+                "managed generation activation receipt does not bind exact durable effects"
+            )
+        try:
+            receipt.activated_authority.verify_managed_successor_origin(
+                expected_authority=receipt.prior_authority,
+                decision_record=decision,
+            )
+        except ValueError as exc:
+            raise ChangeControlCorruptionError(
+                "managed generation activation successor is not reproducible"
+            ) from exc
+        return receipt
+
+    def _read_generation_activation_receipt_by_authority(
+        self, authority_id: str
+    ) -> ManagedGenerationActivationReceipt:
+        row = self.conn.execute(
+            "SELECT activation_id FROM change_control_generation_activation_receipts "
+            "WHERE authority_id=?",
+            (authority_id,),
+        ).fetchone()
+        if row is None:
+            raise ChangeControlCorruptionError(
+                "managed authority has no immutable activation receipt"
+            )
+        receipt = self._read_activation_receipt(str(row["activation_id"]))
+        assert receipt is not None
+        return receipt
+
+    def _validate_activation_command(
+        self,
+        command: ManagedActivationCommand,
+        *,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> ManagedRevisionDecisionRecord:
+        expected = command.expected_authority
+        if not (
+            isinstance(expected.origin_basis, GenerationZeroOriginBasis)
+            and expected.authority_revision == 0
+            and expected.active_generation.generation_number == 0
+        ):
+            raise ManagedGenerationActivationError(
+                "PR15 activation supports exactly one managed successor from generation zero"
+            )
+        decision = self._read_decision_record(command.request_id)
+        manifest = decision.command.generation_manifest
+        if not isinstance(manifest, ManagedGenerationManifestBindingV2):
+            raise ManagedGenerationActivationError(
+                "managed activation requires an accepted v2 generation manifest"
+            )
+        if not (
+            decision.command.decision_id == command.decision_id
+            and decision.record_sha256 == command.decision_record_sha256
+            and decision.command.expected_authority == command.expected_authority
+            and manifest.manifest_id == command.manifest_id
+            and manifest.manifest_sha256 == command.manifest_sha256
+            and manifest.authorized_generation.generation_id == command.projection.generation_id
+            and manifest.authorized_generation.generation_number
+            == command.projection.generation_number
+            and command.projection.request_id == command.request_id
+            and command.projection.decision_id == command.decision_id
+            and command.projection.decision_record_sha256 == decision.record_sha256
+            and command.projection.manifest_id == manifest.manifest_id
+            and command.projection.manifest_sha256 == manifest.manifest_sha256
+        ):
+            raise ManagedGenerationActivationError(
+                "managed activation command differs from its authoritative decision"
+            )
+        self._resolve_contract_and_artifacts(decision.command, resolver)
+        try:
+            source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
+            exact_projection = derive_managed_generation_projection(
+                decision=decision,
+                reviewed_inventory=source.inventory,
+                temporal_constraints=(source.snapshot.aggregate.validated_temporal_constraints()),
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ManagedGenerationActivationError(
+                "managed activation projection authority cannot be reopened"
+            ) from exc
+        if exact_projection != command.projection:
+            raise ManagedGenerationActivationError(
+                "managed activation projection differs from reviewed source authority"
+            )
+        self._assert_temporal_prerequisite(decision.command.bundle)
+        self._verify_stored_authority_chain(
+            command.expected_authority,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
+        try:
+            successor = AuthorityRevisionBinding.create_managed_successor(
+                expected_authority=command.expected_authority,
+                decision_record=decision,
+            )
+        except ValueError as exc:
+            raise ManagedGenerationActivationError(
+                "managed activation decision does not reproduce an exact successor"
+            ) from exc
+        if successor.active_generation.generation_id != command.projection.generation_id:
+            raise ManagedGenerationActivationError(
+                "managed projection does not identify the authorized successor generation"
+            )
+        return decision
+
+    def claim_managed_activation(
+        self,
+        command: ManagedActivationCommand,
+        *,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> ManagedActivationIntentRecord:
+        """Create or exactly replay the sole operation-owned activation intent."""
+
+        command = ManagedActivationCommand.model_validate_json(command.model_dump_json())
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            self._validate_activation_command(
+                command,
+                resolver=resolver,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            owner = self._operation_owner(command.operation_id)
+            if owner is not None:
+                if owner[0] != "managed-activation":
+                    raise ChangeControlIdempotencyError(
+                        "operation_id is already owned by another write"
+                    )
+                existing = self._read_activation_intent(owner[1])
+                if existing.command != command:
+                    raise ChangeControlIdempotencyError(
+                        "managed activation operation_id was reused for different inputs"
+                    )
+                self.conn.execute("COMMIT")
+                return existing
+            if (
+                self.conn.execute(
+                    "SELECT 1 FROM change_control_managed_activation_intents WHERE request_id=?",
+                    (command.request_id,),
+                ).fetchone()
+                is not None
+            ):
+                raise ChangeControlIdempotencyError(
+                    "managed decision is already owned by another activation operation"
+                )
+            current = self._read_active_authority(
+                command.expected_authority.aggregate_id,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            if current != command.expected_authority:
+                raise ManagedGenerationActivationStaleError(
+                    "managed activation expected authority is no longer active"
+                )
+            record = ManagedActivationIntentRecord.create(command=command, created_at=_now())
+            self.conn.execute(
+                "INSERT INTO change_control_managed_activation_intents VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    command.activation_id,
+                    command.activation_sha256,
+                    command.operation_id,
+                    command.request_id,
+                    command.decision_id,
+                    command.decision_record_sha256,
+                    command.manifest_id,
+                    command.manifest_sha256,
+                    command.projection.generation_id,
+                    command.expected_authority.authority_id,
+                    command.expected_authority.authority_revision,
+                    command.expected_authority.active_pointer_sha256,
+                    command.projection.projection_id,
+                    command.projection.projection_sha256,
+                    command.generation_repository_id,
+                    _canonical_model_json(record),
+                    record.created_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self.conn.execute("COMMIT")
+            return record
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_managed_publication(
+        self,
+        event: ManagedPublicationEvent,
+        *,
+        capability: RepositoryVerifiedManagedGenerationEffects,
+    ) -> ManagedPublicationEvent:
+        """Commit one exact create-only publication event, or replay it."""
+
+        event = ManagedPublicationEvent.model_validate_json(event.model_dump_json())
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_global_operation_ownership()
+            intent = self._read_activation_intent(event.activation_id)
+            capability.verify(
+                command=intent.command,
+                publication_events=(event,),
+                index_receipt=None,
+            )
+            decision = self._read_decision_record(intent.command.request_id)
+            manifest = decision.command.generation_manifest
+            if not isinstance(manifest, ManagedGenerationManifestBindingV2):
+                raise ManagedGenerationActivationError(
+                    "publication requires an exact v2 activation intent"
+                )
+            publications = manifest.publication_delta
+            if (
+                event.ordinal >= len(publications)
+                or event.publication != publications[event.ordinal]
+            ):
+                raise ManagedGenerationActivationError(
+                    "publication event differs from exact manifest ordinal"
+                )
+            expected_path = (
+                f"generations/{intent.command.projection.generation_id}/canonical/"
+                f"{event.publication.destination.path}"
+            )
+            if event.repository_relative_path != expected_path:
+                raise ManagedGenerationActivationError(
+                    "publication event has a non-canonical generation path"
+                )
+            existing = self.conn.execute(
+                "SELECT payload_json FROM change_control_revision_publication_events "
+                "WHERE activation_id=? AND ordinal=?",
+                (event.activation_id, event.ordinal),
+            ).fetchone()
+            if existing is not None:
+                persisted = _decode_model(
+                    ManagedPublicationEvent,
+                    str(existing["payload_json"]),
+                    label="managed publication event",
+                )
+                if persisted != event:
+                    raise ChangeControlIdempotencyError(
+                        "managed publication ordinal was reused for different evidence"
+                    )
+                self._read_publication_events(event.activation_id)
+                self.conn.execute("COMMIT")
+                return persisted
+            if event.ordinal != len(self._read_publication_events(event.activation_id)):
+                raise ManagedGenerationActivationError(
+                    "managed publications must commit in exact contiguous manifest order"
+                )
+            self.conn.execute(
+                "INSERT INTO change_control_revision_publication_events VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    event.activation_id,
+                    event.ordinal,
+                    event.event_id,
+                    event.event_sha256,
+                    event.publication.destination.destination_id,
+                    event.repository_relative_path,
+                    event.published_sha256,
+                    event.published_byte_count,
+                    _canonical_model_json(event),
+                    event.published_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self.conn.execute("COMMIT")
+            return event
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_managed_index_readiness(
+        self,
+        receipt: ManagedIndexReadinessReceipt,
+        *,
+        capability: RepositoryVerifiedManagedGenerationEffects,
+    ) -> ManagedIndexReadinessReceipt:
+        """Commit one exact isolated-index readiness receipt, or replay it."""
+
+        receipt = ManagedIndexReadinessReceipt.model_validate_json(receipt.model_dump_json())
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_global_operation_ownership()
+            intent = self._read_activation_intent(receipt.activation_id)
+            command = intent.command
+            events = self._read_publication_events(receipt.activation_id)
+            capability.verify(
+                command=command,
+                publication_events=events,
+                index_receipt=receipt,
+            )
+            if not (
+                receipt.generation_id == command.projection.generation_id
+                and receipt.manifest_sha256 == command.manifest_sha256
+                and receipt.projection_id == command.projection.projection_id
+                and receipt.projection_sha256 == command.projection.projection_sha256
+                and receipt.serving_content_fingerprint
+                == command.projection.serving_content_fingerprint
+                and receipt.embedding_model_version == command.embedding_model_version
+                and receipt.embedding_dimensions == command.embedding_dimensions
+                and receipt.storage_schema_version == SCHEMA_VERSION
+            ):
+                raise ManagedGenerationActivationError(
+                    "managed index receipt differs from exact activation command"
+                )
+            existing = self._read_index_receipt(receipt.activation_id)
+            if existing is not None:
+                if existing != receipt:
+                    raise ChangeControlIdempotencyError(
+                        "managed index readiness was reused for different evidence"
+                    )
+                self.conn.execute("COMMIT")
+                return existing
+            self.conn.execute(
+                "INSERT INTO change_control_index_generation_receipts VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    receipt.activation_id,
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    receipt.generation_id,
+                    receipt.manifest_sha256,
+                    receipt.projection_id,
+                    receipt.projection_sha256,
+                    receipt.index_relative_path,
+                    receipt.index_file_sha256,
+                    receipt.logical_index_fingerprint,
+                    _canonical_model_json(receipt),
+                    receipt.ready_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self.conn.execute("COMMIT")
+            return receipt
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_managed_generation_activation(
+        self,
+        operation_id: str,
+        *,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> ManagedGenerationActivationState | None:
+        """Reopen exact durable activation evidence without writing a delivery row."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(operation_id)
+            if owner is None:
+                self.conn.execute("COMMIT")
+                return None
+            if owner[0] != "managed-activation":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another write"
+                )
+            intent = self._read_activation_intent(owner[1])
+            self._validate_activation_command(
+                intent.command,
+                resolver=resolver,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            state = ManagedGenerationActivationState(
+                intent=intent,
+                publication_events=self._read_publication_events(intent.command.activation_id),
+                index_receipt=self._read_index_receipt(intent.command.activation_id),
+                activation_receipt=self._read_activation_receipt(intent.command.activation_id),
+            )
+            self.conn.execute("COMMIT")
+            return state
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_managed_activation_operation_request_id(
+        self,
+        operation_id: str,
+    ) -> str | None:
+        """Preflight one activation operation without reopening repository evidence."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(operation_id)
+            if owner is None:
+                self.conn.execute("COMMIT")
+                return None
+            if owner[0] != "managed-activation":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another write"
+                )
+            request_id = self._read_activation_intent(owner[1]).command.request_id
+            self.conn.execute("COMMIT")
+            return request_id
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_active_managed_generation_state(
+        self,
+        aggregate_id: str,
+        *,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> ManagedGenerationActivationState | None:
+        """Return exact effect evidence for the active managed successor, if any."""
+
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            authority = self._read_active_authority(
+                aggregate_id,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            if isinstance(authority.origin_basis, GenerationZeroOriginBasis):
+                self.conn.execute("COMMIT")
+                return None
+            receipt = self._read_generation_activation_receipt_by_authority(authority.authority_id)
+            intent = self._read_activation_intent(receipt.activation_id)
+            self._validate_activation_command(
+                intent.command,
+                resolver=resolver,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            state = ManagedGenerationActivationState(
+                intent=intent,
+                publication_events=self._read_publication_events(receipt.activation_id),
+                index_receipt=self._read_index_receipt(receipt.activation_id),
+                activation_receipt=receipt,
+            )
+            self.conn.execute("COMMIT")
+            return state
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def activate_managed_generation(
+        self,
+        command: ManagedActivationCommand,
+        *,
+        capability: RepositoryVerifiedManagedGenerationEffects,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+        failure_hook: Callable[[str], None] | None = None,
+    ) -> ManagedGenerationActivationReceipt:
+        """Atomically CAS authority and commit its exact immutable activation receipt."""
+
+        command = ManagedActivationCommand.model_validate_json(command.model_dump_json())
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            decision = self._validate_activation_command(
+                command,
+                resolver=resolver,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            intent = self._read_activation_intent(command.activation_id)
+            if intent.command != command:
+                raise ChangeControlIdempotencyError(
+                    "managed activation intent differs from CAS command"
+                )
+            manifest = decision.command.generation_manifest
+            assert isinstance(manifest, ManagedGenerationManifestBindingV2)
+            events = self._read_publication_events(command.activation_id)
+            if len(events) != len(manifest.publication_delta) or any(
+                event.ordinal != ordinal or event.publication != publication
+                for ordinal, (event, publication) in enumerate(
+                    zip(events, manifest.publication_delta, strict=True)
+                )
+            ):
+                raise ManagedGenerationActivationError(
+                    "managed activation lacks the exact complete publication set"
+                )
+            index_receipt = self._read_index_receipt(command.activation_id)
+            if index_receipt is None:
+                raise ManagedGenerationActivationError(
+                    "managed activation requires an immutable index readiness receipt"
+                )
+            capability.verify(
+                command=command,
+                publication_events=events,
+                index_receipt=index_receipt,
+            )
+            existing = self._read_activation_receipt(command.activation_id)
+            if existing is not None:
+                active = self._read_active_authority(
+                    command.expected_authority.aggregate_id,
+                    verified_bootstrap=verified_bootstrap,
+                    prechange_head=prechange_head,
+                )
+                if active != existing.activated_authority:
+                    raise ChangeControlCorruptionError(
+                        "recorded activation is not the exact active authority"
+                    )
+                self.conn.execute("COMMIT")
+                return existing
+            current = self._read_active_authority(
+                command.expected_authority.aggregate_id,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            if current != command.expected_authority:
+                raise ManagedGenerationActivationStaleError(
+                    "managed activation lost the expected-authority CAS"
+                )
+            successor = AuthorityRevisionBinding.create_managed_successor(
+                expected_authority=current,
+                decision_record=decision,
+            )
+            receipt = ManagedGenerationActivationReceipt.create(
+                activation_id=command.activation_id,
+                operation_id=command.operation_id,
+                decision_record_sha256=decision.record_sha256,
+                publication_set_sha256=publication_set_sha256(events),
+                publication_count=len(events),
+                index_receipt_id=index_receipt.receipt_id,
+                index_receipt_sha256=index_receipt.receipt_sha256,
+                prior_authority=current,
+                activated_authority=successor,
+                activated_at=_now(),
+            )
+            cursor = self.conn.execute(
+                "UPDATE change_control_active_generation SET "
+                "authority_id=?, authority_revision=?, origin_kind='managed-decision', "
+                "active_generation_id=?, active_generation_number=?, "
+                "active_manifest_sha256=?, active_pointer_sha256=?, authority_json=? "
+                "WHERE aggregate_id=? AND authority_id=? AND authority_revision=? "
+                "AND active_generation_id=? AND active_manifest_sha256=? "
+                "AND active_pointer_sha256=?",
+                (
+                    successor.authority_id,
+                    successor.authority_revision,
+                    successor.active_generation.generation_id,
+                    successor.active_generation.generation_number,
+                    successor.active_generation.manifest_sha256,
+                    successor.active_pointer_sha256,
+                    _canonical_model_json(successor),
+                    current.aggregate_id,
+                    current.authority_id,
+                    current.authority_revision,
+                    current.active_generation.generation_id,
+                    current.active_generation.manifest_sha256,
+                    current.active_pointer_sha256,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ManagedGenerationActivationStaleError(
+                    "managed activation lost the exact authority CAS"
+                )
+            if failure_hook is not None:
+                failure_hook("authority-updated-before-receipt")
+            self.conn.execute(
+                "INSERT INTO change_control_generation_activation_receipts VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    command.activation_id,
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    successor.active_generation.generation_id,
+                    successor.authority_id,
+                    successor.authority_revision,
+                    receipt.publication_set_sha256,
+                    receipt.publication_count,
+                    receipt.index_receipt_id,
+                    receipt.index_receipt_sha256,
+                    _canonical_model_json(receipt),
+                    receipt.activated_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self.conn.execute("COMMIT")
+            return receipt
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
 
 __all__ = [
+    "ManagedGenerationActivationError",
+    "ManagedGenerationActivationStaleError",
+    "ManagedGenerationActivationState",
     "ManagedReviewAuthorityError",
     "ManagedReviewRepositoryResolver",
     "ManagedReviewStaleError",

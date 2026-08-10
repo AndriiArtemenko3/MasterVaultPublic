@@ -248,6 +248,54 @@ if TYPE_CHECKING:
         InferenceEvidenceUnsupportedPlatformError,
         RepositoryVerifiedInferenceEvidenceBatch,
     )
+    from mastervault.change_control.managed_activation_service import (
+        ManagedActivationBackendUnsupportedError as ManagedActivationBackendUnsupportedError,
+    )
+    from mastervault.change_control.managed_activation_service import (
+        ManagedActivationOutcome as ManagedActivationOutcome,
+    )
+    from mastervault.change_control.managed_activation_service import (
+        ManagedActivationServiceError as ManagedActivationServiceError,
+    )
+    from mastervault.change_control.managed_activation_service import (
+        ManagedActivationServiceResult as ManagedActivationServiceResult,
+    )
+    from mastervault.change_control.managed_activation_service import (
+        activate_reviewed_managed_generation as activate_reviewed_managed_generation,
+    )
+    from mastervault.change_control.managed_generation import (
+        ManagedActivationCommand as ManagedActivationCommand,
+    )
+    from mastervault.change_control.managed_generation import (
+        ManagedGenerationActivationReceipt as ManagedGenerationActivationReceipt,
+    )
+    from mastervault.change_control.managed_generation import (
+        ManagedIndexReadinessReceipt as ManagedIndexReadinessReceipt,
+    )
+    from mastervault.change_control.managed_generation import (
+        ManagedPublicationEvent as ManagedPublicationEvent,
+    )
+    from mastervault.change_control.managed_generation import (
+        ResolvedManagedGenerationProjection as ResolvedManagedGenerationProjection,
+    )
+    from mastervault.change_control.managed_generation import (
+        derive_managed_generation_projection as derive_managed_generation_projection,
+    )
+    from mastervault.change_control.managed_generation_repository import (
+        ManagedGenerationIndexError as ManagedGenerationIndexError,
+    )
+    from mastervault.change_control.managed_generation_repository import (
+        ManagedGenerationRepository as ManagedGenerationRepository,
+    )
+    from mastervault.change_control.managed_generation_repository import (
+        ManagedGenerationRepositoryConflictError as ManagedGenerationRepositoryConflictError,
+    )
+    from mastervault.change_control.managed_generation_repository import (
+        ManagedGenerationRepositoryError as ManagedGenerationRepositoryError,
+    )
+    from mastervault.change_control.managed_generation_repository import (
+        RepositoryVerifiedManagedGenerationEffects as RepositoryVerifiedManagedGenerationEffects,
+    )
     from mastervault.change_control.managed_review import (
         ManagedGenerationManifest as ManagedGenerationManifest,
     )
@@ -285,11 +333,29 @@ if TYPE_CHECKING:
     from mastervault.change_control.managed_review_service import (
         open_managed_revision_review as open_managed_revision_review,
     )
+    from mastervault.change_control.managed_serving import (
+        ManagedServingError as ManagedServingError,
+    )
+    from mastervault.change_control.managed_serving import (
+        ManagedServingGenerationZeroError as ManagedServingGenerationZeroError,
+    )
+    from mastervault.change_control.managed_serving import (
+        open_active_managed_sqlite_index as open_active_managed_sqlite_index,
+    )
     from mastervault.change_control.managed_staging_repository import (
         ManagedStagingCompletionBinding,
         ManagedStagingManifest,
         ManagedStagingRepository,
         VerifiedManagedStagingCapability,
+    )
+    from mastervault.change_control.managed_store import (
+        ManagedGenerationActivationError as ManagedGenerationActivationError,
+    )
+    from mastervault.change_control.managed_store import (
+        ManagedGenerationActivationStaleError as ManagedGenerationActivationStaleError,
+    )
+    from mastervault.change_control.managed_store import (
+        ManagedGenerationActivationState as ManagedGenerationActivationState,
     )
     from mastervault.change_control.managed_store import (
         ManagedReviewAuthorityError as ManagedReviewAuthorityError,
@@ -520,6 +586,45 @@ if TYPE_CHECKING:
     )
 
 _LAZY_EXPORTS = {
+    **{
+        name: ("mastervault.change_control.managed_activation_service", name)
+        for name in (
+            "ManagedActivationBackendUnsupportedError",
+            "ManagedActivationOutcome",
+            "ManagedActivationServiceError",
+            "ManagedActivationServiceResult",
+            "activate_reviewed_managed_generation",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_generation", name)
+        for name in (
+            "ManagedActivationCommand",
+            "ManagedGenerationActivationReceipt",
+            "ManagedIndexReadinessReceipt",
+            "ManagedPublicationEvent",
+            "ResolvedManagedGenerationProjection",
+            "derive_managed_generation_projection",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_generation_repository", name)
+        for name in (
+            "ManagedGenerationIndexError",
+            "ManagedGenerationRepository",
+            "ManagedGenerationRepositoryConflictError",
+            "ManagedGenerationRepositoryError",
+            "RepositoryVerifiedManagedGenerationEffects",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_serving", name)
+        for name in (
+            "ManagedServingError",
+            "ManagedServingGenerationZeroError",
+            "open_active_managed_sqlite_index",
+        )
+    },
     **{
         name: ("mastervault.change_control.impact_analysis", name)
         for name in (
@@ -778,6 +883,9 @@ _LAZY_EXPORTS = {
     **{
         name: ("mastervault.change_control.managed_store", name)
         for name in (
+            "ManagedGenerationActivationError",
+            "ManagedGenerationActivationStaleError",
+            "ManagedGenerationActivationState",
             "ManagedReviewAuthorityError",
             "ManagedReviewRepositoryResolver",
             "ManagedReviewStaleError",
@@ -951,6 +1059,25 @@ __all__ = [
     "HumanReviewRequestReceipt",
     "HumanReviewRequestView",
     "GraphMaterializationStatus",
+    "ManagedActivationBackendUnsupportedError",
+    "ManagedActivationCommand",
+    "ManagedActivationOutcome",
+    "ManagedActivationServiceError",
+    "ManagedActivationServiceResult",
+    "ManagedGenerationActivationReceipt",
+    "ManagedGenerationActivationError",
+    "ManagedGenerationActivationStaleError",
+    "ManagedGenerationActivationState",
+    "ManagedGenerationIndexError",
+    "ManagedGenerationRepository",
+    "ManagedGenerationRepositoryConflictError",
+    "ManagedGenerationRepositoryError",
+    "RepositoryVerifiedManagedGenerationEffects",
+    "ManagedIndexReadinessReceipt",
+    "ManagedPublicationEvent",
+    "ManagedServingError",
+    "ManagedServingGenerationZeroError",
+    "ResolvedManagedGenerationProjection",
     "ManagedReviewAuthorityError",
     "ManagedReviewCheckpointHealth",
     "ManagedReviewOrchestrationPhase",
@@ -1021,10 +1148,12 @@ __all__ = [
     "ValidatedTemporalConstraintSet",
     "VersionedClaimRevision",
     "aggregate_sha256",
+    "activate_reviewed_managed_generation",
     "apply_human_review_decision",
     "canonical_json_bytes",
     "claim_scopes_v1",
     "derive_managed_governing_source_adoption",
+    "derive_managed_generation_projection",
     "bootstrap_analysis_aggregate",
     "build_verified_prechange_aggregate",
     "create_verified_analysis_bootstrap_binding",
@@ -1089,6 +1218,7 @@ __all__ = [
     "materialize_dependencies",
     "managed_review_workflow_id",
     "open_managed_revision_review",
+    "open_active_managed_sqlite_index",
     "validate_dependency_results",
     "validate_dependency_workload",
     "validate_impact_workload",

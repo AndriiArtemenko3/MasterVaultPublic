@@ -63,7 +63,7 @@ from mastervault.change_control.review import (
 from mastervault.document_intelligence.models import EvidenceRef, StructuralEvidenceRef
 
 _STORE_IDENTITY = "mastervault.change-control.sqlite"
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MODEL_SCHEMA_VERSION = 1
 _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "sqlite"
 _MIGRATION_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
@@ -111,11 +111,19 @@ _MANAGED_REVIEW_TABLES = {
     "change_control_managed_review_decision_items",
     "change_control_managed_review_decision_delivery_receipts",
 }
-_EXPECTED_TABLES = _V2_EXPECTED_TABLES | _MANAGED_REVIEW_TABLES
+_V3_EXPECTED_TABLES = _V2_EXPECTED_TABLES | _MANAGED_REVIEW_TABLES
+_MANAGED_GENERATION_EFFECT_TABLES = {
+    "change_control_managed_activation_intents",
+    "change_control_revision_publication_events",
+    "change_control_index_generation_receipts",
+    "change_control_generation_activation_receipts",
+}
+_EXPECTED_TABLES = _V3_EXPECTED_TABLES | _MANAGED_GENERATION_EFFECT_TABLES
 _EXPECTED_TABLES_BY_VERSION = {
     1: _V1_EXPECTED_TABLES,
     2: _V2_EXPECTED_TABLES,
-    3: _EXPECTED_TABLES,
+    3: _V3_EXPECTED_TABLES,
+    4: _EXPECTED_TABLES,
 }
 
 
@@ -805,6 +813,12 @@ class SqliteChangeControlStore:
                 "operation_id",
                 "request_id",
             ),
+            (
+                "managed-activation",
+                "change_control_managed_activation_intents",
+                "operation_id",
+                "activation_id",
+            ),
         )
         tables = self._user_tables()
         for owner, table, operation_column, identity_column in queries:
@@ -837,6 +851,11 @@ class SqliteChangeControlStore:
             selects.append(
                 "SELECT operation_id, 'managed-decision' "
                 "FROM change_control_managed_review_decisions"
+            )
+        if "change_control_managed_activation_intents" in tables:
+            selects.append(
+                "SELECT operation_id, 'managed-activation' "
+                "FROM change_control_managed_activation_intents"
             )
         rows = self.conn.execute(
             "SELECT operation_id, owner FROM ("

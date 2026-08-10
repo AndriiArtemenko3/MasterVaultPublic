@@ -776,6 +776,49 @@ def test_symlink_artifact_locator_is_never_followed(
         evidence_repository.persist_outcome(live)
 
 
+def test_optional_read_stays_on_pinned_parent_during_intermediate_swap(
+    tmp_path: Path,
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    relative = "nested/evidence.json"
+    expected = b'{"source":"repository"}'
+    evidence_repository._create_only(relative, expected, label="test evidence")
+    canonical_parent = evidence_repository.root / "nested"
+    moved_parent = evidence_repository.root / "nested-pinned"
+    victim_parent = tmp_path / "victim"
+    victim_parent.mkdir(mode=0o700)
+    victim = victim_parent / "evidence.json"
+    victim.write_bytes(b'{"source":"outside"}')
+    victim.chmod(0o600)
+    original_open_parent = evidence_repository._open_parent
+    swapped = False
+
+    def swap_after_parent_pin(value: str, *, create: bool) -> tuple[int, str]:
+        nonlocal swapped
+        parent_fd, name = original_open_parent(value, create=create)
+        if value == relative and not swapped:
+            canonical_parent.rename(moved_parent)
+            canonical_parent.symlink_to(victim_parent, target_is_directory=True)
+            swapped = True
+        return parent_fd, name
+
+    try:
+        monkeypatch.setattr(evidence_repository, "_open_parent", swap_after_parent_pin)
+        assert evidence_repository._read_optional(
+            relative,
+            limit=len(expected),
+            label="test evidence",
+        ) == expected
+        assert swapped
+        assert victim.read_bytes() == b'{"source":"outside"}'
+    finally:
+        if canonical_parent.is_symlink():
+            canonical_parent.unlink()
+        if moved_parent.exists():
+            moved_parent.rename(canonical_parent)
+
+
 def test_special_file_artifact_locator_is_rejected_without_blocking(
     evidence_repository: FilesystemInferenceEvidenceRepository,
     live: RecordedInferenceOutcome,

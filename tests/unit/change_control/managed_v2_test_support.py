@@ -48,6 +48,7 @@ class RealManagedV2Scenario:
     verified_bootstrap: VerifiedAnalysisBootstrapCapability
     prechange_head: AggregateHeadBinding
     canonical_root: Path
+    evidence_root: Path
 
 
 def build_real_managed_v2_scenario(tmp_path: Path) -> RealManagedV2Scenario:
@@ -160,6 +161,70 @@ def build_real_managed_v2_scenario(tmp_path: Path) -> RealManagedV2Scenario:
         verified_bootstrap=verified_bootstrap,
         prechange_head=prechange_head,
         canonical_root=recorded.canonical_root,
+        evidence_root=case.evidence_repository.root,
+    )
+
+
+def build_real_managed_v2_variant(
+    seed: RealManagedV2Scenario, tmp_path: Path
+) -> RealManagedV2Scenario:
+    """Build a second valid reviewed generation over the seed's exact base authority."""
+
+    tmp_path.mkdir(parents=True)
+    recorded = _recorded_scenario(
+        authority=seed.reviewed_snapshot,
+        workload=build_impact_workload(seed.reviewed_snapshot),
+        tmp_path=tmp_path,
+        repository_root=seed.evidence_root,
+    )
+    admission = _bind(recorded)
+    analysis = recorded.run.analysis_set
+    assert analysis is not None
+    bootstrap_binding = analysis.analysis_bootstrap
+    adoption = derive_managed_governing_source_adoption(
+        reviewed_snapshot=seed.reviewed_snapshot,
+        analysis_bootstrap=bootstrap_binding,
+        repo_root=recorded.canonical_root,
+        manifest_path=recorded.canonical_root / MANIFEST_RELATIVE_PATH,
+        evidence_repository_id=admission.repository_id,
+    )
+    resolver = _resolver(
+        recorded,
+        admission,
+        governing_sources=(
+            ApprovedManagedGoverningSourceAuthority(
+                adoption=adoption,
+                reviewed_snapshot=seed.reviewed_snapshot,
+                analysis_bootstrap=bootstrap_binding,
+            ),
+        ),
+    )
+    run_binding = ManagedRunBindingV2.create(
+        run_id=admission.run_id,
+        operation_id=seed.run_binding.operation_id,
+        prechange_head=seed.prechange_head,
+        analysis_head=seed.reviewed_snapshot.binding.analysis_head,
+        algorithm_manifest_sha256=recorded.run.outcomes[
+            0
+        ].execution.contract.algorithm_manifest_sha256,
+        inference_contract=recorded.run.outcomes[0].execution.contract,
+        analysis_set=analysis,
+        revision_planning_admission=admission,
+        governing_source_adoption=adoption,
+    )
+    authority_path = tmp_path / "variant-authority.sqlite3"
+    shutil.copy2(seed.authority_path, authority_path)
+    return RealManagedV2Scenario(
+        store=SqliteManagedChangeControlStore(authority_path),
+        authority_path=authority_path,
+        reviewed_snapshot=seed.reviewed_snapshot,
+        run_binding=run_binding,
+        subjects=recorded.run.subjects,
+        resolver=resolver,
+        verified_bootstrap=seed.verified_bootstrap,
+        prechange_head=seed.prechange_head,
+        canonical_root=recorded.canonical_root,
+        evidence_root=seed.evidence_root,
     )
 
 
@@ -181,11 +246,13 @@ def clone_real_managed_v2_scenario(
         verified_bootstrap=seed.verified_bootstrap,
         prechange_head=seed.prechange_head,
         canonical_root=seed.canonical_root,
+        evidence_root=seed.evidence_root,
     )
 
 
 __all__ = [
     "RealManagedV2Scenario",
     "build_real_managed_v2_scenario",
+    "build_real_managed_v2_variant",
     "clone_real_managed_v2_scenario",
 ]

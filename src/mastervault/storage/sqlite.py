@@ -103,16 +103,40 @@ _ALL_TABLES = (
 class SqliteBackend:
     name = "sqlite"
 
-    def __init__(self, db_path: Path | str, migrations_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str,
+        migrations_dir: Path | None = None,
+        *,
+        read_only: bool = False,
+        _read_only_uri: str | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.migrations_dir = migrations_dir or _DEFAULT_MIGRATIONS_DIR
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), timeout=30)
+        self.read_only = read_only
+        if _read_only_uri is not None and not read_only:
+            raise ValueError("an exact read-only URI requires read_only=True")
+        if read_only:
+            database_uri = (
+                self.db_path.resolve(strict=True).as_uri()
+                if _read_only_uri is None
+                else _read_only_uri
+            )
+            self.conn = sqlite3.connect(
+                f"{database_uri}?mode=ro&immutable=1",
+                timeout=30,
+                uri=True,
+            )
+        else:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(str(self.db_path), timeout=30)
         self.conn.row_factory = sqlite3.Row
         self.conn.enable_load_extension(True)
         sqlite_vec.load(self.conn)
         self.conn.enable_load_extension(False)
         self.conn.execute("PRAGMA foreign_keys = ON")
+        if read_only:
+            self.conn.execute("PRAGMA query_only = ON")
 
     # -- schema -------------------------------------------------------------
 
@@ -222,11 +246,14 @@ class SqliteBackend:
             "SELECT version, name, checksum_sha256 FROM schema_migrations ORDER BY version"
         ).fetchall()
         actual = [
-            (int(row["version"]), str(row["name"]), str(row["checksum_sha256"]))
-            for row in rows
+            (int(row["version"]), str(row["name"]), str(row["checksum_sha256"])) for row in rows
         ]
         expected = [
-            (item_version, migrations[item_version].stem, self._migration_checksum(migrations[item_version]))
+            (
+                item_version,
+                migrations[item_version].stem,
+                self._migration_checksum(migrations[item_version]),
+            )
             for item_version in range(1, version + 1)
         ]
         if actual != expected:
@@ -614,9 +641,7 @@ class SqliteBackend:
         params.append(k)
         return [r["doc_id"] for r in self.conn.execute(sql, params)]
 
-    def replace_structural_records(
-        self, doc_id: str, rows: list[StructuralRecordRow]
-    ) -> None:
+    def replace_structural_records(self, doc_id: str, rows: list[StructuralRecordRow]) -> None:
         """Transactionally replace one document's derived structural records."""
         if any(row.doc_id != doc_id for row in rows):
             raise StorageError("structural record belongs to another document")
@@ -646,18 +671,34 @@ class SqliteBackend:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (
-                        row.record_id, row.doc_id, row.ordinal, row.record_kind, row.text,
-                        row.asset_sha256, row.parsed_artifact_sha256,
-                        row.parser, row.parser_version,
-                        row.parser_core_version, row.parser_profile,
-                        row.normalization_profile, row.model_identity,
-                        json.dumps(row.resource_limits), row.page_number,
-                        row.block_id, row.section_id, row.table_id, row.row_id,
+                        row.record_id,
+                        row.doc_id,
+                        row.ordinal,
+                        row.record_kind,
+                        row.text,
+                        row.asset_sha256,
+                        row.parsed_artifact_sha256,
+                        row.parser,
+                        row.parser_version,
+                        row.parser_core_version,
+                        row.parser_profile,
+                        row.normalization_profile,
+                        row.model_identity,
+                        json.dumps(row.resource_limits),
+                        row.page_number,
+                        row.block_id,
+                        row.section_id,
+                        row.table_id,
+                        row.row_id,
                         json.dumps(row.cell_ids),
-                        json.dumps([
-                            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
-                            for item in row.evidence
-                        ]),
+                        json.dumps(
+                            [
+                                item.model_dump(mode="json")
+                                if hasattr(item, "model_dump")
+                                else item
+                                for item in row.evidence
+                            ]
+                        ),
                     )
                     for row in rows
                 ],
@@ -667,9 +708,7 @@ class SqliteBackend:
                 [(row.record_id, row.text) for row in rows],
             )
 
-    def lexical_structural(
-        self, query: str, k: int, domain: str | None = None
-    ) -> list[str]:
+    def lexical_structural(self, query: str, k: int, domain: str | None = None) -> list[str]:
         match = fts_match_expr(query)
         if match is None:
             return []
@@ -700,21 +739,32 @@ class SqliteBackend:
         ).fetchall()
         by_id = {
             row["record_id"]: StructuralRecordRow(
-                record_id=row["record_id"], doc_id=row["doc_id"], ordinal=row["ordinal"],
-                record_kind=row["record_kind"], text=row["text"],
-                asset_sha256=row["asset_sha256"], parser=row["parser"],
+                record_id=row["record_id"],
+                doc_id=row["doc_id"],
+                ordinal=row["ordinal"],
+                record_kind=row["record_kind"],
+                text=row["text"],
+                asset_sha256=row["asset_sha256"],
+                parser=row["parser"],
                 parsed_artifact_sha256=row["parsed_artifact_sha256"],
                 parser_version=row["parser_version"],
                 parser_core_version=row["parser_core_version"],
                 parser_profile=row["parser_profile"],
                 normalization_profile=row["normalization_profile"],
-                model_identity=row["model_identity"], page_number=row["page_number"],
+                model_identity=row["model_identity"],
+                page_number=row["page_number"],
                 resource_limits=json.loads(row["resource_limits"]),
-                block_id=row["block_id"], section_id=row["section_id"],
-                table_id=row["table_id"], row_id=row["row_id"],
+                block_id=row["block_id"],
+                section_id=row["section_id"],
+                table_id=row["table_id"],
+                row_id=row["row_id"],
                 cell_ids=json.loads(row["cell_ids"]),
-                evidence=[StructuralEvidenceRef.model_validate(item) for item in json.loads(row["evidence"])],
-                rel_path=row["rel_path"], domain=row["domain"],
+                evidence=[
+                    StructuralEvidenceRef.model_validate(item)
+                    for item in json.loads(row["evidence"])
+                ],
+                rel_path=row["rel_path"],
+                domain=row["domain"],
             )
             for row in rows
         }
