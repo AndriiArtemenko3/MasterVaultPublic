@@ -1164,28 +1164,20 @@ class ManagedGenerationRepository:
                     "managed SQLite connection did not open one main database"
                 )
             reported = Path(str(main_rows[0][2]))
-            reported_fd = -1
-            try:
-                if reported != alias:
-                    raise ManagedGenerationIndexError(
-                        "managed SQLite reported a substituted main database path"
-                    )
-                reported_fd = os.open(reported, os.O_RDONLY)
-                reported_identity = _inode_signature(os.fstat(reported_fd))
-            finally:
-                if reported_fd >= 0:
-                    os.close(reported_fd)
-            if reported_identity != _inode_signature(owned.verify_entry(allow_empty=False)):
-                raise ManagedGenerationIndexError(
-                    "managed SQLite connection is not bound to the pinned inode"
-                )
+            opened_signature = self._verify_reported_sqlite_locator(
+                reported=reported,
+                pinned=owned,
+            )
             serialized = backend.conn.serialize(name="main")
             exact = owned.exact_bytes()
             if serialized != exact:
                 raise ManagedGenerationIndexError(
                     "managed SQLite connection content differs from the pinned inode"
                 )
-            owned.verify_entry(allow_empty=False)
+            if _stable_file_signature(owned.verify_entry(allow_empty=False)) != opened_signature:
+                raise ManagedGenerationIndexError(
+                    "managed SQLite index changed after its reported locator was verified"
+                )
             return backend
         except ManagedGenerationRepositoryError:
             if backend is not None:
@@ -1201,6 +1193,48 @@ class ManagedGenerationRepository:
             raise ManagedGenerationIndexError(
                 "managed SQLite index could not be opened on its pinned inode"
             ) from exc
+
+    @staticmethod
+    def _verify_reported_sqlite_locator(
+        *,
+        reported: Path,
+        pinned: _PinnedIndexFile,
+    ) -> tuple[int, int, int, int, int, int, int]:
+        """Bind SQLite's platform-normalized reported locator to the pinned inode."""
+
+        if not reported.is_absolute():
+            raise ManagedGenerationIndexError(
+                "managed SQLite reported a non-absolute main database locator"
+            )
+        before = pinned.verify_entry(allow_empty=False)
+        reported_fd = -1
+        try:
+            # Linux may normalize /proc/self/fd/N to /proc/<pid>/fd/N or to the
+            # resolved canonical file path. Text is not authority: this
+            # nonblocking read-only reopen is accepted only for the exact
+            # already-pinned regular inode below.
+            reported_fd = os.open(
+                reported,
+                os.O_RDONLY | getattr(os, "O_NONBLOCK", 0),
+            )
+            reported_info = os.fstat(reported_fd)
+        except OSError as exc:
+            raise ManagedGenerationIndexError(
+                "managed SQLite reported locator cannot be inspected safely"
+            ) from exc
+        finally:
+            if reported_fd >= 0:
+                os.close(reported_fd)
+        after = pinned.verify_entry(allow_empty=False)
+        if (
+            not stat.S_ISREG(reported_info.st_mode)
+            or _inode_signature(reported_info) != _inode_signature(before)
+            or _stable_file_signature(before) != _stable_file_signature(after)
+        ):
+            raise ManagedGenerationIndexError(
+                "managed SQLite reported locator is not the pinned index inode"
+            )
+        return _stable_file_signature(after)
 
     def _inspect_unsealed_index_marker(
         self,

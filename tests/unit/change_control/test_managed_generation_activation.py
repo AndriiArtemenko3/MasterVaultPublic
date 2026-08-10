@@ -142,6 +142,43 @@ def test_pinned_index_rejects_fifo_without_blocking(tmp_path: Path) -> None:
         repository._open_pinned_index(relative, writable=False)
 
 
+def test_reported_sqlite_locator_uses_inode_identity_not_path_text(tmp_path: Path) -> None:
+    repository = ManagedGenerationRepository(tmp_path / "generation-effects")
+    generation_id = "mgeneration:" + "b" * 64
+    relative = repository.index_relative_path(generation_id=generation_id)
+    index_path, _created = repository._ensure_index_file(relative)
+    pinned = repository._open_pinned_index(relative, writable=True)
+    builder = SqliteBackend(":memory:")
+    try:
+        with builder.conn:
+            builder.conn.execute("CREATE TABLE marker(value TEXT NOT NULL)")
+            builder.conn.execute("INSERT INTO marker(value) VALUES ('exact')")
+        image = builder.conn.serialize(name="main")
+    finally:
+        builder.close()
+    try:
+        pinned.write_image(image)
+        descriptor_alias = repository._descriptor_alias(pinned)
+        assert descriptor_alias != index_path
+        assert repository._verify_reported_sqlite_locator(
+            reported=index_path,
+            pinned=pinned,
+        ) == generation_repository_module._stable_file_signature(
+            pinned.verify_entry(allow_empty=False)
+        )
+
+        substituted = tmp_path / "substituted.sqlite3"
+        substituted.write_bytes(image)
+        substituted.chmod(0o400)
+        with pytest.raises(ManagedGenerationRepositoryError, match="not the pinned"):
+            repository._verify_reported_sqlite_locator(
+                reported=substituted,
+                pinned=pinned,
+            )
+    finally:
+        pinned.close()
+
+
 def test_pinned_index_write_and_open_ignore_intermediate_directory_swap(
     tmp_path: Path,
 ) -> None:
