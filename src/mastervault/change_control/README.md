@@ -18,8 +18,9 @@ knowledge-change workflow.
   Repository bytes,
   approved inference contracts, patch reconstruction, and SourceNote
   projection validation cross an injected `ManagedReviewRepositoryResolver`;
-  no production registry is invented before the classifier/service seam owns
-  those reviewed records. The store-owned lifecycle is `open`, `stale`, or
+  ADR 0014 supplies its production repository-backed implementation through
+  explicit operator-configured authorities rather than an implicit global
+  registry. The store-owned lifecycle is `open`, `stale`, or
   `decided`, while the pure bundle view intentionally remains `open/decided`.
   A managed bundle's temporal prerequisite names the exact authoritative
   ADR 0006 decision that produced its review-open aggregate head; it does not
@@ -204,6 +205,33 @@ knowledge-change workflow.
   statement normalization are checked locally. Paths, hashes,
   provenance, identities, dates, scopes, confidence, complete SourceNotes,
   staging, review creation, and orchestration remain outside this module.
+- `revision_planning_inference.py` executes that wire through the bounded
+  recorded LIVE/REPLAY boundary, retains the exact v2 managed analysis set,
+  materializes paths, identities, evidence-grounded patches and complete
+  SourceNotes locally, stages all derived bytes create-only, and commits one
+  all-target inference batch. `NO_WORK` creates neither a batch nor staging;
+  any unresolved impact target blocks the whole set before side effects.
+- `managed_staging_repository.py` owns the inert manifest-last staging root.
+  Its durable completion binding and narrow exact-member opener revalidate the
+  complete manifest, repository/run identity, declared kind/path, byte count,
+  and SHA without treating the process-local capability as restart authority.
+- `managed_revision_admission.py` is the ADR 0014 restart boundary. It freshly
+  reopens the Step 10 and planning batches plus completed staging. Every
+  selected Step 10 input/output pair is re-grounded and used to rederive exact
+  eligibility and ADR 0013 citation inputs; the resulting planning workload
+  must byte-match its staged inputs before raw provider output is validated and
+  deterministically rematerialized. This closes the Step-10-batch-to-planning
+  projection without adding a second durable workload-index/exclusion ledger,
+  then content-binds the complete target/subject/staged-artifact set. A
+  canonical v2 admission—not a capability—can enter the managed-review run
+  binding.
+- `managed_review_repository.py` is the production, fail-closed implementation
+  of the managed store's evidence resolver. Operator-approved contracts cover
+  both impact and revision-planning execution. Artifact kind and path family
+  jointly select canonical, inference, receipt, or admitted staging roots.
+  Impact spans, citations, patches, projections, and the complete successor
+  SourceNote rendering are independently reproduced before the store may
+  accept v2 review authority.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -359,8 +387,18 @@ corrupt checkpoints fail closed without deletion. The owned connection and
 lock support synchronous callers in one process only; they make no
 multi-process or production-scaling claim.
 
+The current managed-review slice now executes and durably replays actual-impact
+and revision-planning inference, reopens the exact reviewed incoming governing
+source, and uses a synchronous LangGraph wait/reconciliation seam around the
+authoritative SQLite review decision. An accepted v2 review authorizes one
+inactive `content-addressed-overlay-v2` manifest: it adopts the reviewed source
+at its original immutable raw/SourceNote paths and adds only approved
+downstream replacements to the publication delta. The workflow checkpoint is
+still disposable and cannot create review, publication, or activation
+authority.
+
 Deliberately deferred: concrete hosted/local provider adapters and model
-dependencies, actual-impact provider execution and adjudication, background
-workers, review UI/CLI integration, multi-document apply/recovery, index
-updates, record-level evidence binding, PostgreSQL change-control persistence,
-and impact evaluation.
+dependencies, background workers, publication and recovery execution,
+active-generation CAS, serving-index build/switch and targeted post-activation
+regressions, final audit reporting, operator review UI/CLI integration,
+PostgreSQL change-control persistence, the public v0.3 release, and deployment.

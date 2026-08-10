@@ -28,7 +28,7 @@ class RenderedManagedSourceNote:
     note_bytes: bytes
 
 
-def _parse_markdown_source_note(note_bytes: bytes) -> SourceNote:
+def parse_managed_source_note(note_bytes: bytes) -> SourceNote:
     try:
         text = note_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -55,7 +55,7 @@ def render_managed_source_note(
 ) -> RenderedManagedSourceNote:
     """Render one canonical SourceNote without normalizing the raw source bytes."""
 
-    predecessor = _parse_markdown_source_note(predecessor_note_bytes)
+    predecessor = parse_managed_source_note(predecessor_note_bytes)
     try:
         raw_text = successor_raw_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -114,5 +114,6 @@ __all__ = [
     "MANAGED_SOURCE_NOTE_SCHEMA_SHA256",
     "MANAGED_SOURCE_NOTE_VALIDATOR_VERSION",
     "RenderedManagedSourceNote",
+    "parse_managed_source_note",
     "render_managed_source_note",
 ]

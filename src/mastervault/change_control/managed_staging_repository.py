@@ -370,6 +370,40 @@ class ManagedStagingRepository:
                 raise ValueError("managed staging member is absent or substituted")
         return self._mint_capability(manifest=manifest, completion=expected)
 
+    def open_member(
+        self,
+        *,
+        completion: ManagedStagingCompletionBinding,
+        artifact: ManagedArtifactRef,
+    ) -> bytes:
+        """Reopen one exact member only through its completed manifest authority."""
+
+        if type(completion) is not ManagedStagingCompletionBinding or type(artifact) is not (
+            ManagedArtifactRef
+        ):
+            raise TypeError("managed staging member reopen requires exact typed bindings")
+        verified = self.resolve_completed_run(completion)
+        member = next(
+            (
+                item.artifact
+                for item in verified.manifest.members
+                if item.artifact.artifact_id == artifact.artifact_id
+            ),
+            None,
+        )
+        if member != artifact:
+            raise ValueError("managed staging artifact is not an exact completed-manifest member")
+        payload = self._backend._read_optional(
+            artifact.path,
+            limit=artifact.byte_count,
+            label="managed staging member",
+        )
+        if payload is None or len(payload) != artifact.byte_count or (
+            hashlib.sha256(payload).hexdigest() != artifact.sha256
+        ):
+            raise ValueError("managed staging member is absent or substituted")
+        return payload
+
     def reopen(self, manifest: ManagedStagingManifest) -> ManagedStagingManifest:
         completion = ManagedStagingCompletionBinding.create(manifest=manifest)
         return self.resolve_completed_run(completion).manifest

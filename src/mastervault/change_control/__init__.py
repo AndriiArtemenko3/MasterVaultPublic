@@ -248,6 +248,43 @@ if TYPE_CHECKING:
         InferenceEvidenceUnsupportedPlatformError,
         RepositoryVerifiedInferenceEvidenceBatch,
     )
+    from mastervault.change_control.managed_review import (
+        ManagedGenerationManifest as ManagedGenerationManifest,
+    )
+    from mastervault.change_control.managed_review import (
+        ManagedGenerationManifestBindingV2 as ManagedGenerationManifestBindingV2,
+    )
+    from mastervault.change_control.managed_review import (
+        ManagedGoverningSourceAdoptionBinding as ManagedGoverningSourceAdoptionBinding,
+    )
+    from mastervault.change_control.managed_review import ManagedRun as ManagedRun
+    from mastervault.change_control.managed_review_repository import (
+        ApprovedManagedGoverningSourceAuthority as ApprovedManagedGoverningSourceAuthority,
+    )
+    from mastervault.change_control.managed_review_repository import (
+        ApprovedManagedInferenceContractAuthority as ApprovedManagedInferenceContractAuthority,
+    )
+    from mastervault.change_control.managed_review_repository import (
+        RepositoryBackedManagedReviewResolver as RepositoryBackedManagedReviewResolver,
+    )
+    from mastervault.change_control.managed_review_repository import (
+        derive_managed_governing_source_adoption as derive_managed_governing_source_adoption,
+    )
+    from mastervault.change_control.managed_review_service import (
+        ManagedReviewSelectionError as ManagedReviewSelectionError,
+    )
+    from mastervault.change_control.managed_review_service import (
+        ManagedReviewServiceError as ManagedReviewServiceError,
+    )
+    from mastervault.change_control.managed_review_service import (
+        ManagedRevisionReviewSelection as ManagedRevisionReviewSelection,
+    )
+    from mastervault.change_control.managed_review_service import (
+        decide_managed_revision_review as decide_managed_revision_review,
+    )
+    from mastervault.change_control.managed_review_service import (
+        open_managed_revision_review as open_managed_revision_review,
+    )
     from mastervault.change_control.managed_staging_repository import (
         ManagedStagingCompletionBinding,
         ManagedStagingManifest,
@@ -264,6 +301,12 @@ if TYPE_CHECKING:
         ManagedReviewStaleError as ManagedReviewStaleError,
     )
     from mastervault.change_control.managed_store import (
+        ManagedReviewWriteVersionError as ManagedReviewWriteVersionError,
+    )
+    from mastervault.change_control.managed_store import (
+        ManagedRevisionEditDeferredError as ManagedRevisionEditDeferredError,
+    )
+    from mastervault.change_control.managed_store import (
         ManagedRevisionReviewStoreView as ManagedRevisionReviewStoreView,
     )
     from mastervault.change_control.managed_store import (
@@ -271,6 +314,42 @@ if TYPE_CHECKING:
     )
     from mastervault.change_control.managed_store import (
         SqliteManagedChangeControlStore as SqliteManagedChangeControlStore,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewCheckpointHealth as ManagedReviewCheckpointHealth,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewOrchestrationPhase as ManagedReviewOrchestrationPhase,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflow as ManagedReviewWorkflow,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowAuthorityError as ManagedReviewWorkflowAuthorityError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowCheckpointCorruptionError as ManagedReviewWorkflowCheckpointCorruptionError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowCheckpointError as ManagedReviewWorkflowCheckpointError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowClosedError as ManagedReviewWorkflowClosedError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowError as ManagedReviewWorkflowError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowNotStartedError as ManagedReviewWorkflowNotStartedError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowPathConflictError as ManagedReviewWorkflowPathConflictError,
+    )
+    from mastervault.change_control.managed_workflow import (
+        ManagedReviewWorkflowStatus as ManagedReviewWorkflowStatus,
+    )
+    from mastervault.change_control.managed_workflow import (
+        managed_review_workflow_id as managed_review_workflow_id,
     )
     from mastervault.change_control.recorded_inference import (
         MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1,
@@ -609,6 +688,24 @@ _LAZY_EXPORTS = {
         )
     },
     **{
+        name: ("mastervault.change_control.managed_review", name)
+        for name in (
+            "ManagedGenerationManifest",
+            "ManagedGenerationManifestBindingV2",
+            "ManagedGoverningSourceAdoptionBinding",
+            "ManagedRun",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_review_repository", name)
+        for name in (
+            "ApprovedManagedGoverningSourceAuthority",
+            "ApprovedManagedInferenceContractAuthority",
+            "RepositoryBackedManagedReviewResolver",
+            "derive_managed_governing_source_adoption",
+        )
+    },
+    **{
         name: ("mastervault.change_control.inference_repository", name)
         for name in (
             "FilesystemInferenceEvidenceRepository",
@@ -684,9 +781,38 @@ _LAZY_EXPORTS = {
             "ManagedReviewAuthorityError",
             "ManagedReviewRepositoryResolver",
             "ManagedReviewStaleError",
+            "ManagedReviewWriteVersionError",
+            "ManagedRevisionEditDeferredError",
             "ManagedRevisionReviewStoreView",
             "ManagedRevisionStoreLifecycle",
             "SqliteManagedChangeControlStore",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_review_service", name)
+        for name in (
+            "ManagedReviewSelectionError",
+            "ManagedReviewServiceError",
+            "ManagedRevisionReviewSelection",
+            "decide_managed_revision_review",
+            "open_managed_revision_review",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.managed_workflow", name)
+        for name in (
+            "ManagedReviewCheckpointHealth",
+            "ManagedReviewOrchestrationPhase",
+            "ManagedReviewWorkflow",
+            "ManagedReviewWorkflowAuthorityError",
+            "ManagedReviewWorkflowCheckpointCorruptionError",
+            "ManagedReviewWorkflowCheckpointError",
+            "ManagedReviewWorkflowClosedError",
+            "ManagedReviewWorkflowError",
+            "ManagedReviewWorkflowNotStartedError",
+            "ManagedReviewWorkflowPathConflictError",
+            "ManagedReviewWorkflowStatus",
+            "managed_review_workflow_id",
         )
     },
     **{
@@ -749,6 +875,8 @@ __all__ = [
     "AnalysisBootstrapIntegrityError",
     "AnalysisBootstrapResult",
     "AnalysisBootstrapStaleError",
+    "ApprovedManagedGoverningSourceAuthority",
+    "ApprovedManagedInferenceContractAuthority",
     "VerifiedAnalysisBootstrapCapability",
     "ChangeControlAggregate",
     "CandidateExclusionReason",
@@ -824,10 +952,30 @@ __all__ = [
     "HumanReviewRequestView",
     "GraphMaterializationStatus",
     "ManagedReviewAuthorityError",
+    "ManagedReviewCheckpointHealth",
+    "ManagedReviewOrchestrationPhase",
     "ManagedReviewRepositoryResolver",
+    "ManagedReviewSelectionError",
+    "ManagedReviewServiceError",
     "ManagedReviewStaleError",
+    "ManagedReviewWorkflow",
+    "ManagedReviewWorkflowAuthorityError",
+    "ManagedReviewWorkflowCheckpointCorruptionError",
+    "ManagedReviewWorkflowCheckpointError",
+    "ManagedReviewWorkflowClosedError",
+    "ManagedReviewWorkflowError",
+    "ManagedReviewWorkflowNotStartedError",
+    "ManagedReviewWorkflowPathConflictError",
+    "ManagedReviewWorkflowStatus",
+    "ManagedReviewWriteVersionError",
+    "ManagedGenerationManifest",
+    "ManagedGenerationManifestBindingV2",
+    "ManagedGoverningSourceAdoptionBinding",
+    "ManagedRevisionEditDeferredError",
+    "ManagedRevisionReviewSelection",
     "ManagedRevisionReviewStoreView",
     "ManagedRevisionStoreLifecycle",
+    "ManagedRun",
     "OrchestrationPhase",
     "PairDisposition",
     "PersistedRelationType",
@@ -837,6 +985,7 @@ __all__ = [
     "RelationGraph",
     "RelationshipCandidate",
     "RelationshipCandidateSet",
+    "RepositoryBackedManagedReviewResolver",
     "SelectedCandidateRef",
     "ReviewDecisionItem",
     "ReviewDisposition",
@@ -875,6 +1024,7 @@ __all__ = [
     "apply_human_review_decision",
     "canonical_json_bytes",
     "claim_scopes_v1",
+    "derive_managed_governing_source_adoption",
     "bootstrap_analysis_aggregate",
     "build_verified_prechange_aggregate",
     "create_verified_analysis_bootstrap_binding",
@@ -935,7 +1085,10 @@ __all__ = [
     "VerifiedSourceNoteInventoryCapability",
     "generate_dependency_workload",
     "build_impact_workload",
+    "decide_managed_revision_review",
     "materialize_dependencies",
+    "managed_review_workflow_id",
+    "open_managed_revision_review",
     "validate_dependency_results",
     "validate_dependency_workload",
     "validate_impact_workload",

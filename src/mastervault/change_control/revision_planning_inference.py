@@ -9,7 +9,14 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mastervault.change_control.impact_analysis import ImpactInferenceShard
 from mastervault.change_control.impact_inference import RecordedImpactInferenceRun
+from mastervault.change_control.impact_results import (
+    ImpactDecision,
+    ImpactDisposition,
+    ImpactOutputShard,
+    ImpactOutputShardRef,
+)
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
     RepositoryVerifiedInferenceEvidenceBatch,
@@ -41,8 +48,10 @@ from mastervault.change_control.managed_revision_planning import (
     RevisionPlanningEligibilityStatus,
     RevisionPlanningInferenceShard,
     RevisionPlanningOutputShard,
+    RevisionPlanningTarget,
     RevisionPlanningWireResponse,
     RevisionPlanningWorkload,
+    UnresolvedImpactForRevisionPlanningError,
     evaluate_revision_planning_eligibility,
 )
 from mastervault.change_control.managed_staging_repository import (
@@ -85,8 +94,7 @@ class RevisionPlanningReplaySourceBinding(_StrictFrozenModel):
         if self.input_shard_id != f"revisionin:{self.input_shard_sha256}":
             raise ValueError("revision replay source input ID differs from its SHA")
         if self.receipt_artifact.kind != ManagedArtifactKind.INFERENCE_RECEIPT or (
-            self.receipt_artifact.path
-            != f"receipts/inference/{self.receipt_artifact.sha256}.json"
+            self.receipt_artifact.path != f"receipts/inference/{self.receipt_artifact.sha256}.json"
         ):
             raise ValueError("revision replay source requires an exact receipt locator")
         return self
@@ -98,6 +106,7 @@ RevisionPlanningSubject = ManagedRevisionPlan | NoChangeImpactCard
 @dataclass(frozen=True)
 class RecordedRevisionPlanningInferenceRun:
     workload: RevisionPlanningWorkload
+    analysis_set: ManagedAnalysisSetBinding | None
     subjects: tuple[RevisionPlanningSubject, ...]
     outcomes: tuple[RecordedInferenceOutcome, ...]
     evidence_batch: RepositoryVerifiedInferenceEvidenceBatch | None
@@ -110,6 +119,7 @@ class RecordedRevisionPlanningInferenceRun:
             if any(
                 value not in ((), None)
                 for value in (
+                    self.analysis_set,
                     self.subjects,
                     self.outcomes,
                     self.evidence_batch,
@@ -121,6 +131,9 @@ class RecordedRevisionPlanningInferenceRun:
             return
         if not self.subjects or len(self.subjects) != len(self.workload.input_shards):
             raise ValueError("revision run subjects must cover every workload shard")
+        if type(self.analysis_set) is not ManagedAnalysisSetBinding:
+            raise ValueError("eligible revision run requires its exact analysis set")
+        analysis_set = self.analysis_set
         if not self.outcomes or type(self.evidence_batch) is not (
             RepositoryVerifiedInferenceEvidenceBatch
         ):
@@ -153,14 +166,18 @@ class RecordedRevisionPlanningInferenceRun:
             outcome = outcomes_by_input[shard.shard_id]
             output = outcome.revision_planning_output
             if (
-                subject.run_id != shard.run_id
+                shard.analysis_set_id != analysis_set.analysis_set_id
+                or shard.analysis_set_sha256 != analysis_set.analysis_set_sha256
+                or subject.analysis.analysis_set_id != analysis_set.analysis_set_id
+                or subject.analysis.analysis_set_sha256 != analysis_set.analysis_set_sha256
+                or subject.analysis.impact_result_sha256 != analysis_set.impact_result_sha256
+                or shard.impact_result_sha256 != analysis_set.impact_result_sha256
+                or subject.run_id != shard.run_id
                 or subject.predecessor != shard.predecessor
-                or subject.analysis.target_result_sha256
-                != shard.target.output_shard_sha256
+                or subject.analysis.target_result_sha256 != shard.target.output_shard_sha256
                 or subject.analysis.inference_input.sha256 != shard.shard_sha256
                 or outcome.execution.input_envelope.workload_id != self.workload.workload_id
-                or outcome.execution.input_envelope.workload_sha256
-                != self.workload.workload_sha256
+                or outcome.execution.input_envelope.workload_sha256 != self.workload.workload_sha256
                 or output is None
                 or output.input_shard_id != shard.shard_id
                 or output.input_shard_sha256 != shard.shard_sha256
@@ -176,8 +193,7 @@ class RecordedRevisionPlanningInferenceRun:
         if (
             batch.repository_id != self.staging_completion.repository_id
             or batch.outcome_count != len(self.outcomes)
-            or batch.execution_ids
-            != tuple(item.execution.execution_id for item in self.outcomes)
+            or batch.execution_ids != tuple(item.execution.execution_id for item in self.outcomes)
             or batch.receipt_artifact_ids
             != tuple(item.execution.receipt_artifact.artifact_id for item in self.outcomes)
             or batch.outcome_sha256s != outcome_sha256s
@@ -216,13 +232,13 @@ def _snapshot_map(
     return by_key
 
 
-def _citation_inputs(
+def build_revision_planning_citation_inputs(
     *,
-    shard: Any,
-    output: Any,
+    shard: ImpactInferenceShard,
+    output: ImpactOutputShard,
 ) -> RevisionPlanningCitationInputSet:
-    # Both objects have already crossed strict Step-10 boundaries; canonical
-    # JSON is a compact, complete governing evidence projection for C0.
+    """Derive the frozen ADR 0013 citation inputs from exact Step-10 evidence."""
+
     governing = canonical_json_bytes(
         {
             "namespace": "mastervault.revision-planning-governing-evidence.v1",
@@ -246,26 +262,180 @@ def _citation_inputs(
     )
 
 
-def _build_workload(
+def derive_revision_planning_eligibility_from_impact_evidence(
+    *,
+    workload_id: str,
+    workload_sha256: str,
+    result_id: str,
+    result_sha256: str,
+    input_shards: tuple[ImpactInferenceShard, ...],
+    output_shards: tuple[ImpactOutputShard, ...],
+) -> RevisionPlanningEligibility:
+    """Rebuild the all-target planning gate from one complete Step-10 batch.
+
+    A recorded impact batch does not persist the complete Step-10a exclusion
+    ledger.  This projection therefore treats its exact reopened input/output
+    shard set as the durable selected-output universe while retaining the
+    already-bound workload identity and reproducing the complete result index.
+    """
+
+    if workload_id != f"impactwork:{workload_sha256}":
+        raise ValueError("reopened impact workload ID differs from its SHA")
+    if result_id != f"impactresult:{result_sha256}":
+        raise ValueError("reopened impact result ID differs from its SHA")
+    exact_inputs = tuple(
+        sorted(
+            (
+                ImpactInferenceShard.model_validate_json(
+                    canonical_json_bytes(item.model_dump(mode="json"))
+                )
+                for item in input_shards
+            ),
+            key=lambda item: (
+                item.target_note.document.document_version_id,
+                item.shard_id,
+            ),
+        )
+    )
+    exact_outputs = tuple(
+        sorted(
+            (
+                ImpactOutputShard.model_validate_json(
+                    canonical_json_bytes(item.model_dump(mode="json"))
+                )
+                for item in output_shards
+            ),
+            key=lambda item: (item.document_version_id, item.input_shard_id),
+        )
+    )
+    inputs_by_id = {item.shard_id: item for item in exact_inputs}
+    outputs_by_id = {item.input_shard_id: item for item in exact_outputs}
+    if len(inputs_by_id) != len(exact_inputs) or len(outputs_by_id) != len(exact_outputs):
+        raise ValueError("reopened impact evidence contains duplicate input coverage")
+    if set(inputs_by_id) != set(outputs_by_id):
+        raise ValueError("reopened impact evidence must cover every selected input exactly once")
+
+    unresolved: list[str] = []
+    targets: list[RevisionPlanningTarget] = []
+    for input_shard in exact_inputs:
+        output = outputs_by_id[input_shard.shard_id]
+        document = input_shard.target_note.document
+        if (
+            output.workload_id != workload_id
+            or output.workload_sha256 != workload_sha256
+            or output.input_shard_sha256 != input_shard.shard_sha256
+            or output.document_version_id != document.document_version_id
+        ):
+            raise ValueError("reopened impact output substitutes its workload or exact input")
+        questions = {item.question_id: item for item in input_shard.questions}
+        decision_ids = tuple(item.question_id for item in output.decisions)
+        if decision_ids != tuple(sorted(questions)):
+            raise ValueError("reopened impact output does not decide every question exactly once")
+        for decision in output.decisions:
+            question = questions[decision.question_id]
+            rebuilt = ImpactDecision.create(
+                input_shard=input_shard,
+                question=question,
+                disposition=decision.disposition,
+                evidence_spans=decision.evidence_spans,
+                attention_path_context_ids=decision.attention_path_context_ids,
+                dependency_context_ids=decision.dependency_context_ids,
+                rationale=decision.rationale,
+            )
+            if rebuilt != decision:
+                raise ValueError("reopened impact decision differs from exact local derivation")
+        if output.document_disposition == ImpactDisposition.UNRESOLVED:
+            unresolved.append(document.document_id)
+            continue
+        response_kind: Literal["affected-revision", "no-change"] = (
+            "affected-revision"
+            if output.document_disposition == ImpactDisposition.AFFECTED
+            else "no-change"
+        )
+        targets.append(
+            RevisionPlanningTarget(
+                target_key=document.document_id,
+                document_version_id=document.document_version_id,
+                input_shard_id=input_shard.shard_id,
+                input_shard_sha256=input_shard.shard_sha256,
+                output_shard_id=output.output_shard_id,
+                output_shard_sha256=output.output_shard_sha256,
+                question_ids=decision_ids,
+                required_response_kind=response_kind,
+            )
+        )
+
+    refs = tuple(ImpactOutputShardRef.create(item) for item in exact_outputs)
+    result_payload = {
+        "namespace": "mastervault.actual-impact-result-index.v1",
+        "schema_version": 1,
+        "workload_id": workload_id,
+        "workload_sha256": workload_sha256,
+        "decision_count": sum(item.decision_count for item in refs),
+        "output_shards": [item.model_dump(mode="json") for item in refs],
+    }
+    observed_result_sha256 = hashlib.sha256(canonical_json_bytes(result_payload)).hexdigest()
+    if result_sha256 != observed_result_sha256 or result_id != (
+        f"impactresult:{observed_result_sha256}"
+    ):
+        raise ValueError("reopened impact result index differs from its exact output shards")
+    if unresolved:
+        raise UnresolvedImpactForRevisionPlanningError(tuple(sorted(set(unresolved))))
+    status = (
+        RevisionPlanningEligibilityStatus.ELIGIBLE
+        if targets
+        else RevisionPlanningEligibilityStatus.NO_WORK
+    )
+    return RevisionPlanningEligibility(
+        status=status,
+        workload_id=workload_id,
+        workload_sha256=workload_sha256,
+        result_id=result_id,
+        result_sha256=result_sha256,
+        targets=tuple(
+            sorted(targets, key=lambda item: (item.target_key, item.document_version_id))
+        ),
+    )
+
+
+def build_revision_planning_workload_from_impact_evidence(
     *,
     run_id: str,
-    impact_run: RecordedImpactInferenceRun,
+    impact_workload_id: str,
+    impact_workload_sha256: str,
+    impact_result_id: str,
+    impact_result_sha256: str,
+    impact_input_shards: tuple[ImpactInferenceShard, ...],
+    impact_output_shards: tuple[ImpactOutputShard, ...],
     snapshots: tuple[RevisionPlanningPredecessorSnapshot, ...],
-    eligibility: RevisionPlanningEligibility,
     analysis_set: ManagedAnalysisSetBinding,
 ) -> tuple[
     RevisionPlanningWorkload,
     dict[str, RevisionPlanningPredecessorSnapshot],
     dict[str, Any],
 ]:
+    eligibility = derive_revision_planning_eligibility_from_impact_evidence(
+        workload_id=impact_workload_id,
+        workload_sha256=impact_workload_sha256,
+        result_id=impact_result_id,
+        result_sha256=impact_result_sha256,
+        input_shards=impact_input_shards,
+        output_shards=impact_output_shards,
+    )
+    if eligibility.status == RevisionPlanningEligibilityStatus.NO_WORK:
+        if snapshots:
+            raise ValueError("NO_WORK revision planning cannot accept predecessor snapshots")
+        return (
+            RevisionPlanningWorkload.create(eligibility=eligibility, input_shards=()),
+            {},
+            {},
+        )
     by_snapshot = _snapshot_map(snapshots)
     expected_keys = {item.target_key for item in eligibility.targets}
     if set(by_snapshot) != expected_keys:
         raise ValueError("predecessor snapshots must cover every eligible target exactly once")
-    impact_inputs = {item.shard_id: item for item in impact_run.results.workload.input_shards}
-    impact_outputs = {
-        item.input_shard_id: item for item in impact_run.results.output_shards
-    }
+    impact_inputs = {item.shard_id: item for item in impact_input_shards}
+    impact_outputs = {item.input_shard_id: item for item in impact_output_shards}
     source_by_target: dict[str, Any] = {}
     planning_inputs: list[RevisionPlanningInferenceShard] = []
     for target in eligibility.targets:
@@ -300,7 +470,10 @@ def _build_workload(
                 predecessor_raw_utf8=raw_utf8,
                 predecessor_source_note_path=source.target_note.source_note_path,
                 predecessor_source_note_utf8=source.target_note.source_note_utf8,
-                citation_inputs=_citation_inputs(shard=source, output=output),
+                citation_inputs=build_revision_planning_citation_inputs(
+                    shard=source,
+                    output=output,
+                ),
                 existing_claim_revisions=source.target_claim_revisions,
             )
         )
@@ -332,9 +505,7 @@ def _analysis_set(
         classification_result_sha256=temporal.classification_result_index.result_sha256,
         attention_result_sha256=binding.attention_result_sha256,
         impact_evidence=impact_evidence,
-        global_relevant_claim_revision_ids=(
-            binding.mechanically_relevant_claim_revision_ids
-        ),
+        global_relevant_claim_revision_ids=(binding.mechanically_relevant_claim_revision_ids),
     )
 
 
@@ -380,16 +551,17 @@ def execute_revision_planning(
         workload = RevisionPlanningWorkload.create(eligibility=eligibility, input_shards=())
         return RecordedRevisionPlanningInferenceRun(
             workload=workload,
+            analysis_set=None,
             subjects=(),
             outcomes=(),
             evidence_batch=None,
             staging_completion=None,
             staging_capability=None,
         )
-    if sum(
-        target.required_response_kind == "affected-revision"
-        for target in eligibility.targets
-    ) > MAX_MANAGED_REVISION_PLANS_V1:
+    if (
+        sum(target.required_response_kind == "affected-revision" for target in eligibility.targets)
+        > MAX_MANAGED_REVISION_PLANS_V1
+    ):
         raise ValueError("revision planning exceeds downstream managed revision plan limit")
     if evidence_repository.root != staging_repository.root or (
         evidence_repository.repository_id != staging_repository.repository_id
@@ -404,13 +576,19 @@ def execute_revision_planning(
         impact_run=impact_run,
         evidence_repository=evidence_repository,
     )
-    workload, snapshots, source_by_target = _build_workload(
+    workload, snapshots, source_by_target = build_revision_planning_workload_from_impact_evidence(
         run_id=run_id,
-        impact_run=impact_run,
+        impact_workload_id=impact_run.results.workload.index.workload_id,
+        impact_workload_sha256=impact_run.results.workload.index.workload_sha256,
+        impact_result_id=impact_run.results.result_id,
+        impact_result_sha256=impact_run.results.result_sha256,
+        impact_input_shards=impact_run.results.workload.input_shards,
+        impact_output_shards=impact_run.results.output_shards,
         snapshots=predecessor_snapshots,
-        eligibility=eligibility,
         analysis_set=analysis_set,
     )
+    if workload.eligibility != eligibility:
+        raise ValueError("revision planning batch projection differs from exact impact results")
     replay_by_input = {item.input_shard_id: item for item in replay_sources}
     if len(replay_by_input) != len(replay_sources):
         raise ValueError("revision replay sources require unique input shards")
@@ -421,9 +599,7 @@ def execute_revision_planning(
     elif provider is not None or set(replay_by_input) != expected_input_ids:
         raise ValueError("REPLAY revision planning requires exact all-target receipt coverage")
 
-    materialized_candidates: dict[
-        tuple[str, str], MaterializedRevisionTarget
-    ] = {}
+    materialized_candidates: dict[tuple[str, str], MaterializedRevisionTarget] = {}
     materialized: dict[str, MaterializedRevisionTarget] = {}
     outcomes: list[RecordedInferenceOutcome] = []
     for shard in workload.input_shards:
@@ -454,21 +630,21 @@ def execute_revision_planning(
 
         replay = replay_by_input.get(shard.shard_id)
         outcome = run_revision_planning_inference(
-                contract=contract,
-                workload=workload,
-                input_shard=shard,
-                algorithm_manifest_bytes=algorithm_manifest_bytes,
-                prompt_bytes=prompt_bytes,
-                response_schema_bytes=response_schema_bytes,
-                materialize_output=materializer,
-                provider=provider,
-                replay_resolver=(
-                    evidence_repository if contract.mode == InferenceExecutionMode.REPLAY else None
-                ),
-                replay_source_receipt_artifact=(
-                    replay.receipt_artifact if replay is not None else None
-                ),
-            )
+            contract=contract,
+            workload=workload,
+            input_shard=shard,
+            algorithm_manifest_bytes=algorithm_manifest_bytes,
+            prompt_bytes=prompt_bytes,
+            response_schema_bytes=response_schema_bytes,
+            materialize_output=materializer,
+            provider=provider,
+            replay_resolver=(
+                evidence_repository if contract.mode == InferenceExecutionMode.REPLAY else None
+            ),
+            replay_source_receipt_artifact=(
+                replay.receipt_artifact if replay is not None else None
+            ),
+        )
         output = outcome.revision_planning_output
         if output is None:
             raise ValueError("accepted revision inference omits its typed output")
@@ -477,9 +653,7 @@ def execute_revision_planning(
             raise ValueError("accepted revision output was not deterministically materialized")
         materialized[shard.shard_id] = accepted
         outcomes.append(outcome)
-    canonical_outcomes = tuple(
-        sorted(outcomes, key=lambda item: item.execution.execution_id)
-    )
+    canonical_outcomes = tuple(sorted(outcomes, key=lambda item: item.execution.execution_id))
     if set(materialized) != expected_input_ids:
         raise ValueError("revision materialization did not cover every workload shard")
     total_hunks = sum(
@@ -508,12 +682,12 @@ def execute_revision_planning(
         output = outcome.revision_planning_output
         if output is None:
             raise ValueError("revision outcome omits typed proposal output")
-        shard = next(item for item in workload.input_shards if item.shard_id == output.input_shard_id)
+        shard = next(
+            item for item in workload.input_shards if item.shard_id == output.input_shard_id
+        )
         for payload in outcome.artifacts:
             if payload.artifact.path.startswith("staging/managed-review/"):
-                staged_members.append(
-                    (payload.artifact, payload.content_utf8.encode("utf-8"))
-                )
+                staged_members.append((payload.artifact, payload.content_utf8.encode("utf-8")))
         staged_output = _staged_output_artifact(shard, output)
         staged_outputs[shard.shard_id] = staged_output
         staged_members.append((staged_output, output.canonical_bytes()))
@@ -551,6 +725,7 @@ def execute_revision_planning(
     staging_capability.verify(staging_repository)
     return RecordedRevisionPlanningInferenceRun(
         workload=workload,
+        analysis_set=analysis_set,
         subjects=canonical_subjects,
         outcomes=reopened,
         evidence_batch=batch,
@@ -564,5 +739,8 @@ __all__ = [
     "RevisionPlanningPredecessorSnapshot",
     "RevisionPlanningReplaySourceBinding",
     "RevisionPlanningSubject",
+    "build_revision_planning_citation_inputs",
+    "build_revision_planning_workload_from_impact_evidence",
+    "derive_revision_planning_eligibility_from_impact_evidence",
     "execute_revision_planning",
 ]
