@@ -676,6 +676,102 @@ def _outcome(
     )
 
 
+def test_v1_bundle_decision_and_manifest_canonical_identities_are_frozen() -> None:
+    context = _context()
+    bundle = _bundle(
+        context,
+        _plan("frozen-v1-plan", context),
+        _negative("frozen-v1-negative", context),
+    )
+    request = _request_record(bundle)
+    by_key = {item.target_key: item for item in bundle.targets}
+    decision = ManagedRevisionDecisionCommand.create(
+        operation_id="managed-decision:frozen-v1",
+        request_record=request,
+        bundle_outcome=ManagedBundleOutcome.ACCEPTED,
+        reviewer_id="reviewer@example.test",
+        rationale="Freeze the exact legacy V1 decision representation.",
+        items=(
+            _outcome(
+                by_key["frozen-v1-negative"],
+                ManagedRevisionDisposition.CONFIRM_NO_CHANGE,
+            ),
+            _outcome(
+                by_key["frozen-v1-plan"],
+                ManagedRevisionDisposition.APPROVE,
+            ),
+        ),
+    )
+    bundle_bytes = canonical_json_bytes(bundle.model_dump(mode="json"))
+    decision_bytes = canonical_json_bytes(decision.model_dump(mode="json"))
+    manifest_bytes = canonical_json_bytes(decision.generation_manifest.model_dump(mode="json"))
+
+    assert bundle.bundle_id == (
+        "mbundle:ddcb42db7290802eb7e6ffa947884a8424249c414cdbc37b3c9723401c96957a"
+    )
+    assert hashlib.sha256(bundle_bytes).hexdigest() == (
+        "4e369d9fe341c6f0e116e6717529eda724505bdb2ce65ab4e20eae7f518d9d5e"
+    )
+    assert decision.decision_id == (
+        "mdecision:a01a47b4b75c121db8a927f5c84db5e7688778d14350cf40ee7d10aa29179978"
+    )
+    assert hashlib.sha256(decision_bytes).hexdigest() == (
+        "bf292b6ac0ace523a3b086f8828fc8146f19227067c55363303a6620dfa5be0b"
+    )
+    assert decision.generation_manifest.manifest_id == (
+        "mgenerationmanifest:f8e248214d5a6a0f99840ce8a56d1e331b714c245693048e9d188cd88e201870"
+    )
+    assert hashlib.sha256(manifest_bytes).hexdigest() == (
+        "5135091003eaa25ee40e7d21b5101ee0ef379f1f1741c12f7a84dc15eaefca1f"
+    )
+    assert b'"schema_version":1' in bundle_bytes
+    assert b"governing_source_adoption" not in bundle_bytes
+    assert b"governing_source_adoption" not in manifest_bytes
+
+
+@pytest.mark.parametrize("schema_version", (None, 3, 2))
+def test_run_discriminator_rejects_missing_unknown_or_mismatched_version(
+    schema_version: int | None,
+) -> None:
+    context = _context()
+    bundle = _bundle(context, _negative("run-discriminator", context))
+    payload = bundle.model_dump(mode="json")
+    if schema_version is None:
+        del payload["run_binding"]["schema_version"]
+    else:
+        payload["run_binding"]["schema_version"] = schema_version
+    with pytest.raises(ValidationError):
+        ManagedRevisionReviewBundle.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("schema_version", (None, 3, 2))
+def test_manifest_discriminator_rejects_missing_unknown_or_mismatched_version(
+    schema_version: int | None,
+) -> None:
+    context = _context()
+    bundle = _bundle(context, _negative("manifest-discriminator", context))
+    command = ManagedRevisionDecisionCommand.create(
+        operation_id="managed-decision:manifest-discriminator",
+        request_record=_request_record(bundle),
+        bundle_outcome=ManagedBundleOutcome.ACCEPTED,
+        reviewer_id="reviewer@example.test",
+        rationale="Exercise the exact persisted manifest discriminator.",
+        items=(
+            _outcome(
+                bundle.targets[0],
+                ManagedRevisionDisposition.CONFIRM_NO_CHANGE,
+            ),
+        ),
+    )
+    payload = command.model_dump(mode="json")
+    if schema_version is None:
+        del payload["generation_manifest"]["schema_version"]
+    else:
+        payload["generation_manifest"]["schema_version"] = schema_version
+    with pytest.raises(ValidationError):
+        ManagedRevisionDecisionCommand.model_validate_json(json.dumps(payload))
+
+
 def _recreate_kwargs(model: ManagedRevisionPlan | NoChangeImpactCard) -> dict[str, object]:
     excluded = {
         "plan_id",
@@ -3194,6 +3290,10 @@ def test_public_contracts_are_exported_and_module_is_pure() -> None:
         "AggregateHeadBinding",
         "AuthorityRevisionBinding",
         "ManagedRunBinding",
+        "ManagedRun",
+        "ManagedGenerationManifest",
+        "ManagedGenerationManifestBindingV2",
+        "ManagedGoverningSourceAdoptionBinding",
         "ManagedReviewBaseBinding",
         "TargetAnalysisBinding",
         "PatchReconstructionAttestation",
@@ -3244,8 +3344,33 @@ def test_public_contracts_are_exported_and_module_is_pure() -> None:
     from mastervault.change_control import (
         AnalysisBootstrapBinding as PackageAnalysisBootstrapBinding,
     )
-    from mastervault.change_control import ChangeControlAggregate, VerifiedPrechangeSeedManifest
+    from mastervault.change_control import (
+        ChangeControlAggregate,
+        VerifiedPrechangeSeedManifest,
+    )
+    from mastervault.change_control import (
+        ManagedGenerationManifest as PackageManagedGenerationManifest,
+    )
+    from mastervault.change_control import (
+        ManagedGenerationManifestBindingV2 as PackageManagedGenerationManifestBindingV2,
+    )
+    from mastervault.change_control import (
+        ManagedGoverningSourceAdoptionBinding as PackageManagedGoverningSourceAdoptionBinding,
+    )
+    from mastervault.change_control import (
+        ManagedRun as PackageManagedRun,
+    )
 
     assert PackageAnalysisBootstrapBinding.__name__ == "AnalysisBootstrapBinding"
     assert ChangeControlAggregate.__name__ == "ChangeControlAggregate"
+    assert PackageManagedGenerationManifest is managed_review_module.ManagedGenerationManifest
+    assert (
+        PackageManagedGenerationManifestBindingV2
+        is managed_review_module.ManagedGenerationManifestBindingV2
+    )
+    assert (
+        PackageManagedGoverningSourceAdoptionBinding
+        is managed_review_module.ManagedGoverningSourceAdoptionBinding
+    )
+    assert PackageManagedRun is managed_review_module.ManagedRun
     assert VerifiedPrechangeSeedManifest.__name__ == "VerifiedPrechangeSeedManifest"

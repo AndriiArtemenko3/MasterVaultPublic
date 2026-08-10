@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import sqlite3
 from dataclasses import dataclass
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from mastervault.change_control import managed_store as managed_store_module
 from mastervault.change_control import store as store_module
 from mastervault.change_control.analysis_binding import AnalysisBootstrapIntegrityError
 from mastervault.change_control.bootstrap import (
@@ -29,6 +31,8 @@ from mastervault.change_control.managed_review import (
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedBundleOutcome,
+    ManagedGenerationManifestBindingV2,
+    ManagedGoverningSourceAdoptionBinding,
     ManagedImpactAnalysisEvidenceBinding,
     ManagedImpactBatchMemberBinding,
     ManagedImpactOutputRefBinding,
@@ -37,11 +41,15 @@ from mastervault.change_control.managed_review import (
     ManagedRevisionDecisionCommand,
     ManagedRevisionDisposition,
     ManagedRevisionPlan,
+    ManagedRevisionPlanningAdmissionBinding,
+    ManagedRevisionPlanningBatchMemberBinding,
+    ManagedRevisionPlanningTargetBinding,
     ManagedRevisionReviewBundle,
     ManagedRevisionReviewOutcome,
     ManagedRevisionReviewRequestCommand,
     ManagedRevisionReviewTarget,
     ManagedRunBinding,
+    ManagedRunBindingV2,
     ManagedSemanticHunk,
     NoChangeImpactCard,
     PatchReconstructionAttestation,
@@ -55,6 +63,8 @@ from mastervault.change_control.managed_review import (
 from mastervault.change_control.managed_store import (
     ManagedReviewAuthorityError,
     ManagedReviewStaleError,
+    ManagedReviewWriteVersionError,
+    ManagedRevisionEditDeferredError,
     ManagedRevisionStoreLifecycle,
     SqliteManagedChangeControlStore,
 )
@@ -123,12 +133,16 @@ class _Resolver:
         *,
         approved_projection_ids: set[str] | None = None,
         impact_evidence: ManagedImpactAnalysisEvidenceBinding | None = None,
+        revision_admission: ManagedRevisionPlanningAdmissionBinding | None = None,
+        governing_source_adoption: ManagedGoverningSourceAdoptionBinding | None = None,
     ) -> None:
         self.contract = contract
         self.manifest = manifest
         self.artifacts = artifacts
         self.approved_projection_ids = approved_projection_ids or set()
         self.impact_evidence = impact_evidence
+        self.revision_admission = revision_admission
+        self.governing_source_adoption = governing_source_adoption
 
     def open_algorithm_manifest(self, binding):
         if binding != self.contract:
@@ -142,6 +156,16 @@ class _Resolver:
         if self.impact_evidence is None:
             raise ValueError("impact evidence is not approved")
         return self.impact_evidence
+
+    def resolve_revision_planning_admission(self, binding):
+        if self.revision_admission is None or self.revision_admission != binding:
+            raise ValueError("revision admission is not approved")
+        return self.revision_admission
+
+    def resolve_governing_source_adoption(self, binding):
+        if self.governing_source_adoption is None or self.governing_source_adoption != binding:
+            raise ValueError("governing source adoption is not approved")
+        return self.governing_source_adoption
 
     def open_artifact(self, artifact):
         return self.artifacts[artifact.path]
@@ -180,6 +204,23 @@ class _Resolver:
         assert hashlib.sha256(note_bytes).hexdigest() == projection.note_artifact.sha256
         return projection
 
+    def verify_revision_plan_source_note(
+        self,
+        plan,
+        *,
+        predecessor_note_bytes: bytes,
+        result_raw_bytes: bytes,
+        proposed_note_bytes: bytes,
+    ) -> SourceNoteProjectionBinding:
+        del predecessor_note_bytes
+        assert hashlib.sha256(result_raw_bytes).hexdigest() == plan.proposed_raw.sha256
+        assert hashlib.sha256(proposed_note_bytes).hexdigest() == plan.proposed_note.sha256
+        return self.verify_source_note_projection(
+            plan.successor_projection,
+            raw_bytes=result_raw_bytes,
+            note_bytes=proposed_note_bytes,
+        )
+
 
 @dataclass(frozen=True)
 class _Scenario:
@@ -198,6 +239,71 @@ def _artifact(kind: ManagedArtifactKind, path: str, payload: bytes) -> ManagedAr
         path=path,
         sha256=hashlib.sha256(payload).hexdigest(),
         byte_count=len(payload),
+    )
+
+
+def _synthetic_governing_source_adoption(
+    *,
+    bootstrap,
+    evidence_repository_id: str,
+    document,
+    raw_artifact: ManagedArtifactRef,
+    note_artifact: ManagedArtifactRef,
+    source_note_logical_path: str,
+    reviewed_head: AggregateHeadBinding,
+    temporal_decision_record_sha256: str,
+) -> ManagedGoverningSourceAdoptionBinding:
+    note_snapshot_sha = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "document": document.model_dump(mode="json"),
+                "path": source_note_logical_path,
+                "sha256": note_artifact.sha256,
+            }
+        )
+    ).hexdigest()
+    reviewed_binding_sha = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "head": reviewed_head.model_dump(mode="json"),
+                "temporal_decision_record_sha256": temporal_decision_record_sha256,
+            }
+        )
+    ).hexdigest()
+    inventory_sha = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "document_version_id": document.document_version_id,
+                "source_note_snapshot_sha256": note_snapshot_sha,
+            }
+        )
+    ).hexdigest()
+    return ManagedGoverningSourceAdoptionBinding.create(
+        evidence_repository_id=evidence_repository_id,
+        analysis_bootstrap_binding_id=bootstrap.binding_id,
+        analysis_bootstrap_binding_sha256=bootstrap.binding_sha256,
+        incoming_logical_event_id=bootstrap.incoming_event_id,
+        incoming_event_identity=bootstrap.incoming_event_identity,
+        incoming_manifest_path="datasets/larkstead/change_control/sl2_incoming_returns_v2.yaml",
+        incoming_manifest_sha256=bootstrap.incoming_manifest_sha256,
+        incoming_manifest_byte_count=1,
+        alignment_attestation_id=bootstrap.alignment_attestation_id,
+        alignment_attestation_sha256=bootstrap.alignment_attestation_sha256,
+        alignment_policy_version=bootstrap.alignment_policy_version,
+        alignment_payload_sha256=bootstrap.alignment_payload_sha256,
+        incoming_claim_evidence_sha256=bootstrap.incoming_claim_evidence_sha256,
+        document=document,
+        raw_artifact=raw_artifact,
+        source_note_artifact=note_artifact,
+        source_note_logical_path=source_note_logical_path,
+        source_note_snapshot_id=f"depsource:{note_snapshot_sha}",
+        source_note_snapshot_sha256=note_snapshot_sha,
+        reviewed_snapshot_binding_id=f"reviewed-snapshot:{reviewed_binding_sha}",
+        reviewed_snapshot_binding_sha256=reviewed_binding_sha,
+        temporal_decision_record_sha256=temporal_decision_record_sha256,
+        reviewed_inventory_sha256=inventory_sha,
+        reviewed_head=reviewed_head,
+        authoritative_repository_resolution_required=True,
     )
 
 
@@ -447,7 +553,7 @@ def _no_change_scenario(path: Path) -> _Scenario:
         impact_evidence=impact_evidence,
         global_relevant_claim_revision_ids=bootstrap.binding.changed_claim_revision_ids,
     )
-    run = ManagedRunBinding.create(
+    legacy_run = ManagedRunBinding.create(
         run_id="managed-store-run",
         operation_id="managed-store:run",
         prechange_head=prechange_head,
@@ -472,7 +578,7 @@ def _no_change_scenario(path: Path) -> _Scenario:
     input_artifact = _artifact(
         ManagedArtifactKind.INFERENCE_INPUT,
         (
-            f"staging/managed-review/{run.run_id}/{target_key}/analysis-input-"
+            f"staging/managed-review/{legacy_run.run_id}/{target_key}/analysis-input-"
             f"{hashlib.sha256(envelope_bytes).hexdigest()}.json"
         ),
         envelope_bytes,
@@ -509,7 +615,7 @@ def _no_change_scenario(path: Path) -> _Scenario:
         quote="{",
     )
     semantic = {
-        "run_id": run.run_id,
+        "run_id": legacy_run.run_id,
         "target_key": target_key,
         "predecessor": newer,
         "predecessor_raw": predecessor_raw,
@@ -523,7 +629,7 @@ def _no_change_scenario(path: Path) -> _Scenario:
     output_artifact = _artifact(
         ManagedArtifactKind.INFERENCE_OUTPUT,
         (
-            f"staging/managed-review/{run.run_id}/{target_key}/validated-output-"
+            f"staging/managed-review/{legacy_run.run_id}/{target_key}/validated-output-"
             f"{hashlib.sha256(output_bytes).hexdigest()}.json"
         ),
         output_bytes,
@@ -585,6 +691,101 @@ def _no_change_scenario(path: Path) -> _Scenario:
         inference_receipt=replay,
         validated_output=output_artifact,
     )
+    workload_sha = hashlib.sha256(b"managed-store-revision-workload").hexdigest()
+    execution_id = "inference-exec:" + hashlib.sha256(
+        b"managed-store-revision-execution"
+    ).hexdigest()
+    outcome_sha = hashlib.sha256(b"managed-store-revision-outcome").hexdigest()
+    receipt_artifact = card.inference_receipt.artifact_ref()
+    admission_target = ManagedRevisionPlanningTargetBinding(
+        target_key=card.target_key,
+        document_version_id=card.predecessor.document_version_id,
+        input_shard_id=f"revisionin:{input_artifact.sha256}",
+        input_shard_sha256=input_artifact.sha256,
+        output_shard_id=f"revisionout:{output_artifact.sha256}",
+        output_shard_sha256=output_artifact.sha256,
+        execution_id=execution_id,
+        outcome_sha256=outcome_sha,
+        receipt_id=card.inference_receipt.receipt_id,
+        receipt_artifact_id=receipt_artifact.artifact_id,
+        subject_kind="no-change-impact-card",
+        subject_id=card.card_id,
+        subject_sha256=card.card_sha256,
+        staged_artifacts=tuple(sorted((input_artifact, output_artifact), key=lambda item: item.artifact_id)),
+    )
+    manifest_sha = hashlib.sha256(b"managed-store-staging-manifest").hexdigest()
+    manifest_path = (
+        f"staging/managed-review/{legacy_run.run_id}/manifests/{manifest_sha}.json"
+    )
+    completion_path = f"staging/managed-review/{legacy_run.run_id}/COMPLETE.json"
+    completion_sha = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "run_id": legacy_run.run_id,
+                "repository_id": impact_evidence.repository_id,
+                "manifest_id": f"managed-staging:{manifest_sha}",
+                "manifest_sha256": manifest_sha,
+                "manifest_path": manifest_path,
+                "completion_path": completion_path,
+            }
+        )
+    ).hexdigest()
+    adoption_note = _artifact(
+        ManagedArtifactKind.SOURCE_NOTE,
+        bootstrap.incoming_event.manifest.document.processed_path,
+        note_bytes,
+    )
+    adoption = _synthetic_governing_source_adoption(
+        bootstrap=analysis_set.analysis_bootstrap,
+        evidence_repository_id=impact_evidence.repository_id,
+        document=newer,
+        raw_artifact=predecessor_raw,
+        note_artifact=adoption_note,
+        source_note_logical_path=note_path,
+        reviewed_head=review_head,
+        temporal_decision_record_sha256=temporal_sha,
+    )
+    admission = ManagedRevisionPlanningAdmissionBinding.create(
+        run_id=legacy_run.run_id,
+        repository_id=impact_evidence.repository_id,
+        workload_id=f"revisionwork:{workload_sha}",
+        workload_sha256=workload_sha,
+        analysis_set=analysis_set,
+        analysis_set_id=analysis_set.analysis_set_id,
+        analysis_set_sha256=analysis_set.analysis_set_sha256,
+        reviewed_snapshot_binding_id=adoption.reviewed_snapshot_binding_id,
+        reviewed_snapshot_binding_sha256=adoption.reviewed_snapshot_binding_sha256,
+        temporal_decision_record_sha256=adoption.temporal_decision_record_sha256,
+        contract_binding_id=contract.contract_binding_id,
+        batch_id="inference-batch:" + hashlib.sha256(b"managed-store-batch").hexdigest(),
+        batch_sha256=hashlib.sha256(b"managed-store-batch").hexdigest(),
+        batch_members=(
+            ManagedRevisionPlanningBatchMemberBinding(
+                execution_id=execution_id,
+                receipt_artifact_id=receipt_artifact.artifact_id,
+                outcome_sha256=outcome_sha,
+            ),
+        ),
+        staging_manifest_id=f"managed-staging:{manifest_sha}",
+        staging_manifest_sha256=manifest_sha,
+        staging_manifest_path=manifest_path,
+        staging_completion_id=f"managed-staging-completion:{completion_sha}",
+        staging_completion_sha256=completion_sha,
+        staging_completion_path=completion_path,
+        targets=(admission_target,),
+    )
+    run = ManagedRunBindingV2.create(
+        run_id=legacy_run.run_id,
+        operation_id=legacy_run.operation_id,
+        prechange_head=legacy_run.prechange_head,
+        analysis_head=legacy_run.analysis_head,
+        algorithm_manifest_sha256=legacy_run.algorithm_manifest_sha256,
+        inference_contract=legacy_run.inference_contract,
+        analysis_set=legacy_run.analysis_set,
+        revision_planning_admission=admission,
+        governing_source_adoption=adoption,
+    )
     bundle = ManagedRevisionReviewBundle.create(
         run_binding=run,
         review_base=ManagedReviewBaseBinding.create(
@@ -606,9 +807,12 @@ def _no_change_scenario(path: Path) -> _Scenario:
             input_artifact.path: envelope_bytes,
             output_artifact.path: output_bytes,
             replay_artifact.path: live_bytes,
+            adoption_note.path: note_bytes,
         },
         approved_projection_ids={projection.projection_id},
         impact_evidence=impact_evidence,
+        revision_admission=admission,
+        governing_source_adoption=adoption,
     )
     request_command = ManagedRevisionReviewRequestCommand.create(
         bundle=bundle,
@@ -682,6 +886,14 @@ def test_managed_no_change_request_decision_replay_and_reopen(tmp_path: Path) ->
         prechange_head=prechange_head,
     )
     assert not first_decision.replayed and replayed_decision.replayed
+    assert first_decision.activation_required
+    assert isinstance(decision_command.generation_manifest, ManagedGenerationManifestBindingV2)
+    assert isinstance(bundle.run_binding, ManagedRunBindingV2)
+    assert decision_command.generation_manifest.publication_delta == ()
+    assert (
+        decision_command.generation_manifest.governing_source_adoption
+        == bundle.run_binding.governing_source_adoption
+    )
     decided = store.get_managed_review(
         request_command.request_id,
         resolver=resolver,
@@ -700,9 +912,34 @@ def test_managed_no_change_request_decision_replay_and_reopen(tmp_path: Path) ->
     )
     assert (
         store.conn.execute("SELECT count(*) FROM change_control_generation_manifests").fetchone()[0]
-        == 1
+        == 2
     )
+    overlay_row = store.conn.execute(
+        "SELECT payload_schema_version, payload_json "
+        "FROM change_control_generation_manifests WHERE manifest_kind='managed-overlay'"
+    ).fetchone()
+    assert overlay_row is not None and int(overlay_row["payload_schema_version"]) == 1
+    assert json.loads(str(overlay_row["payload_json"]))["schema_version"] == 2
     store.close()
+
+
+def test_impact_evidence_v1_canonical_identity_remains_frozen(tmp_path: Path) -> None:
+    scenario = _no_change_scenario(tmp_path / "impact-v1.sqlite3")
+    try:
+        evidence = scenario.bundle.run_binding.analysis_set.impact_evidence
+        assert evidence is not None
+        canonical = canonical_json_bytes(evidence.model_dump(mode="json"))
+        assert evidence.evidence_binding_id == (
+            "mimpactevidence:7ce3941a793b27363a5802fedcd9a594166c3a22da255327b87dc89a97de82e1"
+        )
+        assert hashlib.sha256(canonical).hexdigest() == (
+            "991561d3d9a71aa7f43daebc95256b74ef89e4b03a6dd1ee05647e3c0c84981a"
+        )
+        assert b'"repository_id"' in canonical
+        assert b'"evidence_repository_id"' not in canonical
+        assert b'"source_repository' not in canonical
+    finally:
+        scenario.store.close()
 
 
 def _create_managed_request(scenario: _Scenario):
@@ -749,7 +986,7 @@ def _advance_non_review_aggregate(scenario: _Scenario) -> None:
     )
 
 
-def _no_change_variant_bundle(scenario: _Scenario) -> ManagedRevisionReviewBundle:
+def _no_change_variant_scenario(scenario: _Scenario) -> _Scenario:
     card = scenario.bundle.targets[0].subject
     assert isinstance(card, NoChangeImpactCard)
     semantic = {
@@ -832,11 +1069,12 @@ def _no_change_variant_bundle(scenario: _Scenario) -> ManagedRevisionReviewBundl
     )
     scenario.resolver.artifacts[output.path] = output_bytes
     scenario.resolver.artifacts[replay_artifact.path] = live_bytes
-    return ManagedRevisionReviewBundle.create(
-        run_binding=scenario.bundle.run_binding,
-        review_base=scenario.bundle.review_base,
-        temporal_prerequisite=scenario.bundle.temporal_prerequisite,
-        targets=(ManagedRevisionReviewTarget.create(variant),),
+    return _rebind_scenario_impact_subjects(
+        scenario,
+        (variant,),
+        ("NO_CHANGE_REQUIRED",),
+        request_operation_id="managed-store:overlapping-request",
+        request_rationale="Attempt a second request over the same still-open target.",
     )
 
 
@@ -1051,6 +1289,7 @@ def _rebind_scenario_impact_subjects(
         global_relevant_claim_revision_ids=original_analysis.global_relevant_claim_revision_ids,
     )
     old_run = scenario.bundle.run_binding
+    assert isinstance(old_run, ManagedRunBindingV2)
     run = ManagedRunBinding.create(
         run_id=old_run.run_id,
         operation_id=old_run.operation_id,
@@ -1228,8 +1467,111 @@ def _rebind_scenario_impact_subjects(
         artifacts[output.path] = output_bytes
         artifacts[replay_artifact.path] = live_bytes
 
+    revision_members: list[ManagedRevisionPlanningBatchMemberBinding] = []
+    revision_targets: list[ManagedRevisionPlanningTargetBinding] = []
+    for subject in rebound:
+        execution_id = "inference-exec:" + hashlib.sha256(
+            f"revision-execution:{subject.target_key}".encode()
+        ).hexdigest()
+        outcome_sha = hashlib.sha256(
+            f"revision-outcome:{subject.target_key}".encode()
+        ).hexdigest()
+        receipt_artifact = subject.inference_receipt.artifact_ref()
+        revision_members.append(
+            ManagedRevisionPlanningBatchMemberBinding(
+                execution_id=execution_id,
+                receipt_artifact_id=receipt_artifact.artifact_id,
+                outcome_sha256=outcome_sha,
+            )
+        )
+        revision_targets.append(
+            ManagedRevisionPlanningTargetBinding(
+                target_key=subject.target_key,
+                document_version_id=subject.predecessor.document_version_id,
+                input_shard_id=f"revisionin:{subject.analysis.inference_input.sha256}",
+                input_shard_sha256=subject.analysis.inference_input.sha256,
+                output_shard_id=f"revisionout:{subject.validated_output.sha256}",
+                output_shard_sha256=subject.validated_output.sha256,
+                execution_id=execution_id,
+                outcome_sha256=outcome_sha,
+                receipt_id=subject.inference_receipt.receipt_id,
+                receipt_artifact_id=receipt_artifact.artifact_id,
+                subject_kind=(
+                    "managed-revision-plan"
+                    if isinstance(subject, ManagedRevisionPlan)
+                    else "no-change-impact-card"
+                ),
+                subject_id=(
+                    subject.plan_id if isinstance(subject, ManagedRevisionPlan) else subject.card_id
+                ),
+                subject_sha256=(
+                    subject.plan_sha256
+                    if isinstance(subject, ManagedRevisionPlan)
+                    else subject.card_sha256
+                ),
+                staged_artifacts=tuple(
+                    sorted(
+                        (subject.analysis.inference_input, subject.validated_output),
+                        key=lambda item: item.artifact_id,
+                    )
+                ),
+            )
+        )
+    revision_workload_sha = hashlib.sha256(("revision:" + batch_sha).encode()).hexdigest()
+    revision_batch_sha = hashlib.sha256(("revision-batch:" + batch_sha).encode()).hexdigest()
+    repository_id = evidence.repository_id
+    manifest_sha = hashlib.sha256(("revision-manifest:" + batch_sha).encode()).hexdigest()
+    manifest_path = f"staging/managed-review/{run.run_id}/manifests/{manifest_sha}.json"
+    completion_path = f"staging/managed-review/{run.run_id}/COMPLETE.json"
+    completion_sha = hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "run_id": run.run_id,
+                "repository_id": repository_id,
+                "manifest_id": f"managed-staging:{manifest_sha}",
+                "manifest_sha256": manifest_sha,
+                "manifest_path": manifest_path,
+                "completion_path": completion_path,
+            }
+        )
+    ).hexdigest()
+    admission = ManagedRevisionPlanningAdmissionBinding.create(
+        run_id=run.run_id,
+        repository_id=repository_id,
+        workload_id=f"revisionwork:{revision_workload_sha}",
+        workload_sha256=revision_workload_sha,
+        analysis_set=analysis,
+        analysis_set_id=analysis.analysis_set_id,
+        analysis_set_sha256=analysis.analysis_set_sha256,
+        reviewed_snapshot_binding_id=old_run.governing_source_adoption.reviewed_snapshot_binding_id,
+        reviewed_snapshot_binding_sha256=old_run.governing_source_adoption.reviewed_snapshot_binding_sha256,
+        temporal_decision_record_sha256=old_run.governing_source_adoption.temporal_decision_record_sha256,
+        contract_binding_id=run.inference_contract.contract_binding_id,
+        batch_id=f"inference-batch:{revision_batch_sha}",
+        batch_sha256=revision_batch_sha,
+        batch_members=tuple(revision_members),
+        staging_manifest_id=f"managed-staging:{manifest_sha}",
+        staging_manifest_sha256=manifest_sha,
+        staging_manifest_path=manifest_path,
+        staging_completion_id=f"managed-staging-completion:{completion_sha}",
+        staging_completion_sha256=completion_sha,
+        staging_completion_path=completion_path,
+        targets=tuple(revision_targets),
+    )
+    admitted_run = ManagedRunBindingV2.create(
+        run_id=run.run_id,
+        operation_id=run.operation_id,
+        prechange_head=run.prechange_head,
+        analysis_head=run.analysis_head,
+        algorithm_manifest_sha256=run.algorithm_manifest_sha256,
+        inference_contract=run.inference_contract,
+        analysis_set=analysis,
+        revision_planning_admission=admission,
+        governing_source_adoption=old_run.governing_source_adoption,
+    )
     bundle = ManagedRevisionReviewBundle.create(
-        run_binding=run,
+        run_binding=admitted_run,
         review_base=scenario.bundle.review_base,
         temporal_prerequisite=scenario.bundle.temporal_prerequisite,
         targets=tuple(ManagedRevisionReviewTarget.create(item) for item in rebound),
@@ -1247,6 +1589,8 @@ def _rebind_scenario_impact_subjects(
         artifacts,
         approved_projection_ids=projection_ids,
         impact_evidence=evidence,
+        revision_admission=admission,
+        governing_source_adoption=old_run.governing_source_adoption,
     )
     request = ManagedRevisionReviewRequestCommand.create(
         bundle=bundle,
@@ -1410,17 +1754,12 @@ def test_operation_collision_and_overlapping_open_target_fail_closed(tmp_path: P
             operation_id=scenario.request_command.operation_id,
         )
 
-    second_bundle = _no_change_variant_bundle(scenario)
-    overlapping = ManagedRevisionReviewRequestCommand.create(
-        bundle=second_bundle,
-        operation_id="managed-store:overlapping-request",
-        requester_id="operator@example.test",
-        rationale="Attempt a second request over the same still-open target.",
-    )
+    overlapping_scenario = _no_change_variant_scenario(scenario)
+    overlapping = overlapping_scenario.request_command
     with pytest.raises(ChangeControlConflictError, match="overlaps an open target"):
         scenario.store.create_managed_review_request(
             overlapping,
-            resolver=scenario.resolver,
+            resolver=overlapping_scenario.resolver,
             verified_bootstrap=scenario.bootstrap.verification_capability,
             prechange_head=scenario.prechange_head,
         )
@@ -1438,7 +1777,8 @@ def test_temporal_prerequisite_rejects_unrelated_proposal_transition_lineage(
 ) -> None:
     scenario = _no_change_scenario(tmp_path / "state.sqlite3")
     run = scenario.bundle.run_binding
-    unrelated_run = ManagedRunBinding.create(
+    assert isinstance(run, ManagedRunBindingV2)
+    unrelated_run = ManagedRunBindingV2.create(
         run_id=run.run_id,
         operation_id="managed-store:unrelated-proposal-transition",
         prechange_head=run.prechange_head,
@@ -1446,6 +1786,8 @@ def test_temporal_prerequisite_rejects_unrelated_proposal_transition_lineage(
         algorithm_manifest_sha256=run.algorithm_manifest_sha256,
         inference_contract=run.inference_contract,
         analysis_set=run.analysis_set,
+        revision_planning_admission=run.revision_planning_admission,
+        governing_source_adoption=run.governing_source_adoption,
     )
     unrelated_bundle = ManagedRevisionReviewBundle.create(
         run_binding=unrelated_run,
@@ -1918,6 +2260,122 @@ def test_normalized_managed_evidence_tamper_fails_closed(
     scenario.store.close()
 
 
+@pytest.mark.parametrize("nested_schema_version", (None, 3, 1))
+def test_persisted_overlay_manifest_nested_discriminator_fails_closed(
+    tmp_path: Path,
+    nested_schema_version: int | None,
+) -> None:
+    scenario = _activating_scenario(tmp_path / "state.sqlite3")
+    command = _open_activating_decision(scenario)
+    scenario.store.decide_managed_review(
+        command,
+        resolver=scenario.resolver,
+        verified_bootstrap=scenario.bootstrap.verification_capability,
+        prechange_head=scenario.prechange_head,
+    )
+    row = scenario.store.conn.execute(
+        "SELECT payload_schema_version, manifest_kind, payload_json "
+        "FROM change_control_generation_manifests WHERE manifest_kind='managed-overlay'"
+    ).fetchone()
+    assert row is not None
+    assert int(row["payload_schema_version"]) == 1
+    assert str(row["manifest_kind"]) == "managed-overlay"
+    payload = json.loads(str(row["payload_json"]))
+    assert payload["schema_version"] == 2
+    if nested_schema_version is None:
+        del payload["schema_version"]
+    else:
+        payload["schema_version"] = nested_schema_version
+    with scenario.store.conn:
+        scenario.store.conn.execute(
+            "UPDATE change_control_generation_manifests SET payload_json=? "
+            "WHERE manifest_kind='managed-overlay'",
+            (canonical_json_bytes(payload).decode("utf-8"),),
+        )
+    with pytest.raises(ChangeControlCorruptionError):
+        scenario.store.get_managed_review(
+            scenario.request_command.request_id,
+            resolver=scenario.resolver,
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    scenario.store.close()
+
+
+def test_persisted_overlay_storage_envelope_and_decision_nested_manifest_fail_closed(
+    tmp_path: Path,
+) -> None:
+    scenario = _activating_scenario(tmp_path / "state.sqlite3")
+    command = _open_activating_decision(scenario)
+    scenario.store.decide_managed_review(
+        command,
+        resolver=scenario.resolver,
+        verified_bootstrap=scenario.bootstrap.verification_capability,
+        prechange_head=scenario.prechange_head,
+    )
+    manifest_row = scenario.store.conn.execute(
+        "SELECT payload_json FROM change_control_generation_manifests "
+        "WHERE manifest_kind='managed-overlay'"
+    ).fetchone()
+    decision_row = scenario.store.conn.execute(
+        "SELECT payload_json FROM change_control_managed_review_decisions"
+    ).fetchone()
+    assert manifest_row is not None and decision_row is not None
+    original_manifest = str(manifest_row["payload_json"])
+    original_decision = str(decision_row["payload_json"])
+
+    scenario.store.conn.execute("PRAGMA ignore_check_constraints=ON")
+    try:
+        with scenario.store.conn:
+            scenario.store.conn.execute(
+                "UPDATE change_control_generation_manifests SET payload_schema_version=2 "
+                "WHERE manifest_kind='managed-overlay'"
+            )
+    finally:
+        scenario.store.conn.execute("PRAGMA ignore_check_constraints=OFF")
+    with pytest.raises(ChangeControlCorruptionError):
+        scenario.store.get_managed_review(
+            scenario.request_command.request_id,
+            resolver=scenario.resolver,
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    with scenario.store.conn:
+        scenario.store.conn.execute(
+            "UPDATE change_control_generation_manifests "
+            "SET payload_schema_version=1, payload_json=? "
+            "WHERE manifest_kind='managed-overlay'",
+            (original_manifest,),
+        )
+
+    for nested_schema_version in (None, 3, 1):
+        payload = json.loads(original_decision)
+        if nested_schema_version is None:
+            del payload["command"]["generation_manifest"]["schema_version"]
+        else:
+            payload["command"]["generation_manifest"]["schema_version"] = (
+                nested_schema_version
+            )
+        with scenario.store.conn:
+            scenario.store.conn.execute(
+                "UPDATE change_control_managed_review_decisions SET payload_json=?",
+                (canonical_json_bytes(payload).decode("utf-8"),),
+            )
+        with pytest.raises(ChangeControlCorruptionError):
+            scenario.store.get_managed_review(
+                scenario.request_command.request_id,
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.bootstrap.verification_capability,
+                prechange_head=scenario.prechange_head,
+            )
+    with scenario.store.conn:
+        scenario.store.conn.execute(
+            "UPDATE change_control_managed_review_decisions SET payload_json=?",
+            (original_decision,),
+        )
+    scenario.store.close()
+
+
 @pytest.mark.parametrize(
     ("trigger", "table"),
     (
@@ -2105,3 +2563,213 @@ def test_active_generation_schema_allows_future_managed_shape_but_rejects_mixed_
             "UPDATE change_control_active_generation SET origin_kind='managed-decision'"
         )
     store.close()
+
+
+class _ExplodingManagedResolver:
+    def __getattr__(self, name: str):
+        raise AssertionError(f"managed write gate accessed resolver method {name}")
+
+
+def _legacy_bundle(bundle: ManagedRevisionReviewBundle) -> ManagedRevisionReviewBundle:
+    run = bundle.run_binding
+    assert isinstance(run, ManagedRunBindingV2)
+    legacy = ManagedRunBinding.create(
+        run_id=run.run_id,
+        operation_id=run.operation_id,
+        prechange_head=run.prechange_head,
+        analysis_head=run.analysis_head,
+        algorithm_manifest_sha256=run.algorithm_manifest_sha256,
+        inference_contract=run.inference_contract,
+        analysis_set=run.analysis_set,
+    )
+    return ManagedRevisionReviewBundle.create(
+        run_binding=legacy,
+        review_base=bundle.review_base,
+        temporal_prerequisite=bundle.temporal_prerequisite,
+        targets=bundle.targets,
+    )
+
+
+def _edited_decision_command(scenario: _Scenario) -> ManagedRevisionDecisionCommand:
+    approved = _open_activating_decision(
+        scenario, operation_id="managed-store:unused-approved-command"
+    )
+    target = approved.bundle.targets[0]
+    original = target.subject
+    assert isinstance(original, ManagedRevisionPlan)
+    excluded = {
+        "plan_id",
+        "plan_sha256",
+        "proposal_id",
+        "proposal_sha256",
+        "kind",
+        "schema_version",
+        "inference_receipt",
+        "validated_output",
+    }
+    semantic = {
+        name: getattr(original, name)
+        for name in type(original).model_fields
+        if name not in excluded
+    }
+    semantic["rationale"] = (
+        "A human-reviewed wording correction that preserves the admitted target and interval."
+    )
+    output_bytes = ManagedRevisionPlan.proposal_output_bytes(**semantic)
+    output_sha = hashlib.sha256(output_bytes).hexdigest()
+    validated_output = ManagedArtifactRef.create(
+        kind=ManagedArtifactKind.INFERENCE_OUTPUT,
+        path=(
+            f"staging/managed-review/{original.run_id}/{original.target_key}/"
+            f"validated-output-{output_sha}.json"
+        ),
+        sha256=output_sha,
+        byte_count=len(output_bytes),
+    )
+    prior = original.inference_receipt
+    receipt = ContentAddressedInferenceReceipt.create(
+        contract_id=prior.contract_id,
+        contract_version=prior.contract_version,
+        mode=prior.mode,
+        provider=prior.provider,
+        model=prior.model,
+        provider_request_id=prior.provider_request_id,
+        replay_source_receipt_sha256=prior.replay_source_receipt_sha256,
+        replay_source_receipt_artifact=prior.replay_source_receipt_artifact,
+        prompt_sha256=prior.prompt_sha256,
+        response_schema_sha256=prior.response_schema_sha256,
+        input_artifacts=prior.input_artifacts,
+        input_envelope_sha256=prior.input_envelope_sha256,
+        raw_output_sha256=output_sha,
+        validated_output_sha256=output_sha,
+        usage=prior.usage,
+    )
+    edited = ManagedRevisionPlan.create(
+        **semantic,
+        inference_receipt=receipt,
+        validated_output=validated_output,
+    )
+    return ManagedRevisionDecisionCommand.create(
+        operation_id="managed-store:edited-decision",
+        request_record=approved.request_record,
+        bundle_outcome=ManagedBundleOutcome.ACCEPTED,
+        reviewer_id="reviewer@example.test",
+        rationale="Attempt a deferred edited-plan decision at the store boundary.",
+        items=(
+            ManagedRevisionReviewOutcome(
+                target_id=target.target_id,
+                original_target_sha256=target.target_sha256,
+                disposition=ManagedRevisionDisposition.EDIT,
+                edited_plan=edited,
+            ),
+        ),
+    )
+
+
+def test_legacy_v1_request_is_readable_but_new_write_and_replay_fail_before_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scenario = _no_change_scenario(tmp_path / "state.sqlite3")
+    legacy = _legacy_bundle(scenario.bundle)
+    command = ManagedRevisionReviewRequestCommand.create(
+        bundle=legacy,
+        operation_id="managed-store:legacy-request",
+        requester_id="operator@example.test",
+        rationale="Represent one request persisted by the legacy managed-review writer.",
+    )
+    before = scenario.store.conn.execute(
+        "SELECT count(*) FROM change_control_managed_review_request_records"
+    ).fetchone()[0]
+    with pytest.raises(ManagedReviewWriteVersionError):
+        scenario.store.create_managed_review_request(
+            command,
+            resolver=_ExplodingManagedResolver(),
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_request_records"
+        ).fetchone()[0]
+        == before
+    )
+
+    with monkeypatch.context() as legacy_writer:
+        legacy_writer.setattr(
+            managed_store_module, "_require_v2_managed_review_write", lambda bundle: None
+        )
+        scenario.store.create_managed_review_request(
+            command,
+            resolver=scenario.resolver,
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    reopened = scenario.store.get_managed_review(
+        command.request_id,
+        resolver=scenario.resolver,
+        verified_bootstrap=scenario.bootstrap.verification_capability,
+        prechange_head=scenario.prechange_head,
+    )
+    assert type(reopened.request_record.command.bundle.run_binding) is ManagedRunBinding
+    with pytest.raises(ManagedReviewWriteVersionError):
+        scenario.store.create_managed_review_request(
+            command,
+            resolver=_ExplodingManagedResolver(),
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_request_delivery_receipts"
+        ).fetchone()[0]
+        == 1
+    )
+    scenario.store.close()
+
+
+def test_valid_edit_decision_is_rejected_before_resolver_transaction_or_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scenario = _activating_scenario(tmp_path / "state.sqlite3")
+    command = _edited_decision_command(scenario)
+    assert scenario.store.conn.execute(
+        "SELECT count(*) FROM change_control_managed_review_decisions"
+    ).fetchone()[0] == 0
+    with pytest.raises(ManagedRevisionEditDeferredError):
+        scenario.store.decide_managed_review(
+            command,
+            resolver=_ExplodingManagedResolver(),
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    assert scenario.store.conn.execute(
+        "SELECT count(*) FROM change_control_managed_review_decisions"
+    ).fetchone()[0] == 0
+
+    with monkeypatch.context() as prior_writer:
+        prior_writer.setattr(managed_store_module, "_reject_deferred_managed_edits", lambda value: None)
+        prior_writer.setattr(
+            SqliteManagedChangeControlStore,
+            "_resolve_contract_and_artifacts",
+            staticmethod(lambda value, resolver: None),
+        )
+        scenario.store.decide_managed_review(
+            command,
+            resolver=scenario.resolver,
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    with pytest.raises(ManagedRevisionEditDeferredError):
+        scenario.store.decide_managed_review(
+            command,
+            resolver=_ExplodingManagedResolver(),
+            verified_bootstrap=scenario.bootstrap.verification_capability,
+            prechange_head=scenario.prechange_head,
+        )
+    assert scenario.store.conn.execute(
+        "SELECT count(*) FROM change_control_managed_review_decisions"
+    ).fetchone()[0] == 1
+    assert scenario.store.conn.execute(
+        "SELECT count(*) FROM change_control_managed_review_decision_delivery_receipts"
+    ).fetchone()[0] == 1
+    scenario.store.close()

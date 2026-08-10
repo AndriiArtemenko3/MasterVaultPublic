@@ -31,6 +31,8 @@ from mastervault.change_control.managed_review import (
     ManagedAnalysisSetBinding,
     ManagedArtifactRef,
     ManagedGenerationManifestBinding,
+    ManagedGenerationManifestBindingV2,
+    ManagedGoverningSourceAdoptionBinding,
     ManagedImpactAnalysisEvidenceBinding,
     ManagedInferenceContractBinding,
     ManagedRevisionDecisionCommand,
@@ -38,11 +40,13 @@ from mastervault.change_control.managed_review import (
     ManagedRevisionDecisionRecord,
     ManagedRevisionDisposition,
     ManagedRevisionPlan,
+    ManagedRevisionPlanningAdmissionBinding,
     ManagedRevisionReviewBundle,
     ManagedRevisionReviewRequestCommand,
     ManagedRevisionReviewRequestReceipt,
     ManagedRevisionReviewRequestRecord,
     ManagedRevisionReviewView,
+    ManagedRunBindingV2,
     NoChangeImpactCard,
     PatchReconstructionAttestation,
     SourceNoteProjectionBinding,
@@ -85,6 +89,14 @@ class ManagedReviewRepositoryResolver(Protocol):
         self, binding: ManagedImpactAnalysisEvidenceBinding
     ) -> ManagedImpactAnalysisEvidenceBinding: ...
 
+    def resolve_revision_planning_admission(
+        self, binding: ManagedRevisionPlanningAdmissionBinding
+    ) -> ManagedRevisionPlanningAdmissionBinding: ...
+
+    def resolve_governing_source_adoption(
+        self, binding: ManagedGoverningSourceAdoptionBinding
+    ) -> ManagedGoverningSourceAdoptionBinding: ...
+
     def open_artifact(self, artifact: ManagedArtifactRef) -> bytes: ...
 
     def verify_patch_reconstruction(
@@ -103,6 +115,15 @@ class ManagedReviewRepositoryResolver(Protocol):
         note_bytes: bytes,
     ) -> SourceNoteProjectionBinding: ...
 
+    def verify_revision_plan_source_note(
+        self,
+        plan: ManagedRevisionPlan,
+        *,
+        predecessor_note_bytes: bytes,
+        result_raw_bytes: bytes,
+        proposed_note_bytes: bytes,
+    ) -> SourceNoteProjectionBinding: ...
+
 
 class ManagedReviewAuthorityError(ChangeControlConflictError):
     """Repository evidence does not authorize the proposed managed review."""
@@ -110,6 +131,14 @@ class ManagedReviewAuthorityError(ChangeControlConflictError):
 
 class ManagedReviewStaleError(ChangeControlReviewStaleError):
     """An undecided managed request no longer binds both live authority heads."""
+
+
+class ManagedReviewWriteVersionError(ManagedReviewAuthorityError):
+    """A legacy run binding was presented to a new authority-bearing write."""
+
+
+class ManagedRevisionEditDeferredError(ManagedReviewAuthorityError):
+    """Managed EDIT remains decodable but is not an authorized PR-A write."""
 
 
 class ManagedRevisionStoreLifecycle(StrEnum):
@@ -157,6 +186,20 @@ def _canonical_model_json(model: BaseModel) -> str:
     return canonical_json_bytes(model.model_dump(mode="json")).decode("utf-8")
 
 
+def _require_v2_managed_review_write(bundle: ManagedRevisionReviewBundle) -> None:
+    if type(bundle.run_binding) is not ManagedRunBindingV2:
+        raise ManagedReviewWriteVersionError(
+            "new managed review writes require an exact v2 admitted run binding"
+        )
+
+
+def _reject_deferred_managed_edits(command: ManagedRevisionDecisionCommand) -> None:
+    if any(item.disposition == ManagedRevisionDisposition.EDIT for item in command.items):
+        raise ManagedRevisionEditDeferredError(
+            "managed review EDIT is deferred until a separately admitted edited plan exists"
+        )
+
+
 def _decode_model[ModelT: BaseModel](
     model: type[ModelT], payload_json: str, *, label: str
 ) -> ModelT:
@@ -170,6 +213,37 @@ def _decode_model[ModelT: BaseModel](
         return result
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ChangeControlCorruptionError(f"persisted {label} is invalid") from exc
+
+
+def _decode_generation_manifest(
+    payload_json: str,
+) -> ManagedGenerationManifestBinding | ManagedGenerationManifestBindingV2:
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        raise ChangeControlCorruptionError(
+            "persisted inactive managed generation manifest is invalid"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise ChangeControlCorruptionError(
+            "persisted inactive managed generation manifest is invalid"
+        )
+    schema_version = payload.get("schema_version")
+    if schema_version == 1:
+        return _decode_model(
+            ManagedGenerationManifestBinding,
+            payload_json,
+            label="inactive managed generation manifest",
+        )
+    if schema_version == 2:
+        return _decode_model(
+            ManagedGenerationManifestBindingV2,
+            payload_json,
+            label="inactive managed generation manifest",
+        )
+    raise ChangeControlCorruptionError(
+        "persisted inactive managed generation manifest has unsupported schema"
+    )
 
 
 def _walk_models(value: Any) -> Any:
@@ -227,6 +301,34 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             resolved_impact = resolver.resolve_impact_analysis_evidence(impact_evidence)
             if resolved_impact != impact_evidence:
                 raise ValueError("resolved impact evidence differs from the managed analysis")
+            planning_admissions = {
+                item.admission_id: item
+                for item in models
+                if isinstance(item, ManagedRevisionPlanningAdmissionBinding)
+            }
+            if planning_admissions:
+                if len(planning_admissions) != 1:
+                    raise ValueError("managed evidence must bind exactly one planning admission")
+                planning = next(iter(planning_admissions.values()))
+                resolved_planning = resolver.resolve_revision_planning_admission(planning)
+                if resolved_planning != planning:
+                    raise ValueError(
+                        "resolved revision-planning admission differs from the run binding"
+                    )
+            governing_sources = {
+                item.adoption_id: item
+                for item in models
+                if isinstance(item, ManagedGoverningSourceAdoptionBinding)
+            }
+            if governing_sources:
+                if len(governing_sources) != 1:
+                    raise ValueError("managed evidence must bind exactly one governing source")
+                governing_source = next(iter(governing_sources.values()))
+                resolved_source = resolver.resolve_governing_source_adoption(governing_source)
+                if resolved_source != governing_source:
+                    raise ValueError(
+                        "resolved governing-source adoption differs from the run binding"
+                    )
             approved = resolver.resolve_approved_inference_contract(contract)
             if approved != contract:
                 raise ValueError("approved inference contract differs from the run binding")
@@ -301,6 +403,19 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
                 if verified_patch != plan.patch_attestation:
                     raise ValueError("patch reconstruction attestation was not reproduced")
+                if planning_admissions:
+                    verified_note = resolver.verify_revision_plan_source_note(
+                        plan,
+                        predecessor_note_bytes=artifact_bytes[
+                            plan.predecessor_note.artifact_id
+                        ],
+                        result_raw_bytes=result,
+                        proposed_note_bytes=artifact_bytes[plan.proposed_note.artifact_id],
+                    )
+                    if verified_note != plan.successor_projection:
+                        raise ValueError(
+                            "managed successor SourceNote rendering was not reproduced"
+                        )
 
             cards = {item.card_id: item for item in models if isinstance(item, NoChangeImpactCard)}
             for card in cards.values():
@@ -822,6 +937,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         prechange_head: AggregateHeadBinding,
     ) -> ManagedRevisionReviewRequestReceipt:
         command = ManagedRevisionReviewRequestCommand.model_validate_json(command.model_dump_json())
+        _require_v2_managed_review_write(command.bundle)
         self._resolve_contract_and_artifacts(command.bundle, resolver)
         self._require_ready()
         self._begin("BEGIN IMMEDIATE")
@@ -1003,6 +1119,49 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
         return initial
 
+    def find_managed_review_request_by_operation_id(
+        self,
+        operation_id: str,
+        *,
+        resolver: ManagedReviewRepositoryResolver,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> ManagedRevisionReviewRequestRecord | None:
+        """Reopen immutable request evidence without consulting mutable live heads."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(operation_id)
+            if owner is None:
+                self.conn.execute("COMMIT")
+                return None
+            if owner[0] != "managed-request":
+                raise ChangeControlIdempotencyError(
+                    "operation_id is already owned by another write"
+                )
+            record = self._read_request_record(owner[1])
+            _require_v2_managed_review_write(record.command.bundle)
+            self._resolve_contract_and_artifacts(record.command.bundle, resolver)
+            self._initial_request_receipt(record)
+            self._assert_temporal_prerequisite(record.command.bundle)
+            self._assert_live_or_decided_request_authority(
+                record,
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=prechange_head,
+            )
+            self.conn.execute("COMMIT")
+            return record
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
     def _append_decision_delivery(
         self, record: ManagedRevisionDecisionRecord, *, replayed: bool
     ) -> ManagedRevisionDecisionReceipt:
@@ -1043,6 +1202,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         prechange_head: AggregateHeadBinding,
     ) -> ManagedRevisionDecisionReceipt:
         command = ManagedRevisionDecisionCommand.model_validate_json(command.model_dump_json())
+        _require_v2_managed_review_write(command.bundle)
+        _reject_deferred_managed_edits(command)
         self._resolve_contract_and_artifacts(command, resolver)
         self._require_ready()
         self._begin("BEGIN IMMEDIATE")
@@ -1052,6 +1213,10 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_receipts()
             self._validate_reviews()
             self._validate_global_operation_ownership()
+            request_id = command.request_record.command.request_id
+            stored = self._read_request_record(request_id)
+            _require_v2_managed_review_write(stored.command.bundle)
+            self._initial_request_receipt(stored)
             owner = self._operation_owner(command.operation_id)
             if owner is not None:
                 if owner[0] != "managed-decision":
@@ -1075,9 +1240,6 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 self.conn.execute("COMMIT")
                 return receipt
 
-            request_id = command.request_record.command.request_id
-            stored = self._read_request_record(request_id)
-            self._initial_request_receipt(stored)
             if command.request_record != stored:
                 raise ChangeControlConflictError(
                     "managed decision must bind the exact stored request record"
@@ -1277,18 +1439,14 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
 
     def _read_inactive_manifest(
         self, manifest_id: str, *, aggregate_id: str, request_id: str
-    ) -> ManagedGenerationManifestBinding:
+    ) -> ManagedGenerationManifestBinding | ManagedGenerationManifestBindingV2:
         row = self.conn.execute(
             "SELECT * FROM change_control_generation_manifests WHERE manifest_id=?",
             (manifest_id,),
         ).fetchone()
         if row is None:
             raise ChangeControlCorruptionError("inactive managed generation manifest is absent")
-        manifest = _decode_model(
-            ManagedGenerationManifestBinding,
-            str(row["payload_json"]),
-            label="inactive managed generation manifest",
-        )
+        manifest = _decode_generation_manifest(str(row["payload_json"]))
         if not (
             str(row["manifest_id"]) == manifest.manifest_id
             and str(row["aggregate_id"]) == aggregate_id
@@ -1464,6 +1622,8 @@ __all__ = [
     "ManagedReviewAuthorityError",
     "ManagedReviewRepositoryResolver",
     "ManagedReviewStaleError",
+    "ManagedReviewWriteVersionError",
+    "ManagedRevisionEditDeferredError",
     "ManagedRevisionReviewStoreView",
     "ManagedRevisionStoreLifecycle",
     "SqliteManagedChangeControlStore",

@@ -1382,6 +1382,46 @@ class FilesystemInferenceEvidenceRepository:
                 cleanup_pending=True,
             )
 
+    def open_artifact(self, artifact: ManagedArtifactRef) -> bytes:
+        """Safely reopen one exact non-staging inference artifact receipt."""
+
+        if type(artifact) is not ManagedArtifactRef:
+            raise TypeError("inference artifact reopen requires an exact artifact reference")
+        parts = PurePosixPath(artifact.path).parts
+        if artifact.kind == ManagedArtifactKind.INFERENCE_INPUT:
+            allowed = (
+                len(parts) >= 3
+                and parts[0] == "inference"
+                and parts[1] in {"algorithms", "prompts", "schemas", "inputs", "citations"}
+            ) or parts[:3] == ("temporal", "evidence", "analyses")
+        elif artifact.kind == ManagedArtifactKind.INFERENCE_OUTPUT:
+            allowed = (
+                len(parts) >= 3
+                and parts[0] == "inference"
+                and parts[1] in {"raw", "outputs"}
+            )
+        elif artifact.kind == ManagedArtifactKind.INFERENCE_RECEIPT:
+            allowed = parts[:2] == ("receipts", "inference")
+        else:
+            allowed = False
+        if not allowed or parts[:2] == ("staging", "managed-review"):
+            raise InferenceEvidenceResolutionError(
+                "inference artifact reopen rejects non-evidence or staging paths"
+            )
+        with self._exclusive_lock():
+            payload = self._read_optional(
+                artifact.path,
+                limit=artifact.byte_count,
+                label="inference artifact",
+            )
+        if payload is None or len(payload) != artifact.byte_count or (
+            hashlib.sha256(payload).hexdigest() != artifact.sha256
+        ):
+            raise InferenceEvidenceResolutionError(
+                "inference artifact is absent or differs from its exact receipt"
+            )
+        return payload
+
     def _resolve_batch(
         self,
         *,
