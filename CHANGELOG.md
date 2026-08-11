@@ -27,9 +27,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   derives plans, no-change cards, byte-grounded citations, successor Markdown
   SourceNotes, claim reconciliation, paths, and hashes locally, commits all
   target outcomes as one existing evidence batch, and writes only create-only,
-  manifest-gated inert staging. Managed-review authority, publication,
-  activation, indexing, CLI integration, and LangGraph expansion remain
-  deferred.
+  manifest-gated inert staging. That evidence now feeds the SQLite-authoritative
+  managed-review and first-successor activation additions below; public CLI
+  integration and LangGraph expansion remain deferred.
+- SQLite-authoritative managed-review admission and decisions over the complete
+  revision-planning and staging evidence set. Every authority boundary freshly
+  reopens and reproduces the exact evidence, while managed `EDIT` execution
+  remains outside this slice.
+- A SQLite-only managed-generation path that rederives the complete
+  historical/current projection from the exact review decision, adopts the
+  governing source in place, publishes only approved downstream replacements
+  create-only, builds and seals an isolated exact index, atomically activates
+  one successor from generation zero, and reopens the active index fail-closed.
+  Exact retries and restart reconciliation reuse immutable effect, readiness,
+  and activation receipts; adoption-only activation creates no fake
+  publication events.
 
 - The first v0.3 document-intelligence vertical slice for clean digital PDFs:
   full-byte SHA-256 source identity, immutable content-addressed assets,
@@ -82,8 +94,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `affects:` links, actual four-item contradiction queue, current eval suite,
   and the 352 processed / 20 historical-no-output split.
 
-These are v0.3 foundation changes in progress; this entry does not claim a
-v0.3 release, tag, package publication, or deployment.
+The declared package version remains `0.2.0`. Everything in this Unreleased
+section is v0.3 work in progress: public application/operator commands,
+ordinary `search`/`ask` generation selection, targeted post-change regressions,
+final JSON/Markdown audit reports, managed `EDIT` execution, PostgreSQL
+managed-generation parity, the keyless change-control demo, and the v0.3
+release remain deferred. This entry does not claim a v0.3 release, tag, package
+publication, or deployment.
 
 ## [0.2.0] - 2026-07-22
 

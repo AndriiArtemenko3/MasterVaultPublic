@@ -6,7 +6,7 @@ import hashlib
 import os
 import sqlite3
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import replace
 from pathlib import Path
 from threading import Barrier
@@ -36,6 +36,7 @@ from mastervault.change_control.managed_generation import (
 from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepository,
     ManagedGenerationRepositoryError,
+    RepositoryVerifiedManagedGenerationEffects,
 )
 from mastervault.change_control.managed_review import (
     ManagedRevisionDisposition,
@@ -1349,6 +1350,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
 def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
     generation_seed: RealManagedV2Scenario,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scenario = clone_real_managed_v2_scenario(generation_seed, tmp_path / "scenario")
     try:
@@ -1371,38 +1373,95 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
             prefix="generation:concurrent:adoption",
             mode="adoption-only",
         )
-        race_timeout_seconds = 600.0
+
+        class PreparationComplete(RuntimeError):
+            pass
+
+        def prepare(
+            runtime: RealManagedV2Scenario,
+            *,
+            request_id: str,
+            operation_id: str,
+            generation_root: Path,
+        ) -> tuple[ManagedActivationCommand, RepositoryVerifiedManagedGenerationEffects]:
+            captured: list[
+                tuple[ManagedActivationCommand, RepositoryVerifiedManagedGenerationEffects]
+            ] = []
+
+            def capture_before_cas(
+                command: ManagedActivationCommand,
+                *,
+                capability: RepositoryVerifiedManagedGenerationEffects,
+                **_kwargs: object,
+            ) -> None:
+                captured.append((command, capability))
+                raise PreparationComplete
+
+            with monkeypatch.context() as preparation:
+                preparation.setattr(
+                    runtime.store,
+                    "activate_managed_generation",
+                    capture_before_cas,
+                )
+                with pytest.raises(PreparationComplete):
+                    _activate(
+                        runtime,
+                        request_id=request_id,
+                        operation_id=operation_id,
+                        generation_root=generation_root,
+                    )
+
+            assert len(captured) == 1
+            command, capability = captured[0]
+            state = runtime.store.get_managed_generation_activation(
+                operation_id,
+                resolver=runtime.resolver,
+                verified_bootstrap=runtime.verified_bootstrap,
+                prechange_head=runtime.prechange_head,
+            )
+            assert state is not None
+            assert state.intent.command == command
+            assert state.index_receipt is not None
+            assert state.activation_receipt is None
+            assert capability.publication_event_ids == tuple(
+                event.event_id for event in state.publication_events
+            )
+            assert capability.publication_event_sha256s == tuple(
+                event.event_sha256 for event in state.publication_events
+            )
+            assert capability.index_receipt_id == state.index_receipt.receipt_id
+            assert capability.index_receipt_sha256 == state.index_receipt.receipt_sha256
+            return command, capability
+
+        mixed_command, mixed_capability = prepare(
+            scenario,
+            request_id=mixed_request,
+            operation_id="generation:concurrent:mixed:activate",
+            generation_root=tmp_path / "mixed-generations",
+        )
+        adoption_command, adoption_capability = prepare(
+            alternative,
+            request_id=adoption_request,
+            operation_id="generation:concurrent:adoption:activate",
+            generation_root=tmp_path / "adoption-generations",
+        )
+
         barrier = Barrier(2)
 
         def activate(
             runtime: RealManagedV2Scenario,
-            request_id: str,
-            operation_id: str,
-            generation_root: Path,
+            command: ManagedActivationCommand,
+            capability: RepositoryVerifiedManagedGenerationEffects,
         ) -> str:
-            # Coverage makes the authoritative claim transaction slow enough that
-            # the default lock budget can expire before both actors reach the CAS
-            # barrier this test is intended to exercise.
-            store = SqliteManagedChangeControlStore(
-                runtime.authority_path,
-                timeout_seconds=race_timeout_seconds,
-            )
-
-            def synchronize(boundary: str) -> None:
-                if boundary == "before-authority-cas":
-                    barrier.wait(timeout=race_timeout_seconds)
-
+            store = SqliteManagedChangeControlStore(runtime.authority_path)
             try:
-                activate_reviewed_managed_generation(
-                    request_id=request_id,
-                    operation_id=operation_id,
-                    store=store,
+                barrier.wait(timeout=10.0)
+                store.activate_managed_generation(
+                    command,
+                    capability=capability,
                     resolver=runtime.resolver,
                     verified_bootstrap=runtime.verified_bootstrap,
                     prechange_head=runtime.prechange_head,
-                    generation_root=generation_root,
-                    embedder=MockEmbedding(8),
-                    failure_hook=synchronize,
                 )
                 return "activated"
             except ManagedGenerationActivationStaleError:
@@ -1411,27 +1470,45 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
                 store.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            outcomes = tuple(
-                future.result(timeout=900)
-                for future in (
-                    pool.submit(
-                        activate,
-                        scenario,
-                        mixed_request,
-                        "generation:concurrent:mixed:activate",
-                        tmp_path / "mixed-generations",
-                    ),
-                    pool.submit(
-                        activate,
-                        alternative,
-                        adoption_request,
-                        "generation:concurrent:adoption:activate",
-                        tmp_path / "adoption-generations",
-                    ),
-                )
+            futures = (
+                pool.submit(activate, scenario, mixed_command, mixed_capability),
+                pool.submit(activate, alternative, adoption_command, adoption_capability),
             )
+            _done, pending = wait(futures, timeout=120.0)
+            assert not pending, "authority-only CAS race exceeded its bounded wait"
+            outcomes = tuple(future.result() for future in futures)
 
         assert sorted(outcomes) == ["activated", "stale"]
+        candidates = (
+            (scenario, mixed_command, mixed_capability),
+            (alternative, adoption_command, adoption_capability),
+        )
+        winner = candidates[outcomes.index("activated")]
+        loser = candidates[outcomes.index("stale")]
+        winner_runtime, winner_command, _ = winner
+        loser_runtime, loser_command, _ = loser
+        winner_state = scenario.store.get_managed_generation_activation(
+            winner_command.operation_id,
+            resolver=winner_runtime.resolver,
+            verified_bootstrap=winner_runtime.verified_bootstrap,
+            prechange_head=winner_runtime.prechange_head,
+        )
+        assert winner_state is not None and winner_state.activation_receipt is not None
+        active = scenario.store.get_active_generation(
+            winner_command.expected_authority.aggregate_id,
+            verified_bootstrap=winner_runtime.verified_bootstrap,
+            prechange_head=winner_runtime.prechange_head,
+        )
+        assert active == winner_state.activation_receipt.activated_authority
+        assert active.active_generation.generation_id == winner_command.projection.generation_id
+
+        loser_state = scenario.store.get_managed_generation_activation(
+            loser_command.operation_id,
+            resolver=loser_runtime.resolver,
+            verified_bootstrap=loser_runtime.verified_bootstrap,
+            prechange_head=loser_runtime.prechange_head,
+        )
+        assert loser_state is not None and loser_state.activation_receipt is None
         assert (
             scenario.store.conn.execute(
                 "SELECT count(*) FROM change_control_generation_activation_receipts"
