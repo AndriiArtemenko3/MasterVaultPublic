@@ -392,24 +392,123 @@ def test_schema_v2_upgrades_to_v3_and_failed_upgrade_rolls_back(
     third = migrations / "003_managed_revision_review.sql"
     source = (_DEFAULT_MIGRATIONS_DIR / third.name).read_text(encoding="utf-8")
     third.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
+    with monkeypatch.context() as v3:
+        v3.setattr(store_module, "_SCHEMA_VERSION", 3)
+        broken = SqliteChangeControlStore(database, migrations)
+        with pytest.raises(sqlite3.Error):
+            broken.init_schema()
+        assert broken._read_meta()["schema_version"] == "2"  # type: ignore[index]
+        assert broken._user_tables() == store_module._V2_EXPECTED_TABLES
+        broken.close()
+
+    third.write_text(source, encoding="utf-8")
+    with monkeypatch.context() as v3:
+        v3.setattr(store_module, "_SCHEMA_VERSION", 3)
+        upgraded = SqliteChangeControlStore(database, migrations)
+        upgraded.init_schema()
+        assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
+        assert upgraded._user_tables() == store_module._V3_EXPECTED_TABLES
+        assert [
+            int(row[0])
+            for row in upgraded.conn.execute(
+                "SELECT version FROM change_control_schema_migrations ORDER BY version"
+            )
+        ] == [1, 2, 3]
+        upgraded.close()
+
+
+def test_schema_v3_upgrades_to_v4_and_failed_upgrade_rolls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    for name in (
+        "001_change_control_aggregate.sql",
+        "002_authoritative_human_review.sql",
+        "003_managed_revision_review.sql",
+    ):
+        shutil.copy(_DEFAULT_MIGRATIONS_DIR / name, migrations / name)
+    database = tmp_path / "state.sqlite3"
+    with monkeypatch.context() as v3:
+        v3.setattr(store_module, "_SCHEMA_VERSION", 3)
+        old = SqliteChangeControlStore(database, migrations)
+        old.init_schema()
+        with old.conn:
+            old.conn.execute(
+                "INSERT INTO change_control_aggregates VALUES (?, 1, 1, ?, ?)",
+                ("aggregate:migration-v3", "a" * 64, "2026-01-01T00:00:00Z"),
+            )
+            old.conn.execute(
+                "INSERT INTO change_control_generation_manifests VALUES "
+                "(?, ?, ?, 0, ?, 'generation-zero', 0, NULL, 1, ?, ?)",
+                (
+                    "manifest:migration-v3",
+                    "aggregate:migration-v3",
+                    "generation:migration-v3",
+                    "b" * 64,
+                    '{"fixture":"populated-v3"}',
+                    "2026-01-01T00:00:00Z",
+                ),
+            )
+            old.conn.execute(
+                "INSERT INTO change_control_active_generation VALUES "
+                "(?, ?, ?, 0, 'verified-seed-bootstrap', ?, 0, ?, ?, 1, ?, ?)",
+                (
+                    "aggregate:migration-v3",
+                    "operation:migration-v3",
+                    "authority:migration-v3",
+                    "generation:migration-v3",
+                    "b" * 64,
+                    "c" * 64,
+                    '{"fixture":"authority-v3"}',
+                    "2026-01-01T00:00:00Z",
+                ),
+            )
+        preserved_v3_rows = {
+            table: old.conn.execute(f"SELECT * FROM {table}").fetchall()
+            for table in (
+                "change_control_aggregates",
+                "change_control_generation_manifests",
+                "change_control_active_generation",
+            )
+        }
+        old.close()
+
+    fourth = migrations / "004_generation_publication_activation.sql"
+    source = (_DEFAULT_MIGRATIONS_DIR / fourth.name).read_text(encoding="utf-8")
+    fourth.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
     broken = SqliteChangeControlStore(database, migrations)
     with pytest.raises(sqlite3.Error):
         broken.init_schema()
-    assert broken._read_meta()["schema_version"] == "2"  # type: ignore[index]
-    assert broken._user_tables() == store_module._V2_EXPECTED_TABLES
+    assert broken._read_meta()["schema_version"] == "3"  # type: ignore[index]
+    assert broken._user_tables() == store_module._V3_EXPECTED_TABLES
+    assert {
+        table: broken.conn.execute(f"SELECT * FROM {table}").fetchall()
+        for table in preserved_v3_rows
+    } == preserved_v3_rows
+    assert (
+        broken.conn.execute(
+            "SELECT count(*) FROM change_control_schema_migrations WHERE version=4"
+        ).fetchone()[0]
+        == 0
+    )
     broken.close()
 
-    third.write_text(source, encoding="utf-8")
+    fourth.write_text(source, encoding="utf-8")
     upgraded = SqliteChangeControlStore(database, migrations)
     upgraded.init_schema()
-    assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
+    assert upgraded._read_meta()["schema_version"] == "4"  # type: ignore[index]
     assert upgraded._user_tables() == store_module._EXPECTED_TABLES
+    assert {
+        table: upgraded.conn.execute(f"SELECT * FROM {table}").fetchall()
+        for table in preserved_v3_rows
+    } == preserved_v3_rows
     assert [
         int(row[0])
         for row in upgraded.conn.execute(
             "SELECT version FROM change_control_schema_migrations ORDER BY version"
         )
-    ] == [1, 2, 3]
+    ] == [1, 2, 3, 4]
     upgraded.close()
 
 
@@ -692,9 +791,9 @@ def _no_change_scenario(path: Path) -> _Scenario:
         validated_output=output_artifact,
     )
     workload_sha = hashlib.sha256(b"managed-store-revision-workload").hexdigest()
-    execution_id = "inference-exec:" + hashlib.sha256(
-        b"managed-store-revision-execution"
-    ).hexdigest()
+    execution_id = (
+        "inference-exec:" + hashlib.sha256(b"managed-store-revision-execution").hexdigest()
+    )
     outcome_sha = hashlib.sha256(b"managed-store-revision-outcome").hexdigest()
     receipt_artifact = card.inference_receipt.artifact_ref()
     admission_target = ManagedRevisionPlanningTargetBinding(
@@ -711,12 +810,12 @@ def _no_change_scenario(path: Path) -> _Scenario:
         subject_kind="no-change-impact-card",
         subject_id=card.card_id,
         subject_sha256=card.card_sha256,
-        staged_artifacts=tuple(sorted((input_artifact, output_artifact), key=lambda item: item.artifact_id)),
+        staged_artifacts=tuple(
+            sorted((input_artifact, output_artifact), key=lambda item: item.artifact_id)
+        ),
     )
     manifest_sha = hashlib.sha256(b"managed-store-staging-manifest").hexdigest()
-    manifest_path = (
-        f"staging/managed-review/{legacy_run.run_id}/manifests/{manifest_sha}.json"
-    )
+    manifest_path = f"staging/managed-review/{legacy_run.run_id}/manifests/{manifest_sha}.json"
     completion_path = f"staging/managed-review/{legacy_run.run_id}/COMPLETE.json"
     completion_sha = hashlib.sha256(
         canonical_json_bytes(
@@ -1470,12 +1569,11 @@ def _rebind_scenario_impact_subjects(
     revision_members: list[ManagedRevisionPlanningBatchMemberBinding] = []
     revision_targets: list[ManagedRevisionPlanningTargetBinding] = []
     for subject in rebound:
-        execution_id = "inference-exec:" + hashlib.sha256(
-            f"revision-execution:{subject.target_key}".encode()
-        ).hexdigest()
-        outcome_sha = hashlib.sha256(
-            f"revision-outcome:{subject.target_key}".encode()
-        ).hexdigest()
+        execution_id = (
+            "inference-exec:"
+            + hashlib.sha256(f"revision-execution:{subject.target_key}".encode()).hexdigest()
+        )
+        outcome_sha = hashlib.sha256(f"revision-outcome:{subject.target_key}".encode()).hexdigest()
         receipt_artifact = subject.inference_receipt.artifact_ref()
         revision_members.append(
             ManagedRevisionPlanningBatchMemberBinding(
@@ -1576,9 +1674,7 @@ def _rebind_scenario_impact_subjects(
         temporal_prerequisite=scenario.bundle.temporal_prerequisite,
         targets=tuple(ManagedRevisionReviewTarget.create(item) for item in rebound),
     )
-    projection_ids = {
-        item.predecessor_projection.projection_id for item in rebound
-    } | {
+    projection_ids = {item.predecessor_projection.projection_id for item in rebound} | {
         item.successor_projection.projection_id
         for item in rebound
         if isinstance(item, ManagedRevisionPlan)
@@ -1651,9 +1747,7 @@ def test_open_request_becomes_stale_but_exact_replay_survives_fresh_connection(
     reopened.close()
 
 
-@pytest.mark.parametrize(
-    "failure", ("impact", "contract", "manifest", "missing", "tampered")
-)
+@pytest.mark.parametrize("failure", ("impact", "contract", "manifest", "missing", "tampered"))
 def test_repository_resolution_failure_creates_no_managed_review_rows(
     tmp_path: Path, failure: str
 ) -> None:
@@ -2064,9 +2158,7 @@ def _multi_target_scenario(path: Path) -> _Scenario:
         (scenario.bundle.targets[0].subject, additional),
         ("AFFECTED", "NO_CHANGE_REQUIRED"),
         request_operation_id="managed-store:multi-target-request",
-        request_rationale=(
-            "Review the activating plan and explicit no-change result atomically."
-        ),
+        request_rationale=("Review the activating plan and explicit no-change result atomically."),
     )
 
 
@@ -2353,9 +2445,7 @@ def test_persisted_overlay_storage_envelope_and_decision_nested_manifest_fail_cl
         if nested_schema_version is None:
             del payload["command"]["generation_manifest"]["schema_version"]
         else:
-            payload["command"]["generation_manifest"]["schema_version"] = (
-                nested_schema_version
-            )
+            payload["command"]["generation_manifest"]["schema_version"] = nested_schema_version
         with scenario.store.conn:
             scenario.store.conn.execute(
                 "UPDATE change_control_managed_review_decisions SET payload_json=?",
@@ -2732,9 +2822,12 @@ def test_valid_edit_decision_is_rejected_before_resolver_transaction_or_replay(
 ) -> None:
     scenario = _activating_scenario(tmp_path / "state.sqlite3")
     command = _edited_decision_command(scenario)
-    assert scenario.store.conn.execute(
-        "SELECT count(*) FROM change_control_managed_review_decisions"
-    ).fetchone()[0] == 0
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_decisions"
+        ).fetchone()[0]
+        == 0
+    )
     with pytest.raises(ManagedRevisionEditDeferredError):
         scenario.store.decide_managed_review(
             command,
@@ -2742,12 +2835,17 @@ def test_valid_edit_decision_is_rejected_before_resolver_transaction_or_replay(
             verified_bootstrap=scenario.bootstrap.verification_capability,
             prechange_head=scenario.prechange_head,
         )
-    assert scenario.store.conn.execute(
-        "SELECT count(*) FROM change_control_managed_review_decisions"
-    ).fetchone()[0] == 0
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_decisions"
+        ).fetchone()[0]
+        == 0
+    )
 
     with monkeypatch.context() as prior_writer:
-        prior_writer.setattr(managed_store_module, "_reject_deferred_managed_edits", lambda value: None)
+        prior_writer.setattr(
+            managed_store_module, "_reject_deferred_managed_edits", lambda value: None
+        )
         prior_writer.setattr(
             SqliteManagedChangeControlStore,
             "_resolve_contract_and_artifacts",
@@ -2766,10 +2864,16 @@ def test_valid_edit_decision_is_rejected_before_resolver_transaction_or_replay(
             verified_bootstrap=scenario.bootstrap.verification_capability,
             prechange_head=scenario.prechange_head,
         )
-    assert scenario.store.conn.execute(
-        "SELECT count(*) FROM change_control_managed_review_decisions"
-    ).fetchone()[0] == 1
-    assert scenario.store.conn.execute(
-        "SELECT count(*) FROM change_control_managed_review_decision_delivery_receipts"
-    ).fetchone()[0] == 1
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_decisions"
+        ).fetchone()[0]
+        == 1
+    )
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_decision_delivery_receipts"
+        ).fetchone()[0]
+        == 1
+    )
     scenario.store.close()

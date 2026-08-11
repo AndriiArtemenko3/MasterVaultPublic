@@ -14,6 +14,7 @@ from mastervault.change_control._repository_files import (
 from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
 from mastervault.change_control.bootstrap import incoming_claim_evidence_sha256
 from mastervault.change_control.claim_scopes import claim_scopes_v1
+from mastervault.change_control.dependency_analysis import SourceNoteInventory
 from mastervault.change_control.impact_analysis import ImpactInferenceShard
 from mastervault.change_control.impact_results import ImpactDecision, ImpactOutputShardRef
 from mastervault.change_control.incoming import (
@@ -57,6 +58,7 @@ from mastervault.change_control.recorded_inference import (
     RecordedInferenceTask,
 )
 from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
+from mastervault.change_control.store import ChangeControlSnapshot
 from mastervault.models import content_hash
 
 _PROCESSED_PREFIX = PurePosixPath("datasets/larkstead/processed")
@@ -170,8 +172,7 @@ def derive_managed_governing_source_adoption(
         or incoming.event_identity != exact_bootstrap.incoming_event_identity
         or incoming.manifest_sha256 != exact_bootstrap.incoming_manifest_sha256
         or incoming.alignment_attestation_id != exact_bootstrap.alignment_attestation_id
-        or incoming.alignment_attestation_sha256
-        != exact_bootstrap.alignment_attestation_sha256
+        or incoming.alignment_attestation_sha256 != exact_bootstrap.alignment_attestation_sha256
         or incoming.alignment_policy_version != exact_bootstrap.alignment_policy_version
         or incoming.alignment_payload_sha256 != exact_bootstrap.alignment_payload_sha256
         or incoming_claim_evidence_sha256(incoming)
@@ -242,6 +243,16 @@ class ApprovedManagedGoverningSourceAuthority:
         self.reviewed_snapshot.verify()
 
 
+@dataclass(frozen=True)
+class ResolvedReviewedGenerationSource:
+    """Freshly verified reviewed aggregate, SourceNotes, and provenance root."""
+
+    adoption: ManagedGoverningSourceAdoptionBinding
+    snapshot: ChangeControlSnapshot
+    inventory: SourceNoteInventory
+    workspace_root: Path
+
+
 def _batch_member_identities(
     outcomes: tuple[RecordedInferenceOutcome, ...],
 ) -> tuple[tuple[str, str, str], ...]:
@@ -250,9 +261,7 @@ def _batch_member_identities(
             (
                 item.execution.execution_id,
                 item.execution.receipt_artifact.artifact_id,
-                hashlib.sha256(
-                    canonical_json_bytes(item.model_dump(mode="json"))
-                ).hexdigest(),
+                hashlib.sha256(canonical_json_bytes(item.model_dump(mode="json"))).hexdigest(),
             )
             for item in outcomes
         )
@@ -415,6 +424,36 @@ class RepositoryBackedManagedReviewResolver:
             evidence_repository_id=binding.evidence_repository_id,
         )
 
+    def resolve_reviewed_generation_source(
+        self, binding: ManagedGoverningSourceAdoptionBinding
+    ) -> ResolvedReviewedGenerationSource:
+        """Reopen the exact complete rev4 inventory behind one adoption."""
+
+        reopened = self.resolve_governing_source_adoption(binding)
+        configured = self._governing_sources.get(binding.adoption_id)
+        if configured is None or reopened != configured.adoption:
+            raise ValueError("governing source lacks exact reviewed generation authority")
+        reviewed = configured.reviewed_snapshot.verify()
+        inventory = reviewed.source_note_capability.verify(snapshot=reviewed.snapshot)
+        if (
+            inventory.inventory_sha256 != binding.reviewed_inventory_sha256
+            or inventory.aggregate_id != binding.reviewed_head.aggregate_id
+            or inventory.snapshot_revision != binding.reviewed_head.revision
+            or inventory.aggregate_sha256 != binding.reviewed_head.aggregate_sha256
+        ):
+            raise ValueError("reviewed generation inventory differs from adoption authority")
+        return ResolvedReviewedGenerationSource(
+            adoption=reopened,
+            snapshot=reviewed.snapshot,
+            inventory=inventory,
+            workspace_root=self._canonical_root,
+        )
+
+    def protected_generation_roots(self) -> tuple[Path, ...]:
+        """Roots that a managed-generation effect repository must never overlap."""
+
+        return tuple(sorted({self._canonical_root, self._evidence.root}, key=str))
+
     def resolve_impact_analysis_evidence(
         self, binding: ManagedImpactAnalysisEvidenceBinding
     ) -> ManagedImpactAnalysisEvidenceBinding:
@@ -484,8 +523,7 @@ class RepositoryBackedManagedReviewResolver:
                 or shard.shard_sha256 != envelope.input_shard_sha256
                 or output.input_shard_id != shard.shard_id
                 or output.input_shard_sha256 != shard.shard_sha256
-                or output.document_version_id
-                != shard.target_note.document.document_version_id
+                or output.document_version_id != shard.target_note.document.document_version_id
             ):
                 raise ValueError("impact output differs from its exact reopened input shard")
             questions = {item.question_id: item for item in shard.questions}
@@ -512,9 +550,7 @@ class RepositoryBackedManagedReviewResolver:
                     dependency_context_ids=decision.dependency_context_ids,
                 )
                 if reconstructed != decision:
-                    raise ValueError(
-                        "impact decision differs from exact input/span reconstruction"
-                    )
+                    raise ValueError("impact decision differs from exact input/span reconstruction")
             note = shard.target_note
             for question_id in sorted(questions):
                 raw_decision = raw_decisions[question_id]
@@ -539,9 +575,7 @@ class RepositoryBackedManagedReviewResolver:
                     dependency_context_ids=raw_decision.dependency_context_ids,
                 )
                 if reconstructed_from_raw != decisions_by_question[question_id]:
-                    raise ValueError(
-                        "impact typed decision differs from exact raw provider output"
-                    )
+                    raise ValueError("impact typed decision differs from exact raw provider output")
             outputs.append(
                 ManagedImpactOutputRefBinding(
                     document_version_id=output.document_version_id,
@@ -636,11 +670,7 @@ class RepositoryBackedManagedReviewResolver:
                 raise ValueError("inference-input artifact uses an unsupported evidence root")
             return self._evidence.open_artifact(artifact)
         elif artifact.kind == ManagedArtifactKind.INFERENCE_OUTPUT:
-            if not (
-                len(parts) >= 3
-                and parts[0] == "inference"
-                and parts[1] in {"raw", "outputs"}
-            ):
+            if not (len(parts) >= 3 and parts[0] == "inference" and parts[1] in {"raw", "outputs"}):
                 raise ValueError("inference-output artifact uses an unsupported evidence root")
             return self._evidence.open_artifact(artifact)
         elif artifact.kind == ManagedArtifactKind.INFERENCE_RECEIPT:
@@ -743,9 +773,8 @@ class RepositoryBackedManagedReviewResolver:
         except UnicodeDecodeError as exc:
             raise ValueError("managed projection raw source must be UTF-8") from exc
         note = parse_managed_source_note(note_bytes)
-        if (
-            note.provenance != projection.canonical_raw_path
-            or note.provenance_hash != content_hash(raw_text)
+        if note.provenance != projection.canonical_raw_path or note.provenance_hash != content_hash(
+            raw_text
         ):
             raise ValueError("SourceNote provenance differs from exact projected raw bytes")
         note_claims = {item.id: item for item in note.key_claims}
@@ -768,9 +797,7 @@ class RepositoryBackedManagedReviewResolver:
                 "source_note_schema_sha256": MANAGED_SOURCE_NOTE_SCHEMA_SHA256,
                 "raw": projection.raw_artifact.model_dump(mode="json"),
                 "note": projection.note_artifact.model_dump(mode="json"),
-                "claims": [
-                    item.model_dump(mode="json") for item in projection.projected_claims
-                ],
+                "claims": [item.model_dump(mode="json") for item in projection.projected_claims],
             }
         )
         result_sha256 = hashlib.sha256(report).hexdigest()
@@ -804,8 +831,7 @@ class RepositoryBackedManagedReviewResolver:
             for item in plan.predecessor_projection.projected_claims
         }
         successor_by_key = {
-            item.source.source_claim_id: item
-            for item in plan.successor_projection.projected_claims
+            item.source.source_claim_id: item for item in plan.successor_projection.projected_claims
         }
         if (
             len(predecessor_by_key) != len(plan.predecessor_projection.projected_claims)
@@ -867,5 +893,6 @@ __all__ = [
     "ApprovedManagedGoverningSourceAuthority",
     "ApprovedManagedInferenceContractAuthority",
     "RepositoryBackedManagedReviewResolver",
+    "ResolvedReviewedGenerationSource",
     "derive_managed_governing_source_adoption",
 ]

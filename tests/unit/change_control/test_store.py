@@ -1724,25 +1724,27 @@ def test_schema_v1_upgrades_to_v3_preserving_aggregate_and_receipt(
         _DEFAULT_MIGRATIONS_DIR / "003_managed_revision_review.sql",
         migrations / "003_managed_revision_review.sql",
     )
-    upgraded = SqliteChangeControlStore(path, migrations)
-    upgraded.init_schema()
-    snapshot = upgraded.load("workspace")
-    assert snapshot is not None and snapshot.aggregate == aggregate
-    assert snapshot.revision == committed.revision == 1
-    assert [
-        int(row[0])
-        for row in upgraded.conn.execute(
-            "SELECT version FROM change_control_schema_migrations ORDER BY version"
+    with monkeypatch.context() as v3_schema:
+        v3_schema.setattr(store_module, "_SCHEMA_VERSION", 3)
+        upgraded = SqliteChangeControlStore(path, migrations)
+        upgraded.init_schema()
+        snapshot = upgraded.load("workspace")
+        assert snapshot is not None and snapshot.aggregate == aggregate
+        assert snapshot.revision == committed.revision == 1
+        assert [
+            int(row[0])
+            for row in upgraded.conn.execute(
+                "SELECT version FROM change_control_schema_migrations ORDER BY version"
+            )
+        ] == [1, 2, 3]
+        assert (
+            upgraded.conn.execute(
+                "SELECT count(*) FROM change_control_operations WHERE operation_id='v1-receipt'"
+            ).fetchone()[0]
+            == 1
         )
-    ] == [1, 2, 3]
-    assert (
-        upgraded.conn.execute(
-            "SELECT count(*) FROM change_control_operations WHERE operation_id='v1-receipt'"
-        ).fetchone()[0]
-        == 1
-    )
-    assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
-    upgraded.close()
+        assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
+        upgraded.close()
 
 
 def test_failed_v1_to_v2_upgrade_rolls_back_and_is_retryable(
@@ -1839,23 +1841,25 @@ def test_schema_v2_review_history_upgrades_to_v3_without_rewriting_authority(
         _DEFAULT_MIGRATIONS_DIR / "003_managed_revision_review.sql",
         migrations / "003_managed_revision_review.sql",
     )
-    upgraded = SqliteChangeControlStore(path, migrations)
-    upgraded.init_schema()
-    snapshot = upgraded.load(expected_aggregate.aggregate_id)
-    view = upgraded.get_review_request(request_id)
-    assert snapshot is not None and snapshot.aggregate == expected_aggregate
-    assert snapshot.revision == expected_decision.aggregate_revision == 2
-    assert view.lifecycle == ReviewLifecycle.DECIDED
-    assert view.decision == expected_decision.decision
-    assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
-    assert upgraded._user_tables() == store_module._EXPECTED_TABLES
-    assert [
-        int(row[0])
-        for row in upgraded.conn.execute(
-            "SELECT version FROM change_control_schema_migrations ORDER BY version"
-        )
-    ] == [1, 2, 3]
-    upgraded.close()
+    with monkeypatch.context() as v3_schema:
+        v3_schema.setattr(store_module, "_SCHEMA_VERSION", 3)
+        upgraded = SqliteChangeControlStore(path, migrations)
+        upgraded.init_schema()
+        snapshot = upgraded.load(expected_aggregate.aggregate_id)
+        view = upgraded.get_review_request(request_id)
+        assert snapshot is not None and snapshot.aggregate == expected_aggregate
+        assert snapshot.revision == expected_decision.aggregate_revision == 2
+        assert view.lifecycle == ReviewLifecycle.DECIDED
+        assert view.decision == expected_decision.decision
+        assert upgraded._read_meta()["schema_version"] == "3"  # type: ignore[index]
+        assert upgraded._user_tables() == store_module._V3_EXPECTED_TABLES
+        assert [
+            int(row[0])
+            for row in upgraded.conn.execute(
+                "SELECT version FROM change_control_schema_migrations ORDER BY version"
+            )
+        ] == [1, 2, 3]
+        upgraded.close()
 
 
 def test_failed_schema_003_rolls_back_to_populated_v2_and_retries(
@@ -1876,43 +1880,47 @@ def test_failed_schema_003_rolls_back_to_populated_v2_and_retries(
     source = (_DEFAULT_MIGRATIONS_DIR / third.name).read_text(encoding="utf-8")
     third.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
 
-    broken = SqliteChangeControlStore(path, migrations)
-    with pytest.raises(sqlite3.Error):
-        broken.init_schema()
-    assert broken._read_meta()["schema_version"] == "2"  # type: ignore[index]
-    assert broken._user_tables() == store_module._V2_EXPECTED_TABLES
-    assert (
-        broken.conn.execute(
-            "SELECT count(*) FROM change_control_review_requests WHERE request_id=?",
-            (request_id,),
-        ).fetchone()[0]
-        == 1
-    )
-    assert (
-        broken.conn.execute(
-            "SELECT count(*) FROM change_control_review_decisions WHERE request_id=?",
-            (request_id,),
-        ).fetchone()[0]
-        == 1
-    )
-    assert (
-        broken.conn.execute(
-            "SELECT count(*) FROM change_control_schema_migrations WHERE version=3"
-        ).fetchone()[0]
-        == 0
-    )
-    broken.close()
+    with monkeypatch.context() as v3_schema:
+        v3_schema.setattr(store_module, "_SCHEMA_VERSION", 3)
+        broken = SqliteChangeControlStore(path, migrations)
+        with pytest.raises(sqlite3.Error):
+            broken.init_schema()
+        assert broken._read_meta()["schema_version"] == "2"  # type: ignore[index]
+        assert broken._user_tables() == store_module._V2_EXPECTED_TABLES
+        assert (
+            broken.conn.execute(
+                "SELECT count(*) FROM change_control_review_requests WHERE request_id=?",
+                (request_id,),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            broken.conn.execute(
+                "SELECT count(*) FROM change_control_review_decisions WHERE request_id=?",
+                (request_id,),
+            ).fetchone()[0]
+            == 1
+        )
+        assert (
+            broken.conn.execute(
+                "SELECT count(*) FROM change_control_schema_migrations WHERE version=3"
+            ).fetchone()[0]
+            == 0
+        )
+        broken.close()
 
     third.write_text(source, encoding="utf-8")
-    recovered = SqliteChangeControlStore(path, migrations)
-    recovered.init_schema()
-    snapshot = recovered.load(expected_aggregate.aggregate_id)
-    view = recovered.get_review_request(request_id)
-    assert snapshot is not None and snapshot.aggregate == expected_aggregate
-    assert view.lifecycle == ReviewLifecycle.DECIDED
-    assert view.decision == expected_decision.decision
-    assert recovered._read_meta()["schema_version"] == "3"  # type: ignore[index]
-    recovered.close()
+    with monkeypatch.context() as v3_schema:
+        v3_schema.setattr(store_module, "_SCHEMA_VERSION", 3)
+        recovered = SqliteChangeControlStore(path, migrations)
+        recovered.init_schema()
+        snapshot = recovered.load(expected_aggregate.aggregate_id)
+        view = recovered.get_review_request(request_id)
+        assert snapshot is not None and snapshot.aggregate == expected_aggregate
+        assert view.lifecycle == ReviewLifecycle.DECIDED
+        assert view.decision == expected_decision.decision
+        assert recovered._read_meta()["schema_version"] == "3"  # type: ignore[index]
+        recovered.close()
 
 
 def test_lost_ack_after_commit_replays_once_from_a_fresh_connection(tmp_path: Path) -> None:

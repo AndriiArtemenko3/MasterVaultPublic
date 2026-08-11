@@ -21,7 +21,6 @@ from mastervault.change_control._repository_files import (
     RepositoryFileBoundaryError,
     RepositoryFileIntegrityError,
     canonical_repo_relative,
-    read_repository_file,
     verified_repository_root,
 )
 from mastervault.change_control.managed_review import (
@@ -373,6 +372,16 @@ class FilesystemInferenceEvidenceRepository:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         current = os.open(self._verified_root(), flags)
         try:
+            root_info = os.fstat(current)
+            if (
+                not stat.S_ISDIR(root_info.st_mode)
+                or (root_info.st_dev, root_info.st_ino) != self._root_signature
+                or root_info.st_uid != os.getuid()
+                or root_info.st_mode & 0o077
+            ):
+                raise InferenceEvidenceRepositoryError(
+                    "evidence repository root changed while opening its exact descriptor"
+                )
             for part in parts[:-1]:
                 names = os.listdir(current)
                 if part not in names:
@@ -402,6 +411,8 @@ class FilesystemInferenceEvidenceRepository:
             raise
 
     def _read_optional(self, relative: str, *, limit: int, label: str) -> bytes | None:
+        parent = -1
+        fd = -1
         try:
             parent, name = self._open_parent(relative, create=False)
         except FileNotFoundError:
@@ -415,15 +426,75 @@ class FilesystemInferenceEvidenceRepository:
                         f"{label} path does not use exact repository case: {relative}"
                     )
                 return None
+            flags = (
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            fd = os.open(name, flags, dir_fd=parent)
+            before = os.fstat(fd)
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+
+            def signature(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+                return (
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_mode,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    info.st_ctime_ns,
+                    info.st_nlink,
+                )
+
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or not stat.S_ISREG(current.st_mode)
+                or before.st_uid != os.getuid()
+                or current.st_uid != os.getuid()
+                or before.st_nlink != 1
+                or current.st_nlink != 1
+                or signature(before) != signature(current)
+                or before.st_size > limit
+            ):
+                raise RepositoryFileIntegrityError(
+                    f"{label} is not one exact regular inode"
+                )
+
+            def exact_read() -> bytes:
+                content = bytearray()
+                offset = 0
+                while offset < before.st_size:
+                    block = os.pread(fd, min(1024 * 1024, before.st_size - offset), offset)
+                    if not block:
+                        break
+                    content.extend(block)
+                    offset += len(block)
+                return bytes(content)
+
+            data = exact_read()
+            first_finished = os.fstat(fd)
+            confirmed = exact_read()
+            finished = os.fstat(fd)
+            current_after = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            expected = signature(before)
+            if (
+                data != confirmed
+                or len(data) != before.st_size
+                or signature(first_finished) != expected
+                or signature(finished) != expected
+                or signature(current_after) != expected
+            ):
+                raise RepositoryFileIntegrityError(f"{label} changed during its exact read")
+            return data
+        except (RepositoryFileBoundaryError, RepositoryFileIntegrityError):
+            raise
+        except OSError as exc:
+            raise RepositoryFileIntegrityError(f"cannot read {label}: {relative}") from exc
         finally:
-            os.close(parent)
-        _, data = read_repository_file(
-            repo_root=self._verified_root(),
-            relative=relative,
-            limit=limit,
-            label=label,
-        )
-        return data
+            if fd >= 0:
+                os.close(fd)
+            if parent >= 0:
+                os.close(parent)
 
     def _cleanup_pending_create_only_files(self, directory_fd: int, *, label: str) -> None:
         pending: list[tuple[str, tuple[int, int, int]]] = []

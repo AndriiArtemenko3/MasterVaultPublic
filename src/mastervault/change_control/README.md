@@ -10,11 +10,12 @@ knowledge-change workflow.
 - `store.py` owns the dedicated, transactional SQLite aggregate store at the
   caller-selected change-control path. It never writes the rebuildable search
   index database.
-- `managed_store.py` adds ADR 0009's PR-A-only generation-zero and managed
-  review authority as a typed subclass over that same database. It stores
+- `managed_store.py` adds ADR 0009's generation-zero and managed review
+  authority as a typed subclass over that same database. It stores
   immutable bundles, normalized targets, requests, decisions, append-only
-  delivery receipts, and successor manifests created inactive without
-  publishing files, advancing authority, or touching the serving index.
+  delivery receipts, successor manifests created inactive, and ADR 0015's
+  activation intents, exact effect receipts, bounded authority-chain
+  reconstruction, and atomic active-generation CAS.
   Repository bytes,
   approved inference contracts, patch reconstruction, and SourceNote
   projection validation cross an injected `ManagedReviewRepositoryResolver`;
@@ -232,6 +233,37 @@ knowledge-change workflow.
   Impact spans, citations, patches, projections, and the complete successor
   SourceNote rendering are independently reproduced before the store may
   accept v2 review authority.
+- `managed_generation.py` owns the pure ADR 0015 projection and receipt
+  contracts. It rederives one complete historical/current SourceNote
+  generation from the exact managed decision and reviewed inventory, while
+  limiting the serving projection to resolved `CURRENT` entries. Governing
+  source adoption stays in place, and only approved downstream successors form
+  the publication delta.
+- `managed_generation_repository.py` owns the private, dedicated generation
+  root. It publishes downstream SourceNotes create-only, builds one isolated
+  SQLite index from an explicit closed inventory, records a durable
+  input-bound completion marker, writes a create-only readiness receipt last,
+  and verifies both the physical database hash and deterministic logical
+  contents. The index is built in memory, serialized through a pinned
+  no-follow inode, sealed owner-read-only, and reopened on that exact descriptor;
+  the serving backend retains its file and parent guards until close. Unsealed
+  retries force-reproject and re-embed the complete inventory; sealed retries
+  never mint replacement readiness.
+  Repository-minted process-local effect
+  capabilities reopen exact bytes before the authority store may record or
+  activate them; self-hashed receipt objects are not sufficient authority.
+- `managed_activation_service.py` is the synchronous restart reconciler. It
+  commits one exact intent, completes or reopens immutable publications and an
+  idempotent index build, freshly revalidates the reviewed projection, and
+  asks SQLite to atomically advance authority. A rejected v1 decision is a
+  no-op; an adoption-only v2 decision activates without fake publications.
+  PR15 supports exactly one managed successor from generation zero; service,
+  store, and repository boundaries reject a second operator event before
+  effects until prior-generation merge semantics are implemented.
+- `managed_serving.py` opens only the exact active managed SQLite generation.
+  It reopens authority, decision, projection, publications, and index evidence,
+  returns an immutable query-only backend, and rereads authority before
+  returning. Missing, corrupt, substituted, or mismatched state fails closed.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -389,16 +421,16 @@ multi-process or production-scaling claim.
 
 The current managed-review slice now executes and durably replays actual-impact
 and revision-planning inference, reopens the exact reviewed incoming governing
-source, and uses a synchronous LangGraph wait/reconciliation seam around the
-authoritative SQLite review decision. An accepted v2 review authorizes one
-inactive `content-addressed-overlay-v2` manifest: it adopts the reviewed source
-at its original immutable raw/SourceNote paths and adds only approved
-downstream replacements to the publication delta. The workflow checkpoint is
-still disposable and cannot create review, publication, or activation
-authority.
+source, obtains an authoritative SQLite review decision, publishes only its
+approved downstream replacements, builds an isolated exact SQLite index, and
+atomically activates the corresponding complete generation. An accepted v2
+review adopts the governing source at its original immutable raw/SourceNote
+paths; adoption-only activation therefore creates no fake publication events.
+The synchronous LangGraph wait/reconciliation checkpoint remains disposable
+and cannot create review, publication, index, or activation authority.
 
 Deliberately deferred: concrete hosted/local provider adapters and model
-dependencies, background workers, publication and recovery execution,
-active-generation CAS, serving-index build/switch and targeted post-activation
-regressions, final audit reporting, operator review UI/CLI integration,
-PostgreSQL change-control persistence, the public v0.3 release, and deployment.
+dependencies, background workers, targeted post-activation regressions, final
+JSON/Markdown audit reporting, operator review UI/CLI integration, managed
+`EDIT` execution, PostgreSQL managed-generation parity, retention/cleanup, the
+public v0.3 release, and deployment.

@@ -29,9 +29,10 @@ env:
   COVERAGE_FLOOR: "82"
 
 jobs:
-  test:
-    name: lint + types + tests (sqlite)
+  quality:
+    name: lint + types + deterministic gates
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -59,31 +60,176 @@ jobs:
       - name: Deterministic PDF fixture gate
         run: uv run python datasets/larkstead/qa/generate_pdf_fixtures.py --check
 
-      # Split so a failure names its tier in the CI log instead of hiding in one
-      # 500-test run. --cov-append accumulates across the tiers; the floor is
-      # asserted once at the end, over the union.
-      - name: Unit tests
-        run: uv run pytest -q tests/unit --cov --cov-report= --junitxml=junit-unit.xml
+  sqlite_unit:
+    name: sqlite unit (${{ matrix.id }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: generation-a
+            pytest_args: >-
+              tests/unit/change_control/test_managed_generation_activation.py
+              -m generation_activation_a
+          - id: generation-b
+            pytest_args: >-
+              tests/unit/change_control/test_managed_generation_activation.py
+              -m generation_activation_b
+          - id: generation-c
+            pytest_args: >-
+              tests/unit/change_control/test_managed_generation_activation.py
+              -m generation_activation_c
+          - id: generation-d
+            pytest_args: >-
+              tests/unit/change_control/test_managed_generation_activation.py
+              -m generation_activation_d
+          - id: managed-admission
+            pytest_args: tests/unit/change_control/test_managed_revision_admission.py
+          - id: managed-review
+            pytest_args: tests/unit/change_control/test_managed_review_service.py
+          - id: managed-workflow
+            pytest_args: tests/unit/change_control/test_managed_workflow.py
+          - id: remainder
+            pytest_args: >-
+              tests/unit
+              --ignore=tests/unit/change_control/test_managed_generation_activation.py
+              --ignore=tests/unit/change_control/test_managed_revision_admission.py
+              --ignore=tests/unit/change_control/test_managed_review_service.py
+              --ignore=tests/unit/change_control/test_managed_workflow.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install (with dev + rerank extras; no optional PDF models)
+        run: uv sync --extra dev --extra rerank
+
+      - name: Unit tests (${{ matrix.id }})
+        env:
+          COVERAGE_FILE: .coverage.${{ matrix.id }}
+        run: >-
+          uv run pytest -q ${{ matrix.pytest_args }}
+          --cov --cov-report=
+          --junitxml=junit-${{ matrix.id }}.xml
+
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          # Keep attempts disjoint: a partial rerun must not silently combine
+          # fresh shard data with evidence left by an earlier attempt.
+          name: sqlite-unit-${{ matrix.id }}-attempt-${{ github.run_attempt }}
+          path: |
+            junit-${{ matrix.id }}.xml
+            .coverage.${{ matrix.id }}
+          include-hidden-files: true
+          if-no-files-found: error
+
+  sqlite_integration:
+    name: sqlite integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install (with dev + rerank extras; no optional PDF models)
+        run: uv sync --extra dev --extra rerank
 
       - name: Integration tests (sqlite backend)
-        run: uv run pytest -q tests/integration --cov --cov-append --cov-report= --junitxml=junit-integration.xml
+        env:
+          COVERAGE_FILE: .coverage.integration
+        run: >-
+          uv run pytest -q tests/integration
+          --cov --cov-report=
+          --junitxml=junit-integration.xml
+
+      - name: Upload integration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sqlite-integration-attempt-${{ github.run_attempt }}
+          path: |
+            junit-integration.xml
+            .coverage.integration
+          include-hidden-files: true
+          if-no-files-found: error
+
+  test:
+    # Keep the established external check name. This always runs so a failed or
+    # cancelled shard becomes a red aggregate gate instead of a misleading skip.
+    name: lint + types + tests (sqlite)
+    needs: [quality, sqlite_unit, sqlite_integration]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install coverage tooling
+        run: uv sync --extra dev --extra rerank
+
+      - name: Download SQLite shard evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sqlite-*-attempt-${{ github.run_attempt }}
+          path: sqlite-evidence
+          merge-multiple: true
+
+      - name: Consolidate SQLite JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-sqlite
+          path: sqlite-evidence/junit-*.xml
+          if-no-files-found: warn
+          overwrite: true
+
+      - name: Require every prerequisite
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          UNIT_RESULT: ${{ needs.sqlite_unit.result }}
+          INTEGRATION_RESULT: ${{ needs.sqlite_integration.result }}
+        run: |
+          test "${QUALITY_RESULT}" = "success"
+          test "${UNIT_RESULT}" = "success"
+          test "${INTEGRATION_RESULT}" = "success"
+
+      - name: Require all nine evidence shards
+        run: |
+          coverage_count="$(find sqlite-evidence -maxdepth 1 -type f -name '.coverage.*' | wc -l)"
+          junit_count="$(find sqlite-evidence -maxdepth 1 -type f -name 'junit-*.xml' | wc -l)"
+          test "${coverage_count}" -eq 9
+          test "${junit_count}" -eq 9
+
+      - name: Combine coverage
+        run: uv run coverage combine sqlite-evidence
 
       - name: Coverage report + regression floor
         run: |
           uv run coverage report
           uv run coverage report --fail-under="${COVERAGE_FLOOR}"
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-sqlite
-          path: junit-*.xml
-          if-no-files-found: ignore
-
   postgres:
     name: storage contract (postgres + pgvector)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     services:
       postgres:
@@ -123,11 +269,12 @@ jobs:
       - name: Install (with dev + rerank extras; no optional PDF models)
         run: uv sync --extra dev --extra rerank
 
-      - name: Backend contract tests (both backends, parametrized)
-        run: uv run pytest -q tests/integration/test_storage_backends.py --junitxml=junit-backend.xml
-
-      - name: Full suite against postgres
-        run: uv run pytest -q --junitxml=junit-postgres.xml
+      # The marker is attached to every postgres backend parameter and direct
+      # pg_test_url consumer. Collection fails if a future postgres item is not
+      # marked, so this avoids rerunning five hours of SQLite-only unit tests
+      # without narrowing the actual PostgreSQL contract.
+      - name: PostgreSQL contract tests
+        run: uv run pytest -q -m postgres_contract --junitxml=junit-postgres.xml
 
       - name: Upload test results
         if: always()
@@ -136,6 +283,7 @@ jobs:
           name: test-results-postgres
           path: junit-*.xml
           if-no-files-found: ignore
+          overwrite: true
 
   eval:
     name: retrieval + ask eval regression gates
@@ -200,3 +348,4 @@ jobs:
         with:
           name: dist
           path: dist/*
+          overwrite: true

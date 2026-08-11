@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -265,6 +266,24 @@ def test_get_backend_explicit_sqlite_creates_parent_dirs(tmp_path):
         assert isinstance(backend, SqliteBackend)
         assert backend.db_path == settings.paths.sqlite_path
         assert backend.db_path.parent.is_dir()
+    finally:
+        backend.close()
+
+
+def test_sqlite_read_only_uses_encoded_exact_uri_and_rejects_writes(tmp_path):
+    path = tmp_path / "index?exact.sqlite3"
+    writable = SqliteBackend(path)
+    writable.init_schema(8, "test-embed-v1")
+    writable.close()
+
+    backend = SqliteBackend(path, read_only=True)
+    try:
+        opened = backend.conn.execute("PRAGMA database_list").fetchone()[2]
+        assert opened == str(path.resolve())
+        assert backend.conn.execute("PRAGMA query_only").fetchone()[0] == 1
+        with pytest.raises(sqlite3.OperationalError):
+            backend.conn.execute("DELETE FROM documents")
+        assert not (tmp_path / "index").exists()
     finally:
         backend.close()
 

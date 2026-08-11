@@ -28,7 +28,7 @@ from mastervault.document_intelligence import (
     structural_records,
     verify_source_asset,
 )
-from mastervault.models import NoteType, RecordType, SourceNote, WikiEntry, content_hash
+from mastervault.models import Domain, NoteType, RecordType, SourceNote, WikiEntry, content_hash
 from mastervault.providers import EmbeddingProvider
 from mastervault.storage.base import (
     AliasRow,
@@ -39,8 +39,8 @@ from mastervault.storage.base import (
     StorageBackend,
     StructuralRecordRow,
 )
-from mastervault.vaultfs.frontmatter import FrontmatterError
-from mastervault.vaultfs.notes import LoadedNote, read_note
+from mastervault.vaultfs.frontmatter import FrontmatterError, parse_frontmatter
+from mastervault.vaultfs.notes import MODEL_BY_TYPE, LoadedNote, extract_title, read_note
 from mastervault.vaultfs.segmenter import segment
 from mastervault.vaultfs.walker import NoteRef, SkippedFile, walk_vault
 
@@ -104,6 +104,23 @@ class SyncReport:
     prepared_paths: set[str] = field(default_factory=set)
 
 
+@dataclass(frozen=True)
+class ExactSourceNoteInput:
+    """One explicitly authorized SourceNote for a closed generation inventory."""
+
+    rel_path: str
+    content: bytes
+    workspace: Path
+
+
+@dataclass
+class ExactSourceNoteSyncReport(SyncReport):
+    """Positive evidence that one closed inventory was indexed with no skips."""
+
+    doc_ids: tuple[str, ...] = ()
+    record_ids: tuple[str, ...] = ()
+
+
 def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared:
     model, body = loaded
     doc_id = doc_id_for(note)
@@ -160,9 +177,7 @@ def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared
     if isinstance(model, WikiEntry):
         slug = Path(note.rel_path).stem
         names = dict.fromkeys(
-            name.lower().strip()
-            for name in (*model.aliases, model.title, slug)
-            if name.strip()
+            name.lower().strip() for name in (*model.aliases, model.title, slug) if name.strip()
         )
         aliases = [AliasRow(alias=alias, wiki_slug=slug, domain=domain) for alias in names]
         wiki_text = f"{model.title}\n\n{wiki_definition_text(body)}"
@@ -205,7 +220,11 @@ def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared
                 parsed_artifact_sha256=model.parsed_document.artifact_sha256,
             )
     return _Prepared(
-        doc=doc, claims=claims, chunks=chunks, aliases=aliases, units=units,
+        doc=doc,
+        claims=claims,
+        chunks=chunks,
+        aliases=aliases,
+        units=units,
         structural=structural,
     )
 
@@ -243,6 +262,150 @@ def prepare_vault(
             continue
         prepared.append(_prepare(note, loaded, workspace=resolved_workspace))
     return prepared, skipped
+
+
+def prepare_exact_source_notes(
+    notes: tuple[ExactSourceNoteInput, ...],
+) -> list[_Prepared]:
+    """Prepare only caller-authorized bytes under stable logical paths.
+
+    Unlike :func:`prepare_vault`, this seam performs no recursive walk and has
+    no skip channel. Any malformed, duplicate, non-SourceNote, or structurally
+    unresolved member rejects the entire closed inventory.
+    """
+
+    if not notes:
+        raise ValueError("exact SourceNote inventory must not be empty")
+    ordered = tuple(sorted(notes, key=lambda item: item.rel_path))
+    if notes != ordered or len({item.rel_path for item in notes}) != len(notes):
+        raise ValueError("exact SourceNotes must use unique canonical path order")
+    prepared: list[_Prepared] = []
+    for item in notes:
+        rel = item.rel_path
+        candidate = Path(rel)
+        if (
+            not rel
+            or candidate.is_absolute()
+            or candidate.as_posix() != rel
+            or ".." in candidate.parts
+            or any(part.startswith(".") for part in candidate.parts)
+            or not rel.endswith(".md")
+        ):
+            raise ValueError("exact SourceNote path must be canonical relative Markdown")
+        try:
+            text = item.content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"exact SourceNote is not UTF-8: {rel}") from exc
+        data, body = parse_frontmatter(text)
+        raw_type = data.get("type")
+        raw_domain = data.get("domain")
+        if not isinstance(raw_type, str) or not isinstance(raw_domain, str):
+            raise ValueError(f"exact SourceNote has invalid type/domain: {rel}")
+        try:
+            note_type = NoteType(raw_type)
+            domain = Domain(raw_domain)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"exact SourceNote has invalid type/domain: {rel}") from exc
+        if note_type != NoteType.SOURCE:
+            raise ValueError("managed generation inventory may contain SourceNotes only")
+        if not data.get("title"):
+            data = {**data, "title": extract_title(body, candidate.stem)}
+        model = MODEL_BY_TYPE[note_type].model_validate(data)
+        note = NoteRef(
+            abs_path=item.workspace / rel,
+            rel_path=rel,
+            note_type=note_type,
+            domain=domain,
+            content_hash=content_hash(text),
+        )
+        prepared.append(
+            _prepare(note, LoadedNote(model=model, body=body), workspace=item.workspace)
+        )
+    doc_ids = [item.doc.doc_id for item in prepared]
+    if len(set(doc_ids)) != len(doc_ids):
+        raise ValueError("exact SourceNote inventory produces duplicate document IDs")
+    record_ids = [unit.record_id for item in prepared for unit in item.units]
+    if len(set(record_ids)) != len(record_ids):
+        raise ValueError("exact SourceNote inventory produces duplicate record IDs")
+    return prepared
+
+
+def sync_exact_source_notes(
+    notes: tuple[ExactSourceNoteInput, ...],
+    backend: StorageBackend,
+    embedder: EmbeddingProvider,
+    *,
+    force_embeddings: bool = False,
+) -> ExactSourceNoteSyncReport:
+    """Build one complete isolated index from an explicit closed inventory."""
+
+    prepared = prepare_exact_source_notes(notes)
+    expected_paths = {item.rel_path for item in notes}
+    prepared_paths = {item.doc.rel_path for item in prepared}
+    if prepared_paths != expected_paths:
+        raise ValueError("prepared SourceNote set differs from exact generation inventory")
+    conn = getattr(backend, "conn", None)
+    if conn is None or not callable(getattr(conn, "execute", None)):
+        raise ValueError("managed generation indexing requires inspectable SQLite storage")
+    existing_paths = {
+        str(row[0]) for row in conn.execute("SELECT rel_path FROM documents").fetchall()
+    }
+    if existing_paths - expected_paths:
+        raise ValueError("isolated generation index unexpectedly contains extra documents")
+    atomic_structural_upsert = getattr(backend, "upsert_document_with_structural", None)
+    if not callable(atomic_structural_upsert):
+        raise ValueError("managed generation indexing requires atomic structural storage")
+    for item in prepared:
+        atomic_structural_upsert(
+            item.doc,
+            item.claims,
+            item.chunks,
+            item.aliases,
+            item.structural,
+        )
+    deleted = backend.delete_documents_not_in(expected_paths)
+    if deleted:
+        raise RuntimeError("exact preflight failed to prevent unexpected document deletion")
+    units = [unit for item in prepared for unit in item.units]
+    record_ids = tuple(sorted(unit.record_id for unit in units))
+    stale = (
+        [unit.record_id for unit in units]
+        if force_embeddings
+        else backend.needs_embedding(
+            [(unit.record_id, unit.content_hash) for unit in units],
+            embedder.model_version,
+        )
+    )
+    stale_ids = set(stale)
+    to_embed = [unit for unit in units if unit.record_id in stale_ids]
+    if to_embed:
+        vectors = embedder.embed([unit.text for unit in to_embed])
+        if len(vectors) != len(to_embed):
+            raise ValueError("embedding provider returned the wrong vector count")
+        backend.upsert_embeddings(
+            [
+                EmbeddingRow(
+                    record_id=unit.record_id,
+                    record_type=unit.record_type,
+                    doc_id=unit.doc_id,
+                    domain=unit.domain,
+                    content_hash=unit.content_hash,
+                    model_version=embedder.model_version,
+                    vector=vector,
+                )
+                for unit, vector in zip(to_embed, vectors, strict=True)
+            ]
+        )
+    return ExactSourceNoteSyncReport(
+        docs_upserted=len(prepared),
+        docs_deleted=0,
+        records_embedded=len(to_embed),
+        records_reused=len(units) - len(to_embed),
+        skipped=[],
+        prepared_paths=prepared_paths,
+        doc_ids=tuple(sorted(item.doc.doc_id for item in prepared)),
+        record_ids=record_ids,
+    )
 
 
 def record_content_hashes(vault_dir: Path | str) -> dict[str, str]:
@@ -298,16 +461,12 @@ def sync_vault(
         row.doc_id: row.content_hash
         for row in backend.get_documents([p.doc.doc_id for p in prepared])
     }
-    changed = [
-        p for p in prepared if full or stored_hashes.get(p.doc.doc_id) != p.doc.content_hash
-    ]
+    changed = [p for p in prepared if full or stored_hashes.get(p.doc.doc_id) != p.doc.content_hash]
     atomic_structural_upsert = getattr(backend, "upsert_document_with_structural", None)
     replace_structural = getattr(backend, "replace_structural_records", None)
     for p in changed:
         if callable(atomic_structural_upsert):
-            atomic_structural_upsert(
-                p.doc, p.claims, p.chunks, p.aliases, p.structural
-            )
+            atomic_structural_upsert(p.doc, p.claims, p.chunks, p.aliases, p.structural)
         else:
             # Legacy duck-typed backends retain their original four-argument
             # write path. A partial structural capability is best-effort only;
