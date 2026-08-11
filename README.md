@@ -5,12 +5,13 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![Keyless demo](https://img.shields.io/badge/demo-keyless%20%2F%20%240.00-brightgreen.svg)](#quickstart)
 
-> Status: `0.2.0`, alpha. A single-user CLI you run locally. The default path
-> (SQLite + local embeddings + a mock LLM) runs with no API keys and no
-> service dependency. `demo load` is offline; the local embedding model is
-> downloaded on the first command that embeds new text or a query.
+> Status: declared package version `0.2.0`, alpha. v0.3 work is in progress on
+> repository `main` and has not been released. The default path (SQLite + local
+> embeddings + a mock LLM) runs with no API keys and no service dependency.
+> `demo load` is offline; the local embedding model is downloaded on the first
+> command that embeds new text or a query.
 
-**Contents:** [Why this shape](#why-this-shape) · [v0.3 work](#v03-in-development-page-grounded-pdf-evidence) · [Quickstart](#quickstart) ·
+**Contents:** [Why this shape](#why-this-shape) · [v0.3 work](#v03-in-development-grounded-evidence-and-sqlite-change-control) · [Quickstart](#quickstart) ·
 [Architecture](#architecture-at-a-glance) · [The 10-minute tour](#the-10-minute-tour) ·
 [Eval numbers](#honest-eval-numbers) · [Command reference](#command-reference) ·
 [The dataset](#the-dataset) · [FAQ and troubleshooting](#faq-and-troubleshooting) ·
@@ -42,7 +43,17 @@ open contradictions, and a file-backed human-in-the-loop review queue means
 nothing gets merged into the shared knowledge layer without a pattern-batched
 approval step.
 
-## v0.3 in development: page-grounded PDF evidence
+## v0.3 in development: grounded evidence and SQLite change control
+
+The internal SQLite-only change-control path can now classify impact, plan and
+review revisions, publish approved downstream replacements into an immutable
+first successor generation, build its isolated serving index, atomically
+activate it, and reopen that exact index fail-closed. It deliberately supports
+only one managed successor from generation zero. Public application/operator
+commands, ordinary `search`/`ask` generation selection, targeted post-change
+regressions, final JSON/Markdown audit reports, managed `EDIT` execution,
+PostgreSQL managed-generation parity, the keyless change-control demo, and the
+v0.3 release remain under development.
 
 The v0.3 document spine replaces lossy PDF flattening with auditable evidence
 for clean, digitally generated PDFs. MasterVault snapshots the exact source
@@ -134,9 +145,13 @@ LIVE evidence without another model call. MasterVault deterministically derives
 the complete candidate plan or no-change payload, byte-grounded citations,
 successor Markdown SourceNote, claims, paths, and hashes, then records one
 all-target inference batch and a create-only, manifest-gated inert staging set.
-This still does **not** create managed-review authority, publish files, activate
-a generation, update an index, add CLI commands, close the v0.3 loop, or expand
-the existing LangGraph orchestration.
+That admitted staging can now proceed through SQLite-authoritative managed
+review and, for approved outcomes, immutable publication, isolated exact
+indexing, and atomic activation of the first successor generation. These remain
+internal library boundaries: no public application/CLI, ordinary `search`/`ask`
+integration, targeted post-activation regression/reporting, managed `EDIT`
+execution, second managed successor, or PostgreSQL managed activation exists
+yet. The existing LangGraph orchestration remains deliberately unchanged.
 
 ## Quickstart
 
