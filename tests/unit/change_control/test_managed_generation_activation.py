@@ -1371,6 +1371,7 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
             prefix="generation:concurrent:adoption",
             mode="adoption-only",
         )
+        race_timeout_seconds = 600.0
         barrier = Barrier(2)
 
         def activate(
@@ -1379,11 +1380,17 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
             operation_id: str,
             generation_root: Path,
         ) -> str:
-            store = SqliteManagedChangeControlStore(runtime.authority_path)
+            # Coverage makes the authoritative claim transaction slow enough that
+            # the default lock budget can expire before both actors reach the CAS
+            # barrier this test is intended to exercise.
+            store = SqliteManagedChangeControlStore(
+                runtime.authority_path,
+                timeout_seconds=race_timeout_seconds,
+            )
 
             def synchronize(boundary: str) -> None:
                 if boundary == "before-authority-cas":
-                    barrier.wait(timeout=600)
+                    barrier.wait(timeout=race_timeout_seconds)
 
             try:
                 activate_reviewed_managed_generation(
