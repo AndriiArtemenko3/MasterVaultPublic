@@ -59,7 +59,10 @@ from mastervault.change_control.managed_store import (
     SqliteManagedChangeControlStore,
 )
 from mastervault.change_control.models import canonical_json_bytes
-from mastervault.change_control.store import ChangeControlIdempotencyError
+from mastervault.change_control.store import (
+    ChangeControlBusyError,
+    ChangeControlIdempotencyError,
+)
 from mastervault.providers import MockEmbedding
 from mastervault.storage.sqlite import SqliteBackend
 
@@ -1448,14 +1451,13 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
 
         barrier = Barrier(2)
 
-        def activate(
+        def attempt_activation(
             runtime: RealManagedV2Scenario,
             command: ManagedActivationCommand,
             capability: RepositoryVerifiedManagedGenerationEffects,
-        ) -> str:
+        ) -> None:
             store = SqliteManagedChangeControlStore(runtime.authority_path)
             try:
-                barrier.wait(timeout=10.0)
                 store.activate_managed_generation(
                     command,
                     capability=capability,
@@ -1463,26 +1465,48 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
                     verified_bootstrap=runtime.verified_bootstrap,
                     prechange_head=runtime.prechange_head,
                 )
-                return "activated"
-            except ManagedGenerationActivationStaleError:
-                return "stale"
             finally:
                 store.close()
 
+        def race_activation(
+            runtime: RealManagedV2Scenario,
+            command: ManagedActivationCommand,
+            capability: RepositoryVerifiedManagedGenerationEffects,
+        ) -> str:
+            barrier.wait(timeout=10.0)
+            try:
+                attempt_activation(runtime, command, capability)
+            except ManagedGenerationActivationStaleError:
+                return "stale"
+            except ChangeControlBusyError:
+                return "busy"
+            return "activated"
+
+        candidates = (
+            (scenario, mixed_command, mixed_capability),
+            (alternative, adoption_command, adoption_capability),
+        )
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = (
-                pool.submit(activate, scenario, mixed_command, mixed_capability),
-                pool.submit(activate, alternative, adoption_command, adoption_capability),
+                pool.submit(race_activation, *candidates[0]),
+                pool.submit(race_activation, *candidates[1]),
             )
             _done, pending = wait(futures, timeout=120.0)
             assert not pending, "authority-only CAS race exceeded its bounded wait"
             outcomes = tuple(future.result() for future in futures)
 
+        assert outcomes.count("activated") == 1
+        assert (outcomes.count("stale"), outcomes.count("busy")) in {(1, 0), (0, 1)}
+        if "busy" in outcomes:
+            busy_index = outcomes.index("busy")
+            with pytest.raises(ManagedGenerationActivationStaleError):
+                attempt_activation(*candidates[busy_index])
+            outcomes = tuple(
+                "stale" if index == busy_index else outcome
+                for index, outcome in enumerate(outcomes)
+            )
+
         assert sorted(outcomes) == ["activated", "stale"]
-        candidates = (
-            (scenario, mixed_command, mixed_capability),
-            (alternative, adoption_command, adoption_capability),
-        )
         winner = candidates[outcomes.index("activated")]
         loser = candidates[outcomes.index("stale")]
         winner_runtime, winner_command, _ = winner
