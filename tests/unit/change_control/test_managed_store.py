@@ -4,18 +4,29 @@ import hashlib
 import json
 import shutil
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from mastervault.change_control import managed_store as managed_store_module
 from mastervault.change_control import store as store_module
+from mastervault.change_control import workspace_bootstrap as workspace_bootstrap_module
 from mastervault.change_control.analysis_binding import AnalysisBootstrapIntegrityError
 from mastervault.change_control.bootstrap import (
     AnalysisBootstrapResult,
     VerifiedAnalysisBootstrapCapability,
     bootstrap_analysis_aggregate,
+)
+from mastervault.change_control.legacy_index import LegacyIndexAttestation
+from mastervault.change_control.managed_activation_service import (
+    activate_reviewed_managed_generation,
+)
+from mastervault.change_control.managed_generation import ManagedActivationCommand
+from mastervault.change_control.managed_generation_repository import (
+    ManagedGenerationRepository,
 )
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
@@ -60,7 +71,12 @@ from mastervault.change_control.managed_review import (
     TemporalDecisionPrerequisite,
     derive_managed_successor,
 )
+from mastervault.change_control.managed_serving import (
+    ManagedServingGenerationZeroError,
+    open_active_managed_sqlite_index,
+)
 from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
     ManagedReviewAuthorityError,
     ManagedReviewStaleError,
     ManagedReviewWriteVersionError,
@@ -70,10 +86,16 @@ from mastervault.change_control.managed_store import (
 )
 from mastervault.change_control.models import (
     ChangeControlAggregate,
+    ClaimRevisionRegistry,
     ClaimSourceReference,
     ComparableClaimPair,
+    DependencyRegistry,
+    DocumentAuthority,
     DocumentReplacementAssessment,
     DocumentReplacementSet,
+    DocumentRole,
+    DocumentVersionMetadata,
+    DocumentVersionRegistry,
     PairDisposition,
     RelationAssessment,
     RelationGraph,
@@ -82,6 +104,11 @@ from mastervault.change_control.models import (
     TemporalConstraintStatus,
     VersionedClaimRevision,
     canonical_json_bytes,
+)
+from mastervault.change_control.operator_run import (
+    OperatorRunCommand,
+    OperatorRunLinkCommand,
+    OperatorRunLinkKind,
 )
 from mastervault.change_control.review import (
     HumanReviewDecisionCommand,
@@ -99,6 +126,17 @@ from mastervault.change_control.store import (
     ChangeControlReviewAlreadyDecidedError,
     SqliteChangeControlStore,
 )
+from mastervault.change_control.workspace_bootstrap import (
+    LegacyIndexExpectation,
+    LegacyIndexReadinessReceipt,
+    ManagedSourceNoteBootstrapMetadata,
+    WorkspaceBootstrapIntent,
+    WorkspaceBootstrapInventory,
+    WorkspaceInventoryReceipt,
+    WorkspaceNoteKind,
+    WorkspaceVaultMember,
+)
+from mastervault.providers import MockEmbedding
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRECHANGE_MANIFEST = REPO_ROOT / "datasets/larkstead/change_control/sl2_prechange.yaml"
@@ -477,39 +515,514 @@ def test_schema_v3_upgrades_to_v4_and_failed_upgrade_rolls_back(
     fourth = migrations / "004_generation_publication_activation.sql"
     source = (_DEFAULT_MIGRATIONS_DIR / fourth.name).read_text(encoding="utf-8")
     fourth.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
+    with monkeypatch.context() as v4:
+        v4.setattr(store_module, "_SCHEMA_VERSION", 4)
+        broken = SqliteChangeControlStore(database, migrations)
+        with pytest.raises(sqlite3.Error):
+            broken.init_schema()
+        assert broken._read_meta()["schema_version"] == "3"  # type: ignore[index]
+        assert broken._user_tables() == store_module._V3_EXPECTED_TABLES
+        assert {
+            table: broken.conn.execute(f"SELECT * FROM {table}").fetchall()
+            for table in preserved_v3_rows
+        } == preserved_v3_rows
+        assert (
+            broken.conn.execute(
+                "SELECT count(*) FROM change_control_schema_migrations WHERE version=4"
+            ).fetchone()[0]
+            == 0
+        )
+        broken.close()
+
+    fourth.write_text(source, encoding="utf-8")
+    with monkeypatch.context() as v4:
+        v4.setattr(store_module, "_SCHEMA_VERSION", 4)
+        upgraded = SqliteChangeControlStore(database, migrations)
+        upgraded.init_schema()
+        assert upgraded._read_meta()["schema_version"] == "4"  # type: ignore[index]
+        assert upgraded._user_tables() == store_module._V4_EXPECTED_TABLES
+        assert {
+            table: upgraded.conn.execute(f"SELECT * FROM {table}").fetchall()
+            for table in preserved_v3_rows
+        } == preserved_v3_rows
+        assert [
+            int(row[0])
+            for row in upgraded.conn.execute(
+                "SELECT version FROM change_control_schema_migrations ORDER BY version"
+            )
+        ] == [1, 2, 3, 4]
+        upgraded.close()
+
+
+def test_schema_v4_upgrades_to_v5_preserving_seed_authority_and_restoring_fks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    for name in (
+        "001_change_control_aggregate.sql",
+        "002_authoritative_human_review.sql",
+        "003_managed_revision_review.sql",
+        "004_generation_publication_activation.sql",
+    ):
+        shutil.copy(_DEFAULT_MIGRATIONS_DIR / name, migrations / name)
+    database = tmp_path / "state.sqlite3"
+    with monkeypatch.context() as v4:
+        v4.setattr(store_module, "_SCHEMA_VERSION", 4)
+        old = SqliteChangeControlStore(database, migrations)
+        old.init_schema()
+        with old.conn:
+            old.conn.execute(
+                "INSERT INTO change_control_aggregates VALUES (?, 1, 1, ?, ?)",
+                ("aggregate:migration-v4", "a" * 64, "2026-01-01T00:00:00+00:00"),
+            )
+            old.conn.execute(
+                "INSERT INTO change_control_generation_manifests VALUES "
+                "(?, ?, ?, 0, ?, 'generation-zero', 0, NULL, 1, ?, ?)",
+                (
+                    "manifest:migration-v4",
+                    "aggregate:migration-v4",
+                    "generation:migration-v4",
+                    "b" * 64,
+                    '{"fixture":"populated-v4"}',
+                    "2026-01-01T00:00:00+00:00",
+                ),
+            )
+            old.conn.execute(
+                "INSERT INTO change_control_active_generation VALUES "
+                "(?, ?, ?, 0, 'verified-seed-bootstrap', ?, 0, ?, ?, 1, ?, ?)",
+                (
+                    "aggregate:migration-v4",
+                    "operation:migration-v4",
+                    "authority:migration-v4",
+                    "generation:migration-v4",
+                    "b" * 64,
+                    "c" * 64,
+                    '{"fixture":"authority-v4"}',
+                    "2026-01-01T00:00:00+00:00",
+                ),
+            )
+            old.conn.execute(
+                "INSERT INTO change_control_managed_review_bundles VALUES "
+                "(?, ?, ?, 1, ?, ?, 0, ?, ?, 1, ?)",
+                (
+                    "bundle:migration-v4",
+                    "d" * 64,
+                    "aggregate:migration-v4",
+                    "a" * 64,
+                    "authority:migration-v4",
+                    "generation:migration-v4",
+                    "b" * 64,
+                    '{"fixture":"bundle-v4"}',
+                ),
+            )
+        preserved = {
+            table: tuple(old.conn.execute(f"SELECT * FROM {table}"))
+            for table in (
+                "change_control_active_generation",
+                "change_control_managed_review_bundles",
+            )
+        }
+        old.close()
+
+    fifth = migrations / "005_workspace_bootstrap_application.sql"
+    source = (_DEFAULT_MIGRATIONS_DIR / fifth.name).read_text(encoding="utf-8")
+    fifth.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
     broken = SqliteChangeControlStore(database, migrations)
     with pytest.raises(sqlite3.Error):
         broken.init_schema()
-    assert broken._read_meta()["schema_version"] == "3"  # type: ignore[index]
-    assert broken._user_tables() == store_module._V3_EXPECTED_TABLES
+    assert broken._read_meta()["schema_version"] == "4"  # type: ignore[index]
+    assert broken._user_tables() == store_module._V4_EXPECTED_TABLES
     assert {
-        table: broken.conn.execute(f"SELECT * FROM {table}").fetchall()
-        for table in preserved_v3_rows
-    } == preserved_v3_rows
-    assert (
-        broken.conn.execute(
-            "SELECT count(*) FROM change_control_schema_migrations WHERE version=4"
-        ).fetchone()[0]
-        == 0
-    )
+        table: tuple(broken.conn.execute(f"SELECT * FROM {table}")) for table in preserved
+    } == preserved
+    assert int(broken.conn.execute("PRAGMA foreign_keys").fetchone()[0]) == 1
     broken.close()
 
-    fourth.write_text(source, encoding="utf-8")
+    fifth.write_text(source, encoding="utf-8")
     upgraded = SqliteChangeControlStore(database, migrations)
     upgraded.init_schema()
-    assert upgraded._read_meta()["schema_version"] == "4"  # type: ignore[index]
+    assert upgraded._read_meta()["schema_version"] == "5"  # type: ignore[index]
     assert upgraded._user_tables() == store_module._EXPECTED_TABLES
     assert {
-        table: upgraded.conn.execute(f"SELECT * FROM {table}").fetchall()
-        for table in preserved_v3_rows
-    } == preserved_v3_rows
-    assert [
-        int(row[0])
-        for row in upgraded.conn.execute(
-            "SELECT version FROM change_control_schema_migrations ORDER BY version"
+        table: tuple(upgraded.conn.execute(f"SELECT * FROM {table}")) for table in preserved
+    } == preserved
+    assert upgraded.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert int(upgraded.conn.execute("PRAGMA foreign_keys").fetchone()[0]) == 1
+    upgraded.conn.execute("BEGIN")
+    upgraded.conn.execute(
+        "UPDATE change_control_active_generation SET origin_kind='verified-workspace-bootstrap'"
+    )
+    assert (
+        str(
+            upgraded.conn.execute(
+                "SELECT origin_kind FROM change_control_active_generation"
+            ).fetchone()[0]
         )
-    ] == [1, 2, 3, 4]
+        == "verified-workspace-bootstrap"
+    )
+    upgraded.conn.execute("ROLLBACK")
     upgraded.close()
+
+
+def _workspace_bootstrap_fixture():
+    raw_sha = "1" * 64
+    note_sha = "2" * 64
+    unmanaged_sha = "3" * 64
+    document = DocumentVersionMetadata.create(
+        document_id="workspace-policy-v1",
+        document_family="workspace-policy",
+        version_label="v1",
+        source_path="raw/workspace-policy-v1.md",
+        source_sha256=raw_sha,
+        declared_effective_from=date(2026, 1, 1),
+        role=DocumentRole.POLICY,
+        authority=DocumentAuthority.PRIMARY,
+    )
+    inventory = WorkspaceBootstrapInventory.create(
+        manifest_schema_version=1,
+        manifest_sha256="4" * 64,
+        vault_members=(
+            WorkspaceVaultMember(
+                logical_path="sources/managed.md",
+                note_kind=WorkspaceNoteKind.SOURCE,
+                content_sha256=note_sha,
+                byte_count=128,
+            ),
+            WorkspaceVaultMember(
+                logical_path="sources/unmanaged.md",
+                note_kind=WorkspaceNoteKind.SOURCE,
+                content_sha256=unmanaged_sha,
+                byte_count=64,
+            ),
+        ),
+        managed_source_notes=(
+            ManagedSourceNoteBootstrapMetadata(
+                logical_path="sources/managed.md",
+                source_note_sha256=note_sha,
+                source_note_byte_count=128,
+                source_root_id="workspace",
+                source_relative_path=document.source_path,
+                source_note_provenance=document.source_path,
+                raw_source_path=document.source_path,
+                raw_source_sha256=raw_sha,
+                raw_source_byte_count=256,
+                document=document,
+            ),
+        ),
+        legacy_index=LegacyIndexExpectation(
+            index_file_sha256="5" * 64,
+            index_file_byte_count=4096,
+            index_schema_version=1,
+            embedding_model="test-embedding-v1",
+            embedding_dimensions=8,
+        ),
+    )
+    intent = WorkspaceBootstrapIntent.create(
+        operation_id="workspace-bootstrap:claim",
+        aggregate_id="workspace-bootstrap",
+        inventory=inventory,
+    )
+    aggregate = ChangeControlAggregate.create(
+        aggregate_id=intent.aggregate_id,
+        documents=DocumentVersionRegistry.create((document,)),
+        claims=ClaimRevisionRegistry.create(()),
+        relation_graph=RelationGraph.create(()),
+        dependencies=DependencyRegistry.create(()),
+        document_replacements=DocumentReplacementSet.create(()),
+        temporal_constraints=TemporalConstraintSet.create(()),
+    )
+    return inventory, intent, aggregate
+
+
+def test_workspace_bootstrap_stages_replay_concurrently_and_initialize_generic_zero(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "state.sqlite3"
+    store = SqliteManagedChangeControlStore(database)
+    store.init_schema()
+    inventory, intent, aggregate = _workspace_bootstrap_fixture()
+    claimed = store.claim_workspace_bootstrap(intent=intent, inventory=inventory)
+    assert claimed.intent == intent
+    assert claimed.inventory == inventory
+    commit = store.create(aggregate, operation_id="workspace-bootstrap:aggregate")
+    store.close()
+
+    inventory_receipts = tuple(
+        WorkspaceInventoryReceipt.create(
+            operation_id="workspace-bootstrap:inventory",
+            bootstrap_id=intent.bootstrap_id,
+            aggregate_operation_id="workspace-bootstrap:aggregate",
+            aggregate_id=intent.aggregate_id,
+            aggregate_revision=commit.revision,
+            aggregate_sha256=commit.aggregate_sha256,
+            inventory_id=inventory.inventory_id,
+            inventory_sha256=inventory.inventory_sha256,
+            recorded_at=f"2026-01-01T00:00:0{second}+00:00",
+        )
+        for second in (1, 2)
+    )
+
+    def record_inventory(receipt: WorkspaceInventoryReceipt):
+        connection = SqliteManagedChangeControlStore(database)
+        try:
+            return connection.record_workspace_inventory(receipt)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        inventory_states = tuple(pool.map(record_inventory, inventory_receipts))
+    assert inventory_states[0] == inventory_states[1]
+    persisted_inventory_receipt = inventory_states[0].inventory_receipt
+    assert persisted_inventory_receipt in inventory_receipts
+    assert persisted_inventory_receipt is not None
+
+    readiness_receipts = tuple(
+        LegacyIndexReadinessReceipt.create(
+            operation_id="workspace-bootstrap:index",
+            bootstrap_id=intent.bootstrap_id,
+            inventory_receipt_id=persisted_inventory_receipt.receipt_id,
+            inventory_receipt_sha256=persisted_inventory_receipt.receipt_sha256,
+            index_logical_fingerprint="6" * 64,
+            index_file_sha256=inventory.legacy_index.index_file_sha256,
+            index_file_byte_count=inventory.legacy_index.index_file_byte_count,
+            index_schema_version=inventory.legacy_index.index_schema_version,
+            embedding_model=inventory.legacy_index.embedding_model,
+            embedding_dimensions=inventory.legacy_index.embedding_dimensions,
+            ready_at=f"2026-01-01T00:00:0{second}+00:00",
+        )
+        for second in (3, 4)
+    )
+
+    def record_readiness(receipt: LegacyIndexReadinessReceipt):
+        connection = SqliteManagedChangeControlStore(database)
+        try:
+            return connection.record_legacy_index_readiness(receipt)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        complete_states = tuple(pool.map(record_readiness, readiness_receipts))
+    assert complete_states[0] == complete_states[1]
+    assert complete_states[0].index_readiness_receipt in readiness_receipts
+
+    evidence_is_fresh = True
+
+    def verify_fresh_workspace() -> None:
+        if not evidence_is_fresh:
+            raise ValueError("simulated workspace/index drift")
+
+    class FreshWorkspaceEvidenceGuard:
+        def verify(self) -> None:
+            verify_fresh_workspace()
+
+    readiness = complete_states[0].index_readiness_receipt
+    assert readiness is not None
+    legacy_attestation = LegacyIndexAttestation(
+        index_file_sha256=readiness.index_file_sha256,
+        index_file_byte_count=readiness.index_file_byte_count,
+        projection_fingerprint="7" * 64,
+        logical_index_fingerprint=readiness.index_logical_fingerprint,
+        storage_schema_version=readiness.index_schema_version,
+        embedding_model_version=readiness.embedding_model,
+        embedding_dimensions=readiness.embedding_dimensions,
+        counts=(("documents", len(inventory.vault_members)),),
+    )
+    evidence_verifier = workspace_bootstrap_module._mint_verified_workspace_bootstrap_evidence_verifier(
+        FreshWorkspaceEvidenceGuard(),
+        resolved_inventory=inventory,
+        resolved_aggregate=aggregate,
+        legacy_attestation=legacy_attestation,
+    )
+    capability = workspace_bootstrap_module._mint_verified_workspace_bootstrap_capability(
+        complete_states[0],
+        evidence_verifier=evidence_verifier,
+    )
+    store = SqliteManagedChangeControlStore(database)
+    authority = store.initialize_workspace_generation_zero(verified_workspace_bootstrap=capability)
+    context = AuthorityVerificationContext.workspace(capability)
+    assert (
+        store.get_active_generation(
+            intent.aggregate_id,
+            authority_context=context,
+        )
+        == authority
+    )
+    assert (
+        store.initialize_workspace_generation_zero(verified_workspace_bootstrap=capability)
+        == authority
+    )
+    command_probe = ManagedActivationCommand.model_construct(
+        expected_authority=authority,
+    )
+    ManagedGenerationRepository._require_generation_zero_command(command_probe)
+
+    class WorkspaceContextReached(Exception):
+        pass
+
+    class WorkspaceContextProbeStore:
+        def get_managed_review(self, request_id, *, resolver, authority_context):
+            del request_id, resolver
+            assert authority_context == context
+            raise WorkspaceContextReached
+
+    with pytest.raises(WorkspaceContextReached):
+        activate_reviewed_managed_generation(
+            request_id="mrequest:" + "a" * 64,
+            operation_id="workspace-bootstrap:activation-probe",
+            store=WorkspaceContextProbeStore(),  # type: ignore[arg-type]
+            resolver=object(),  # type: ignore[arg-type]
+            generation_root=tmp_path / "must-not-exist",
+            embedder=MockEmbedding(8),
+            authority_context=context,
+        )
+    with pytest.raises(ManagedServingGenerationZeroError):
+        open_active_managed_sqlite_index(
+            aggregate_id=intent.aggregate_id,
+            store=store,
+            resolver=object(),  # type: ignore[arg-type]
+            authority_context=context,
+            generation_root=tmp_path / "must-not-exist",
+        )
+    assert not (tmp_path / "must-not-exist").exists()
+    run_command = OperatorRunCommand.create(
+        operation_id="workspace-bootstrap:operator-run",
+        aggregate_id=intent.aggregate_id,
+        base_authority_id=authority.authority_id,
+        base_authority_revision=authority.authority_revision,
+        base_active_pointer_sha256=authority.active_pointer_sha256,
+    )
+    store.create_operator_run(run_command)
+    persisted_readiness = complete_states[0].index_readiness_receipt
+    assert persisted_readiness is not None
+    for operation_id, kind, target_id, target_sha in (
+        (
+            "workspace-bootstrap:link:intent",
+            OperatorRunLinkKind.BOOTSTRAP_INTENT,
+            intent.bootstrap_id,
+            intent.intent_sha256,
+        ),
+        (
+            "workspace-bootstrap:link:inventory",
+            OperatorRunLinkKind.WORKSPACE_INVENTORY,
+            persisted_inventory_receipt.receipt_id,
+            persisted_inventory_receipt.receipt_sha256,
+        ),
+        (
+            "workspace-bootstrap:link:index",
+            OperatorRunLinkKind.LEGACY_INDEX_READINESS,
+            persisted_readiness.receipt_id,
+            persisted_readiness.receipt_sha256,
+        ),
+        (
+            "workspace-bootstrap:link:authority",
+            OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY,
+            authority.authority_id,
+            authority.active_pointer_sha256,
+        ),
+    ):
+        command = OperatorRunLinkCommand.create(
+            operation_id=operation_id,
+            run_id=run_command.run_id,
+            kind=kind,
+            target_id=target_id,
+            target_sha256=target_sha,
+        )
+        store.record_operator_run_link(command)
+    navigation = store.get_operator_run(run_command.run_id)
+    assert navigation is not None
+    assert tuple(link.command.kind for link in navigation.links) == (
+        OperatorRunLinkKind.BOOTSTRAP_INTENT,
+        OperatorRunLinkKind.WORKSPACE_INVENTORY,
+        OperatorRunLinkKind.LEGACY_INDEX_READINESS,
+        OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY,
+    )
+    assert store.conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    evidence_is_fresh = False
+    with pytest.raises(ManagedReviewAuthorityError, match="cannot be verified"):
+        store.get_active_generation(intent.aggregate_id, authority_context=context)
+    store.close()
+
+
+def test_workspace_bootstrap_inventory_tamper_fails_every_public_reopen(
+    tmp_path: Path,
+) -> None:
+    store = SqliteManagedChangeControlStore(tmp_path / "state.sqlite3")
+    store.init_schema()
+    inventory, intent, _aggregate = _workspace_bootstrap_fixture()
+    store.claim_workspace_bootstrap(intent=intent, inventory=inventory)
+    with store.conn:
+        store.conn.execute(
+            "UPDATE change_control_workspace_inventories SET payload_json='{}' "
+            "WHERE inventory_id=?",
+            (inventory.inventory_id,),
+        )
+    with pytest.raises(ChangeControlCorruptionError, match="workspace bootstrap inventory"):
+        store.get_workspace_bootstrap(intent.bootstrap_id)
+    store.close()
+
+
+def test_operator_run_navigation_is_post_authority_typed_and_replayable(
+    tmp_path: Path,
+) -> None:
+    store, bootstrap, prechange_head = _bootstrapped_store(tmp_path / "state.sqlite3")
+    authority = store.initialize_generation_zero(
+        verified_bootstrap=bootstrap.verification_capability,
+        prechange_head=prechange_head,
+    )
+    command = OperatorRunCommand.create(
+        operation_id="operator-run:create",
+        aggregate_id=authority.aggregate_id,
+        base_authority_id=authority.authority_id,
+        base_authority_revision=authority.authority_revision,
+        base_active_pointer_sha256=authority.active_pointer_sha256,
+    )
+    created = store.create_operator_run(command)
+    assert store.create_operator_run(command) == created
+    assert created.links == ()
+
+    link = OperatorRunLinkCommand.create(
+        operation_id="operator-run:link:authority",
+        run_id=command.run_id,
+        kind=OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY,
+        target_id=authority.authority_id,
+        target_sha256=authority.active_pointer_sha256,
+    )
+    linked = store.record_operator_run_link(link)
+    assert store.record_operator_run_link(link) == linked
+    assert store.get_operator_run(command.run_id) == linked
+    assert tuple(item.command.kind for item in linked.links) == (
+        OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY,
+    )
+
+    unsupported = OperatorRunLinkCommand.create(
+        operation_id="operator-run:link:incoming-source",
+        run_id=command.run_id,
+        kind=OperatorRunLinkKind.INCOMING_SOURCE,
+        target_id="incoming-source:not-yet-supported",
+        target_sha256="a" * 64,
+    )
+    with pytest.raises(ManagedReviewAuthorityError, match="no authoritative target resolver"):
+        store.record_operator_run_link(unsupported)
+
+    conflicting = OperatorRunLinkCommand.create(
+        operation_id="operator-run:link:authority:other",
+        run_id=command.run_id,
+        kind=OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY,
+        target_id=authority.authority_id,
+        target_sha256=authority.active_pointer_sha256,
+    )
+    with pytest.raises(ChangeControlIdempotencyError, match="kind"):
+        store.record_operator_run_link(conflicting)
+    snapshot = store.load(authority.aggregate_id)
+    assert snapshot is not None
+    with pytest.raises(ChangeControlIdempotencyError, match="another authority"):
+        store.compare_and_swap(
+            snapshot.aggregate,
+            expected_revision=snapshot.revision,
+            operation_id=command.operation_id,
+        )
+    store.close()
 
 
 def _no_change_scenario(path: Path) -> _Scenario:

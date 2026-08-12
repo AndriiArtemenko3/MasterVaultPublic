@@ -109,6 +109,9 @@ if TYPE_CHECKING:
         load_parsed_document as load_parsed_document,
     )
     from mastervault.document_intelligence.store import (
+        load_parsed_document_bytes as load_parsed_document_bytes,
+    )
+    from mastervault.document_intelligence.store import (
         parsed_document_bytes as parsed_document_bytes,
     )
     from mastervault.document_intelligence.store import (
@@ -122,6 +125,9 @@ if TYPE_CHECKING:
     )
     from mastervault.document_intelligence.store import (
         verify_source_asset as verify_source_asset,
+    )
+    from mastervault.document_intelligence.store import (
+        verify_source_asset_bytes as verify_source_asset_bytes,
     )
     from mastervault.document_intelligence.structural_records import (
         structural_records as structural_records,
@@ -164,11 +170,13 @@ _EXPORT_GROUPS = {
     "renderer": ("render_document_markdown",),
     "store": (
         "load_parsed_document",
+        "load_parsed_document_bytes",
         "parsed_document_bytes",
         "parsed_document_sha256",
         "store_parsed_document",
         "store_source_asset",
         "verify_source_asset",
+        "verify_source_asset_bytes",
     ),
     "structural_records": ("structural_records",),
 }

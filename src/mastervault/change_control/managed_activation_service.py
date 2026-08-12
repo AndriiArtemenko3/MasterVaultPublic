@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -10,31 +9,31 @@ from pathlib import Path
 from typing import Protocol
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generation_resolution import (
+    ManagedActivationServiceError,
+    derive_generation_projection,
+    resolve_generation_notes,
+)
 from mastervault.change_control.managed_generation import (
-    GoverningSourceBinding,
     ManagedActivationCommand,
     ManagedGenerationActivationReceipt,
-    PublishedSourceBinding,
     ResolvedManagedGenerationProjection,
-    ReviewedSourceBinding,
-    derive_managed_generation_projection,
 )
 from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepository,
-    ResolvedGenerationSourceNote,
 )
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
     GenerationZeroOriginBasis,
     ManagedGenerationManifestBindingV2,
     ManagedGoverningSourceAdoptionBinding,
-    ManagedRevisionDecisionRecord,
+    WorkspaceGenerationZeroOriginBasis,
 )
 from mastervault.change_control.managed_review_repository import (
     ResolvedReviewedGenerationSource,
 )
 from mastervault.change_control.managed_store import (
-    ManagedGenerationActivationError,
+    AuthorityVerificationContext,
     ManagedGenerationActivationState,
     ManagedReviewRepositoryResolver,
     ManagedRevisionStoreLifecycle,
@@ -52,10 +51,6 @@ class ManagedGenerationSourceResolver(ManagedReviewRepositoryResolver, Protocol)
     ) -> ResolvedReviewedGenerationSource: ...
 
     def protected_generation_roots(self) -> tuple[Path, ...]: ...
-
-
-class ManagedActivationServiceError(ManagedGenerationActivationError):
-    """A managed generation could not be safely reconciled."""
 
 
 class ManagedActivationBackendUnsupportedError(ManagedActivationServiceError):
@@ -85,92 +80,17 @@ def _notify(hook: FailureHook | None, boundary: str) -> None:
         hook(boundary)
 
 
-def _derive_projection(
-    *,
-    decision: ManagedRevisionDecisionRecord,
-    source: ResolvedReviewedGenerationSource,
-) -> ResolvedManagedGenerationProjection:
-    return derive_managed_generation_projection(
-        decision=decision,
-        reviewed_inventory=source.inventory,
-        temporal_constraints=source.snapshot.aggregate.validated_temporal_constraints(),
-    )
-
-
-def _resolve_generation_notes(
-    *,
-    source: ResolvedReviewedGenerationSource,
-    projection: ResolvedManagedGenerationProjection,
-    state: ManagedGenerationActivationState,
-    repository: ManagedGenerationRepository,
-) -> tuple[ResolvedGenerationSourceNote, ...]:
-    inventory = {item.document.document_version_id: item for item in source.inventory.notes}
-    events = {
-        item.publication.destination.destination_id: item for item in state.publication_events
-    }
-    if len(events) != len(state.publication_events):
-        raise ManagedActivationServiceError(
-            "managed publication events contain duplicate destinations"
-        )
-    generation_workspace = repository.root / "generations" / projection.generation_id / "canonical"
-    resolved: list[ResolvedGenerationSourceNote] = []
-    for entry in projection.entries:
-        binding = entry.source
-        if isinstance(binding, PublishedSourceBinding):
-            event = events.get(binding.destination_id)
-            if event is None or not (
-                event.publication.staged_artifact.artifact_id == binding.staged_artifact_id
-                and event.publication.destination.path == binding.destination_path
-            ):
-                raise ManagedActivationServiceError(
-                    "published generation SourceNote lacks its exact durable event"
-                )
-            content = repository.open_publication(event)
-            workspace = generation_workspace
-        elif isinstance(binding, (ReviewedSourceBinding, GoverningSourceBinding)):
-            note = inventory.get(entry.document.document_version_id)
-            if note is None or not (
-                note.source_note_path == entry.logical_path
-                and note.source_note_sha256 == entry.source_note_sha256
-                and note.source_note_utf8_bytes == entry.source_note_byte_count
-                and note.snapshot_id == binding.source_note_snapshot_id
-                and note.snapshot_sha256 == binding.source_note_snapshot_sha256
-            ):
-                raise ManagedActivationServiceError(
-                    "reviewed generation SourceNote differs from exact projection"
-                )
-            content = note.source_note_utf8.encode("utf-8")
-            workspace = source.workspace_root
-        else:  # pragma: no cover - exhaustive discriminated-union guard
-            raise ManagedActivationServiceError(
-                "generation SourceNote has an unsupported source binding"
-            )
-        if len(content) != entry.source_note_byte_count or (
-            hashlib.sha256(content).hexdigest() != entry.source_note_sha256
-        ):
-            raise ManagedActivationServiceError(
-                "resolved generation SourceNote bytes differ from projection"
-            )
-        resolved.append(
-            ResolvedGenerationSourceNote(
-                entry=entry,
-                content=content,
-                workspace=workspace,
-            )
-        )
-    return tuple(resolved)
-
-
 def activate_reviewed_managed_generation(
     *,
     request_id: str,
     operation_id: str,
     store: SqliteManagedChangeControlStore,
     resolver: ManagedGenerationSourceResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-    prechange_head: AggregateHeadBinding,
     generation_root: Path,
     embedder: EmbeddingProvider,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+    prechange_head: AggregateHeadBinding | None = None,
+    authority_context: AuthorityVerificationContext | None = None,
     backend_kind: str = "sqlite",
     protected_paths: tuple[Path, ...] = (),
     failure_hook: FailureHook | None = None,
@@ -186,11 +106,25 @@ def activate_reviewed_managed_generation(
         raise ManagedActivationBackendUnsupportedError(
             "managed generation activation supports SQLite only in PR15"
         )
+    if authority_context is not None:
+        if verified_bootstrap is not None or prechange_head is not None:
+            raise TypeError(
+                "authority_context cannot be mixed with legacy bootstrap arguments"
+            )
+        context = authority_context
+    else:
+        if verified_bootstrap is None or prechange_head is None:
+            raise TypeError(
+                "either authority_context or the complete legacy bootstrap pair is required"
+            )
+        context = AuthorityVerificationContext.legacy(
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
     review = store.get_managed_review(
         request_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     decision = review.decision_record
     if review.lifecycle != ManagedRevisionStoreLifecycle.DECIDED or decision is None:
@@ -213,7 +147,10 @@ def activate_reviewed_managed_generation(
         )
     expected_authority = decision.command.expected_authority
     if not (
-        isinstance(expected_authority.origin_basis, GenerationZeroOriginBasis)
+        isinstance(
+            expected_authority.origin_basis,
+            (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+        )
         and expected_authority.authority_revision == 0
         and expected_authority.active_generation.generation_number == 0
     ):
@@ -222,8 +159,7 @@ def activate_reviewed_managed_generation(
         )
     active_authority = store.get_active_generation(
         expected_authority.aggregate_id,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     owned_request_id = store.get_managed_activation_operation_request_id(operation_id)
     if owned_request_id is not None and owned_request_id != request_id:
@@ -235,8 +171,7 @@ def activate_reviewed_managed_generation(
         prior_state = store.get_managed_generation_activation(
             operation_id,
             resolver=resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=context,
         )
     exact_completed_replay = bool(
         prior_state is not None
@@ -250,7 +185,7 @@ def activate_reviewed_managed_generation(
             "PR15 activation base is no longer the exact generation-zero authority"
         )
     source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
-    projection = _derive_projection(decision=decision, source=source)
+    projection = derive_generation_projection(decision=decision, source=source)
 
     # The repository constructor creates its root, so every backend, decision,
     # source-byte, and protected-path preflight above deliberately precedes it.
@@ -284,16 +219,14 @@ def activate_reviewed_managed_generation(
     store.claim_managed_activation(
         command,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     _notify(failure_hook, "intent-committed")
 
     state = store.get_managed_generation_activation(
         operation_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     assert state is not None
     for ordinal, publication in enumerate(manifest.publication_delta):
@@ -323,12 +256,11 @@ def activate_reviewed_managed_generation(
         state = store.get_managed_generation_activation(
             operation_id,
             resolver=resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=context,
         )
         assert state is not None
 
-    notes = _resolve_generation_notes(
+    notes = resolve_generation_notes(
         source=source,
         projection=projection,
         state=state,
@@ -365,15 +297,14 @@ def activate_reviewed_managed_generation(
     fresh_review = store.get_managed_review(
         request_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     if fresh_review.decision_record != decision:
         raise ManagedActivationServiceError(
             "managed decision changed between effect preparation and CAS"
         )
     fresh_source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
-    fresh_projection = _derive_projection(decision=decision, source=fresh_source)
+    fresh_projection = derive_generation_projection(decision=decision, source=fresh_source)
     if fresh_projection != projection:
         raise ManagedActivationServiceError(
             "reviewed generation projection changed before authority CAS"
@@ -381,11 +312,10 @@ def activate_reviewed_managed_generation(
     state = store.get_managed_generation_activation(
         operation_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     assert state is not None and state.index_receipt is not None
-    fresh_notes = _resolve_generation_notes(
+    fresh_notes = resolve_generation_notes(
         source=fresh_source,
         projection=fresh_projection,
         state=state,
@@ -407,8 +337,7 @@ def activate_reviewed_managed_generation(
         command,
         capability=effects_capability,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
         failure_hook=failure_hook,
     )
     _notify(failure_hook, "authority-cas-committed")

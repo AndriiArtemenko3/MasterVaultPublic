@@ -154,6 +154,31 @@ if TYPE_CHECKING:
     from mastervault.change_control.analysis_binding import (
         AnalysisBootstrapIntegrityError as AnalysisBootstrapIntegrityError,
     )
+    from mastervault.change_control.application import BootstrapResult as BootstrapResult
+    from mastervault.change_control.application import (
+        ChangeControlApplication as ChangeControlApplication,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationConflictError as ChangeControlApplicationConflictError,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationError as ChangeControlApplicationError,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationErrorCode as ChangeControlApplicationErrorCode,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationIntegrityError as ChangeControlApplicationIntegrityError,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationReviewRequiredError as ChangeControlApplicationReviewRequiredError,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationUnsupportedOperationError as ChangeControlApplicationUnsupportedOperationError,
+    )
+    from mastervault.change_control.application_errors import (
+        ChangeControlApplicationUsageError as ChangeControlApplicationUsageError,
+    )
     from mastervault.change_control.bootstrap import (
         AnalysisBootstrapResult as AnalysisBootstrapResult,
     )
@@ -514,6 +539,9 @@ if TYPE_CHECKING:
         ChangeControlIdempotencyError as ChangeControlIdempotencyError,
     )
     from mastervault.change_control.store import (
+        ChangeControlPlatformUnsupportedError as ChangeControlPlatformUnsupportedError,
+    )
+    from mastervault.change_control.store import (
         ChangeControlReviewAlreadyDecidedError as ChangeControlReviewAlreadyDecidedError,
     )
     from mastervault.change_control.store import (
@@ -584,8 +612,34 @@ if TYPE_CHECKING:
     from mastervault.change_control.workflow import (
         temporal_review_workflow_id as temporal_review_workflow_id,
     )
+    from mastervault.change_control.workspace_bootstrap_repository import (
+        BootstrapSourceRoot as BootstrapSourceRoot,
+    )
 
 _LAZY_EXPORTS = {
+    **{
+        name: ("mastervault.change_control.application", name)
+        for name in (
+            "BootstrapResult",
+            "ChangeControlApplication",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.application_errors", name)
+        for name in (
+            "ChangeControlApplicationConflictError",
+            "ChangeControlApplicationError",
+            "ChangeControlApplicationErrorCode",
+            "ChangeControlApplicationIntegrityError",
+            "ChangeControlApplicationReviewRequiredError",
+            "ChangeControlApplicationUnsupportedOperationError",
+            "ChangeControlApplicationUsageError",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.workspace_bootstrap_repository", name)
+        for name in ("BootstrapSourceRoot",)
+    },
     **{
         name: ("mastervault.change_control.managed_activation_service", name)
         for name in (
@@ -871,6 +925,7 @@ _LAZY_EXPORTS = {
             "ChangeControlConflictError",
             "ChangeControlCorruptionError",
             "ChangeControlIdempotencyError",
+            "ChangeControlPlatformUnsupportedError",
             "ChangeControlReviewAlreadyDecidedError",
             "ChangeControlReviewMissingError",
             "ChangeControlReviewStaleError",
@@ -955,6 +1010,16 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "BootstrapSourceRoot",
+    "BootstrapResult",
+    "ChangeControlApplication",
+    "ChangeControlApplicationConflictError",
+    "ChangeControlApplicationError",
+    "ChangeControlApplicationErrorCode",
+    "ChangeControlApplicationIntegrityError",
+    "ChangeControlApplicationReviewRequiredError",
+    "ChangeControlApplicationUnsupportedOperationError",
+    "ChangeControlApplicationUsageError",
     "ANALYSIS_AGGREGATE_ID",
     "CLAIM_SCOPE_POLICY_VERSION",
     "MAX_CLASSIFICATION_LEDGER_ENTRY_BYTES_V1",
@@ -1005,6 +1070,7 @@ __all__ = [
     "ChangeControlConflictError",
     "ChangeControlCorruptionError",
     "ChangeControlIdempotencyError",
+    "ChangeControlPlatformUnsupportedError",
     "ChangeControlReviewAlreadyDecidedError",
     "ChangeControlReviewMissingError",
     "ChangeControlReviewStaleError",

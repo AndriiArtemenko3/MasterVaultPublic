@@ -26,11 +26,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    require_exact_repository_path,
-)
 from mastervault.change_control.analysis_binding import (
     ALIGNMENT_ATTESTATION_ID as ALIGNMENT_ATTESTATION_ID,
 )
@@ -54,6 +49,11 @@ from mastervault.change_control.models import (
     VersionedClaimRevision,
     canonical_json_bytes,
     normalize_semantic_text,
+)
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    require_exact_repository_path,
 )
 from mastervault.models import CLAIM_ID_RE, Claim, NoteType, SourceNote, SourceType, content_hash
 from mastervault.vaultfs.frontmatter import parse_frontmatter, split_frontmatter

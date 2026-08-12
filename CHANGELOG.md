@@ -42,6 +42,39 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Exact retries and restart reconciliation reuse immutable effect, readiness,
   and activation receipts; adoption-only activation creates no fake
   publication events.
+- A generic SQLite bootstrap boundary for an operator-specified existing v0.2
+  workspace. Its explicit versioned manifest selects managed SourceNotes and
+  supplies exact document identity, dates, role, authority, and full-SHA
+  governing-source evidence without inference. Explicit runtime
+  `BootstrapSourceRoot` bindings preserve ordinary external ingestion
+  provenance without copying or rerendering its raw source or SourceNote;
+  durable authority retains only a logical root/path/provenance binding and a
+  safe content-addressed locator. PDF asset/parsed provenance is
+  transitively bound by the exact typed SourceNote and reopened by its normal
+  projection verifier. A separate closed inventory covers every indexable
+  legacy-vault note (source, wiki, decision, and strategy) through bounded
+  stable no-follow reads; invalid, skipped, external, symlinked, duplicate, or
+  changed inputs fail closed.
+- Read-only legacy-index attestation and generic generation-zero authority.
+  Exact schema/migration and embedding identity, complete document/record/FTS/
+  vector coverage, physical bytes, and deterministic logical contents bind the
+  index to the workspace inventory. SQLite initializes authority only after
+  freshly reopening the immutable bootstrap, inventory, and index receipts;
+  it never rewrites the legacy vault/index, and exact lost-ack retries replay
+  the same evidence.
+- A synchronous library-level application boundary for generic bootstrap and
+  durable status, with non-authoritative operator-run navigation and stable
+  usage, review-required, conflict-or-stale-authority, integrity, and
+  unsupported error categories. Linked artifacts still require verification
+  at their owning authority boundary. Later operations must extend this same
+  façade. This does not add public CLI/operator commands or ordinary
+  `search`/`ask` generation selection.
+- Descriptor-pinned bootstrap and authority-database handoffs. Workspace
+  evidence must be owner-controlled, single-link and non-writable by group or
+  others; the exact workspace and legacy-index descriptors remain live through
+  generation-zero commit. The SQLite authority path is private and
+  inode-checked, while status is immutable/query-only and never creates or
+  migrates state.
 
 - The first v0.3 document-intelligence vertical slice for clean digital PDFs:
   full-byte SHA-256 source identity, immutable content-addressed assets,

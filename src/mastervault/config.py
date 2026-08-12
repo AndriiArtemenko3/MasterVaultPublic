@@ -116,6 +116,18 @@ class PathsCfg(BaseModel):
     def change_control_checkpoint_path(self) -> Path:
         return self.workspace / "change_control" / "checkpoints.sqlite3"
 
+    @property
+    def change_control_generation_root(self) -> Path:
+        """Dedicated root for immutable managed generations.
+
+        This deliberately lives outside both the legacy canonical vault and
+        its rebuildable serving index.  Application services pass the exact
+        derived path into the managed repository boundary; public callers do
+        not assemble generation paths themselves.
+        """
+
+        return self.workspace / "change_control" / "generations"
+
 
 def resolve_config_path() -> Path | None:
     """Return the exact TOML source selected by the settings precedence."""

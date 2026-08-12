@@ -23,6 +23,7 @@ The long-form design documents and architecture decision records behind the root
 | `decisions/0013-deterministic-recorded-revision-planning-and-inert-staging.md` | Exact Step 10b-to-planning execution, role-qualified recorded evidence, deterministic Markdown plan/no-change materialization, byte-compatible target-analysis v2, and manifest-gated inert staging without review authority. |
 | `decisions/0014-durable-revision-planning-admission.md` | Restart-verifiable admission of the complete planning/staging evidence set, v2 managed-run compatibility, authoritative governing-source adoption, and exact managed-review inputs. |
 | `decisions/0015-managed-generation-publication-and-activation.md` | Complete historical/current generation projection, create-only approved publications, descriptor-pinned READY-sealed SQLite indexing, single generation-zero successor activation, recovery, and fail-closed serving. |
+| `decisions/0016-generic-sqlite-workspace-bootstrap-and-application-boundary.md` | Explicit existing-workspace evidence, read-only legacy-index attestation, generic SQLite generation zero, non-authoritative operator navigation, and the stable synchronous application/error boundary. |
 
 ## How it fits
 

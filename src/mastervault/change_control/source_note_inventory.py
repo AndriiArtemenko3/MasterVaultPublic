@@ -14,11 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, SupportsIndex
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    verified_repository_root,
-)
 from mastervault.change_control.bootstrap import (
     ANALYSIS_AGGREGATE_ID,
     AnalysisBootstrapBinding,
@@ -48,6 +43,11 @@ from mastervault.change_control.models import (
     VersionedClaimRevision,
     aggregate_sha256,
     canonical_json_bytes,
+)
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    verified_repository_root,
 )
 from mastervault.change_control.seed import (
     VerifiedDocumentContext,

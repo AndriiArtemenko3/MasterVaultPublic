@@ -5,11 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generation_resolution import (
+    derive_generation_projection,
+    resolve_generation_notes,
+)
 from mastervault.change_control.managed_activation_service import (
     ManagedActivationServiceError,
     ManagedGenerationSourceResolver,
-    _derive_projection,
-    _resolve_generation_notes,
 )
 from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepository,
@@ -19,7 +21,10 @@ from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
     ManagedGenerationManifestBindingV2,
 )
-from mastervault.change_control.managed_store import SqliteManagedChangeControlStore
+from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
+    SqliteManagedChangeControlStore,
+)
 from mastervault.storage.sqlite import SqliteBackend
 
 
@@ -36,18 +41,34 @@ def open_active_managed_sqlite_index(
     aggregate_id: str,
     store: SqliteManagedChangeControlStore,
     resolver: ManagedGenerationSourceResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-    prechange_head: AggregateHeadBinding,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+    prechange_head: AggregateHeadBinding | None = None,
+    authority_context: AuthorityVerificationContext | None = None,
     generation_root: Path,
     protected_paths: tuple[Path, ...] = (),
 ) -> SqliteBackend:
     """Open the exact active index read-only, failing closed on every mismatch."""
 
+    if authority_context is not None:
+        if verified_bootstrap is not None or prechange_head is not None:
+            raise TypeError(
+                "authority_context cannot be mixed with legacy bootstrap arguments"
+            )
+        context = authority_context
+    else:
+        if verified_bootstrap is None or prechange_head is None:
+            raise TypeError(
+                "either authority_context or the complete legacy bootstrap pair is required"
+            )
+        context = AuthorityVerificationContext.legacy(
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
+
     state = store.get_active_managed_generation_state(
         aggregate_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     )
     if state is None:
         raise ManagedServingGenerationZeroError(
@@ -97,8 +118,7 @@ def open_active_managed_sqlite_index(
     decision = store.get_managed_review(
         command.request_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=context,
     ).decision_record
     if decision is None or decision.record_sha256 != command.decision_record_sha256:
         raise ManagedServingError("active managed decision cannot be reopened exactly")
@@ -106,13 +126,13 @@ def open_active_managed_sqlite_index(
     if not isinstance(manifest, ManagedGenerationManifestBindingV2):
         raise ManagedServingError("active managed generation does not have a v2 manifest")
     source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
-    projection = _derive_projection(decision=decision, source=source)
+    projection = derive_generation_projection(decision=decision, source=source)
     if projection != command.projection:
         raise ManagedServingError("active generation projection is no longer reproducible")
     try:
         for event in state.publication_events:
             repository.open_publication(event)
-        notes = _resolve_generation_notes(
+        notes = resolve_generation_notes(
             source=source,
             projection=projection,
             state=state,
@@ -130,8 +150,7 @@ def open_active_managed_sqlite_index(
         current = store.get_active_managed_generation_state(
             aggregate_id,
             resolver=resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=context,
         )
         if current != state:
             raise ManagedServingError("active authority changed during managed index opening")

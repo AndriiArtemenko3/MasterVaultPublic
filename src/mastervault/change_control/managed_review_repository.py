@@ -7,10 +7,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from mastervault.change_control._repository_files import (
-    read_repository_file,
-    verified_repository_root,
-)
 from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
 from mastervault.change_control.bootstrap import incoming_claim_evidence_sha256
 from mastervault.change_control.claim_scopes import claim_scopes_v1
@@ -56,6 +52,10 @@ from mastervault.change_control.recorded_inference import (
     ImpactWireResponse,
     RecordedInferenceOutcome,
     RecordedInferenceTask,
+)
+from mastervault.change_control.repository_files import (
+    read_repository_file,
+    verified_repository_root,
 )
 from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
 from mastervault.change_control.store import ChangeControlSnapshot

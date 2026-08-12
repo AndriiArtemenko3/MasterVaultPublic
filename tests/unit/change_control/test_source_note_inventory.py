@@ -8,13 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    canonical_repo_relative,
-    read_regular_file,
-    require_exact_repository_path,
-)
 from mastervault.change_control.bootstrap import (
     AnalysisBootstrapIntegrityError,
     AnalysisBootstrapResult,
@@ -24,6 +17,13 @@ from mastervault.change_control.bootstrap import (
 from mastervault.change_control.dependency_analysis import (
     CanonicalSourceNoteSnapshot,
     SourceNoteInventory,
+)
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    canonical_repo_relative,
+    read_regular_file,
+    require_exact_repository_path,
 )
 from mastervault.change_control.seed import (
     SeedBoundaryError,

@@ -15,7 +15,7 @@ document but still embeds nothing when no text changed.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NamedTuple
@@ -25,8 +25,10 @@ from pydantic import ValidationError
 from mastervault.document_intelligence import (
     ParsedDocumentV2,
     load_parsed_document,
+    load_parsed_document_bytes,
     structural_records,
     verify_source_asset,
+    verify_source_asset_bytes,
 )
 from mastervault.models import Domain, NoteType, RecordType, SourceNote, WikiEntry, content_hash
 from mastervault.providers import EmbeddingProvider
@@ -90,6 +92,13 @@ class _Prepared:
     structural: list[StructuralRecordRow] = field(default_factory=list)
 
 
+# Public, read-only inspection aliases.  Generation/bootstrap verification
+# needs the exact projection produced by the normal synchroniser, but must not
+# reach through an underscore-prefixed sibling API to get it.
+PreparedIndexUnit = _Unit
+PreparedIndexDocument = _Prepared
+
+
 @dataclass
 class SyncReport:
     docs_upserted: int = 0
@@ -105,12 +114,26 @@ class SyncReport:
 
 
 @dataclass(frozen=True)
-class ExactSourceNoteInput:
-    """One explicitly authorized SourceNote for a closed generation inventory."""
+class ExactWorkspaceFileInput:
+    """One exact auxiliary workspace file already read by a hardened caller."""
+
+    rel_path: str
+    content: bytes
+
+
+@dataclass(frozen=True)
+class ExactVaultNoteInput:
+    """One explicitly authorized note for a closed vault inventory."""
 
     rel_path: str
     content: bytes
     workspace: Path
+    supporting_files: tuple[ExactWorkspaceFileInput, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExactSourceNoteInput(ExactVaultNoteInput):
+    """One explicitly authorized SourceNote for a closed generation inventory."""
 
 
 @dataclass
@@ -121,7 +144,13 @@ class ExactSourceNoteSyncReport(SyncReport):
     record_ids: tuple[str, ...] = ()
 
 
-def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared:
+def _prepare(
+    note: NoteRef,
+    loaded: LoadedNote,
+    *,
+    workspace: Path,
+    exact_workspace_files: Mapping[str, bytes] | None = None,
+) -> _Prepared:
     model, body = loaded
     doc_id = doc_id_for(note)
     domain = note.domain.value
@@ -206,12 +235,29 @@ def _prepare(note: NoteRef, loaded: LoadedNote, *, workspace: Path) -> _Prepared
     if (
         isinstance(model, SourceNote)
         and model.parsed_document is not None
-        and model.parsed_document.document_schema_version == 2
+        and (
+            exact_workspace_files is not None
+            or model.parsed_document.document_schema_version == 2
+        )
     ):
         if model.source_asset is None:
             raise ValueError("parsed PDF source is missing its immutable asset reference")
-        verify_source_asset(model.source_asset, workspace)
-        parsed = load_parsed_document(model.parsed_document, workspace)
+        if exact_workspace_files is None:
+            verify_source_asset(model.source_asset, workspace)
+            parsed = load_parsed_document(model.parsed_document, workspace)
+        else:
+            expected_paths = {
+                model.source_asset.stored_path,
+                model.parsed_document.artifact_path,
+            }
+            if set(exact_workspace_files) != expected_paths:
+                raise ValueError(
+                    "exact PDF projection requires only its bound asset and parsed artifact"
+                )
+            source_bytes = exact_workspace_files[model.source_asset.stored_path]
+            parsed_bytes = exact_workspace_files[model.parsed_document.artifact_path]
+            verify_source_asset_bytes(model.source_asset, source_bytes)
+            parsed = load_parsed_document_bytes(model.parsed_document, parsed_bytes)
         if isinstance(parsed, ParsedDocumentV2):
             structural = structural_records(
                 parsed,
@@ -264,22 +310,23 @@ def prepare_vault(
     return prepared, skipped
 
 
-def prepare_exact_source_notes(
-    notes: tuple[ExactSourceNoteInput, ...],
-) -> list[_Prepared]:
-    """Prepare only caller-authorized bytes under stable logical paths.
+def _prepare_exact_vault_notes(
+    notes: tuple[ExactVaultNoteInput, ...],
+    *,
+    source_notes_only: bool,
+) -> list[PreparedIndexDocument]:
+    """Prepare caller-authorized bytes without walking or skipping members.
 
-    Unlike :func:`prepare_vault`, this seam performs no recursive walk and has
-    no skip channel. Any malformed, duplicate, non-SourceNote, or structurally
-    unresolved member rejects the entire closed inventory.
+    The caller owns inventory closure.  This function parses every supplied
+    byte string and returns exactly the projection used by ``sync_vault``.
     """
 
     if not notes:
-        raise ValueError("exact SourceNote inventory must not be empty")
+        raise ValueError("exact vault inventory must not be empty")
     ordered = tuple(sorted(notes, key=lambda item: item.rel_path))
     if notes != ordered or len({item.rel_path for item in notes}) != len(notes):
-        raise ValueError("exact SourceNotes must use unique canonical path order")
-    prepared: list[_Prepared] = []
+        raise ValueError("exact vault notes must use unique canonical path order")
+    prepared: list[PreparedIndexDocument] = []
     for item in notes:
         rel = item.rel_path
         candidate = Path(rel)
@@ -291,26 +338,47 @@ def prepare_exact_source_notes(
             or any(part.startswith(".") for part in candidate.parts)
             or not rel.endswith(".md")
         ):
-            raise ValueError("exact SourceNote path must be canonical relative Markdown")
+            raise ValueError("exact vault note path must be canonical relative Markdown")
         try:
             text = item.content.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise ValueError(f"exact SourceNote is not UTF-8: {rel}") from exc
+            raise ValueError(f"exact vault note is not UTF-8: {rel}") from exc
         data, body = parse_frontmatter(text)
         raw_type = data.get("type")
         raw_domain = data.get("domain")
         if not isinstance(raw_type, str) or not isinstance(raw_domain, str):
-            raise ValueError(f"exact SourceNote has invalid type/domain: {rel}")
+            raise ValueError(f"exact vault note has invalid type/domain: {rel}")
         try:
             note_type = NoteType(raw_type)
             domain = Domain(raw_domain)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"exact SourceNote has invalid type/domain: {rel}") from exc
-        if note_type != NoteType.SOURCE:
+            raise ValueError(f"exact vault note has invalid type/domain: {rel}") from exc
+        if source_notes_only and note_type != NoteType.SOURCE:
             raise ValueError("managed generation inventory may contain SourceNotes only")
         if not data.get("title"):
             data = {**data, "title": extract_title(body, candidate.stem)}
         model = MODEL_BY_TYPE[note_type].model_validate(data)
+        exact_workspace_files = {
+            supporting.rel_path: supporting.content for supporting in item.supporting_files
+        }
+        if len(exact_workspace_files) != len(item.supporting_files):
+            raise ValueError("exact workspace supporting-file paths must be unique")
+        for supporting in item.supporting_files:
+            supporting_path = Path(supporting.rel_path)
+            if (
+                not supporting.rel_path
+                or supporting_path.is_absolute()
+                or supporting_path.as_posix() != supporting.rel_path
+                or ".." in supporting_path.parts
+                or any(part.startswith(".") for part in supporting_path.parts)
+            ):
+                raise ValueError("exact workspace supporting-file path must be canonical")
+        if not isinstance(model, SourceNote) or model.source_asset is None:
+            if exact_workspace_files:
+                raise ValueError("non-PDF exact note cannot carry supporting workspace files")
+            exact_workspace_files_arg: Mapping[str, bytes] | None = None
+        else:
+            exact_workspace_files_arg = exact_workspace_files
         note = NoteRef(
             abs_path=item.workspace / rel,
             rel_path=rel,
@@ -319,15 +387,36 @@ def prepare_exact_source_notes(
             content_hash=content_hash(text),
         )
         prepared.append(
-            _prepare(note, LoadedNote(model=model, body=body), workspace=item.workspace)
+            _prepare(
+                note,
+                LoadedNote(model=model, body=body),
+                workspace=item.workspace,
+                exact_workspace_files=exact_workspace_files_arg,
+            )
         )
     doc_ids = [item.doc.doc_id for item in prepared]
     if len(set(doc_ids)) != len(doc_ids):
-        raise ValueError("exact SourceNote inventory produces duplicate document IDs")
+        raise ValueError("exact vault inventory produces duplicate document IDs")
     record_ids = [unit.record_id for item in prepared for unit in item.units]
     if len(set(record_ids)) != len(record_ids):
-        raise ValueError("exact SourceNote inventory produces duplicate record IDs")
+        raise ValueError("exact vault inventory produces duplicate record IDs")
     return prepared
+
+
+def prepare_exact_vault_notes(
+    notes: tuple[ExactVaultNoteInput, ...],
+) -> list[PreparedIndexDocument]:
+    """Project one complete, explicit all-note inventory with no skip channel."""
+
+    return _prepare_exact_vault_notes(notes, source_notes_only=False)
+
+
+def prepare_exact_source_notes(
+    notes: tuple[ExactSourceNoteInput, ...],
+) -> list[PreparedIndexDocument]:
+    """Project an explicit managed SourceNote inventory with no skip channel."""
+
+    return _prepare_exact_vault_notes(notes, source_notes_only=True)
 
 
 def sync_exact_source_notes(

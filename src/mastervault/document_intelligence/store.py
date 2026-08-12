@@ -113,12 +113,12 @@ def store_parsed_document(document: ParsedDocumentAny, workspace: Path | str) ->
     )
 
 
-def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) -> ParsedDocumentAny:
-    path = resolve_within(Path(workspace), reference.artifact_path)
-    try:
-        payload = path.read_bytes()
-    except OSError as exc:
-        raise DocumentIntegrityError(f"parsed artefact cannot be read: {path}") from exc
+def load_parsed_document_bytes(
+    reference: ParsedDocumentRef,
+    payload: bytes,
+) -> ParsedDocumentAny:
+    """Validate an exact caller-owned parsed-artifact snapshot."""
+
     actual_sha = hashlib.sha256(payload).hexdigest()
     if actual_sha != reference.artifact_sha256:
         raise DocumentIntegrityError(
@@ -128,7 +128,7 @@ def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) ->
     try:
         document = PARSED_DOCUMENT_ADAPTER.validate_json(payload)
     except (ValidationError, ValueError) as exc:
-        raise DocumentIntegrityError(f"parsed artefact does not validate: {path}") from exc
+        raise DocumentIntegrityError("parsed artefact snapshot does not validate") from exc
     if document.asset_sha256 != reference.asset_sha256:
         raise DocumentIntegrityError("parsed artefact points to a different source asset")
     if (
@@ -156,16 +156,31 @@ def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) ->
     return document
 
 
-def verify_source_asset(reference: SourceAssetRef, workspace: Path | str) -> Path:
-    path = resolve_within(Path(workspace), reference.stored_path)
+def load_parsed_document(reference: ParsedDocumentRef, workspace: Path | str) -> ParsedDocumentAny:
+    path = resolve_within(Path(workspace), reference.artifact_path)
     try:
         payload = path.read_bytes()
     except OSError as exc:
-        raise DocumentIntegrityError(f"source asset cannot be read: {path}") from exc
+        raise DocumentIntegrityError(f"parsed artefact cannot be read: {path}") from exc
+    return load_parsed_document_bytes(reference, payload)
+
+
+def verify_source_asset_bytes(reference: SourceAssetRef, payload: bytes) -> None:
+    """Validate an exact caller-owned source-asset snapshot."""
+
     actual_sha = hashlib.sha256(payload).hexdigest()
     if actual_sha != reference.asset_sha256 or len(payload) != reference.size_bytes:
         raise DocumentIntegrityError(
             f"source asset integrity mismatch: expected {reference.asset_sha256} "
             f"({reference.size_bytes} bytes), found {actual_sha} ({len(payload)} bytes)"
         )
+
+
+def verify_source_asset(reference: SourceAssetRef, workspace: Path | str) -> Path:
+    path = resolve_within(Path(workspace), reference.stored_path)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise DocumentIntegrityError(f"source asset cannot be read: {path}") from exc
+    verify_source_asset_bytes(reference, payload)
     return path

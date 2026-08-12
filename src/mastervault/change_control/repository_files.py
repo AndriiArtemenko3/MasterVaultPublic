@@ -1,4 +1,4 @@
-"""Small fail-closed helpers for repository-owned runtime files."""
+"""Public fail-closed helpers for repository-owned runtime files."""
 
 from __future__ import annotations
 

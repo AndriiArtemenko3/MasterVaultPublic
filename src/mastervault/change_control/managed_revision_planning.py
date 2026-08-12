@@ -18,7 +18,6 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
-from mastervault.change_control._repository_files import canonical_repo_relative
 from mastervault.change_control.impact_results import (
     ImpactDisposition,
     ImpactResultSet,
@@ -30,6 +29,7 @@ from mastervault.change_control.models import (
     normalize_logical_key,
     normalize_semantic_text,
 )
+from mastervault.change_control.repository_files import canonical_repo_relative
 
 MAX_REVISION_PLANNING_TARGETS_V1 = 16
 MAX_REVISION_PLANNING_QUESTIONS_V1 = 64
