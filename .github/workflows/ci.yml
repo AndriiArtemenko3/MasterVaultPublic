@@ -112,11 +112,13 @@ jobs:
       - name: Unit tests (${{ matrix.id }})
         env:
           COVERAGE_FILE: .coverage.${{ matrix.id }}
-        # Two fixed workers use the standard runner without oversubscribing it.
-        # Work stealing fits the deliberately uneven crash-boundary cases, and
-        # a worker crash must fail rather than being hidden by an automatic restart.
+        # Layer exact CI-only tooling over the locked project environment so a
+        # test runner cannot change the frozen application/evaluation identity.
+        # Two fixed workers avoid oversubscription; a worker crash must fail.
         run: >-
-          uv run pytest -q -n 2 --dist worksteal --max-worker-restart=0
+          uv run --locked
+          --with pytest-xdist==3.8.0 --with execnet==2.1.2
+          pytest -q -n 2 --dist worksteal --max-worker-restart=0
           ${{ matrix.pytest_args }}
           --cov --cov-report=
           --junitxml=junit-${{ matrix.id }}.xml
