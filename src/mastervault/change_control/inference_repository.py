@@ -17,12 +17,6 @@ from typing import Any, Final, Literal, Self, SupportsIndex
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    canonical_repo_relative,
-    verified_repository_root,
-)
 from mastervault.change_control.managed_review import (
     InferenceExecutionMode,
     ManagedArtifactKind,
@@ -33,6 +27,12 @@ from mastervault.change_control.recorded_inference import (
     MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1,
     InferenceArtifactPayload,
     RecordedInferenceOutcome,
+)
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    canonical_repo_relative,
+    verified_repository_root,
 )
 from mastervault.change_control.temporal_analysis import (
     MAX_TEMPORAL_ANALYSIS_MANIFEST_CANONICAL_BYTES_V1,

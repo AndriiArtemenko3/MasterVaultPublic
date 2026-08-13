@@ -19,12 +19,6 @@ from typing import Any, Literal, Self
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    read_repository_file,
-    verified_repository_root,
-)
 from mastervault.change_control.models import (
     ClaimSourceReference,
     DocumentAuthority,
@@ -32,6 +26,12 @@ from mastervault.change_control.models import (
     DocumentSpanReference,
     DocumentVersionMetadata,
     VersionedClaimRevision,
+)
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    read_repository_file,
+    verified_repository_root,
 )
 from mastervault.core.paths import PathBoundaryError, resolve_within
 from mastervault.models import NoteType, SourceNote, content_hash

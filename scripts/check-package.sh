@@ -89,7 +89,9 @@ for MIGRATION in \
   'mastervault/storage/migrations/sqlite/003_structural_records.sql' \
   'mastervault/change_control/migrations/sqlite/001_change_control_aggregate.sql' \
   'mastervault/change_control/migrations/sqlite/002_authoritative_human_review.sql' \
-  'mastervault/change_control/migrations/sqlite/003_managed_revision_review.sql'
+  'mastervault/change_control/migrations/sqlite/003_managed_revision_review.sql' \
+  'mastervault/change_control/migrations/sqlite/004_generation_publication_activation.sql' \
+  'mastervault/change_control/migrations/sqlite/005_workspace_bootstrap_application.sql'
 do
   grep -q "$MIGRATION" "$WORK/wheel.txt" \
     || fail "wheel is missing an ordered schema migration ($MIGRATION)"

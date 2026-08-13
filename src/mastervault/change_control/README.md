@@ -264,6 +264,51 @@ knowledge-change workflow.
   It reopens authority, decision, projection, publications, and index evidence,
   returns an immutable query-only backend, and rereads authority before
   returning. Missing, corrupt, substituted, or mismatched state fails closed.
+- `workspace_bootstrap.py` is the generic existing-workspace adoption boundary.
+  A caller-supplied versioned manifest explicitly selects managed SourceNotes
+  and supplies their document identity, effective dates, role, authority, and
+  full-SHA governing-source binding; none of that authority metadata is
+  inferred. A logical root ID, root-relative path, and exact opaque provenance
+  bind every source. The stable `BootstrapSourceRoot` API supplies external
+  roots only at runtime, while durable authority uses a path-safe content
+  address and never persists an absolute runtime locator. Existing absolute
+  ingestion provenance remains unchanged and its governing source is neither
+  copied nor rerendered. PDF asset and parsed provenance remains transitively bound by the
+  exact typed SourceNote and is reopened by its normal projection verifier.
+  The resolver separately captures a complete, closed inventory of every
+  indexable note in the legacy vault through bounded stable no-follow reads.
+  This includes source, wiki, decision, and strategy notes. Symlinks,
+  external hard-link aliases, unsafe ownership or permissions, unbound
+  external/evaluator provenance, invalid or skipped notes,
+  duplicate/case-ambiguous paths, and byte drift fail closed. Descriptor guards
+  over the complete evidence set remain live through the generation-zero
+  authority transaction and verify before and after commit. The result is
+  content-addressed bootstrap intent and inventory evidence, not authority by
+  itself.
+- `legacy_index.py` attests the existing SQLite index read-only against that
+  exact complete inventory. It pins the regular-file inode, rejects SQLite
+  sidecars and path substitution, validates integrity, schema/migration and
+  embedding identity, and proves exact document, record, FTS, and vector
+  coverage with no missing, surplus, duplicate, or skipped item. Its readiness
+  receipt binds both physical bytes and a deterministic logical fingerprint;
+  it never rebuilds or upgrades the legacy index.
+- `operator_run.py` stores content-addressed operator runs and append-only typed
+  links for navigation. Links carry only a separately authoritative target ID
+  and SHA and must be reopened at the owning boundary. They cannot authorize
+  bootstrap, review, publication, index readiness, or activation and may be
+  reconciled after lost acknowledgement from authoritative receipts.
+- `application.py` is the first stable synchronous library façade. This slice
+  exposes generic bootstrap and durable status/navigation; later operator
+  operations must extend the same boundary. It owns configuration/root
+  preflight and maps internal failures through `application_errors.py` to
+  `usage-error`, `review-required`, `conflict-or-stale-authority`,
+  `integrity-failure`, or `unsupported-operation` while retaining the cause
+  chain. This is the boundary for future operator commands; this slice adds no
+  public CLI or ordinary `search`/`ask` integration. Its authority store uses
+  a private descriptor-pinned directory and database inode; status uses a
+  separate immutable/query-only no-create opener and never initializes or
+  migrates state. `BootstrapSourceRoot` is part of this stable boundary;
+  source-root paths are process inputs, not serialized authority.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -405,6 +450,17 @@ Migration `002_authoritative_human_review.sql` is that first additive upgrade.
 It preserves v1 aggregates and receipts without claiming or inventing review
 history for them; pre-`002` history remains digest-only.
 
+Migration `005_workspace_bootstrap_application.sql` adds immutable generic
+workspace-bootstrap intent, inventory, legacy-index readiness, and
+non-authoritative operator-navigation rows. It admits
+`verified-workspace-bootstrap` as a generation-zero origin while preserving
+existing `verified-seed-bootstrap` authority. Generic generation zero is
+created in one SQLite transaction only after a process-local verified
+capability freshly reopens the exact intent, complete inventory, legacy index,
+and pre-change aggregate head. Exact replay returns the same authority;
+different-input reuse or drift fails closed. Neither migration nor bootstrap
+modifies the legacy vault or index, and PostgreSQL is rejected before effects.
+
 `TemporalReviewWorkflow` persists only a versioned primitive execution cursor
 at `<workspace>/change_control/checkpoints.sqlite3`. Its stable topology reads
 the authoritative request, interrupts once while it is open, and rereads
@@ -426,11 +482,17 @@ approved downstream replacements, builds an isolated exact SQLite index, and
 atomically activates the corresponding complete generation. An accepted v2
 review adopts the governing source at its original immutable raw/SourceNote
 paths; adoption-only activation therefore creates no fake publication events.
+The internal application slice can adopt an operator-specified existing SQLite
+workspace as generic generation zero only after its explicit manifest,
+complete vault inventory, and unchanged legacy index have been independently
+verified and durably bound. Operator-run records remain navigation over those
+authorities, never an alternative authority source.
 The synchronous LangGraph wait/reconciliation checkpoint remains disposable
 and cannot create review, publication, index, or activation authority.
 
 Deliberately deferred: concrete hosted/local provider adapters and model
 dependencies, background workers, targeted post-activation regressions, final
-JSON/Markdown audit reporting, operator review UI/CLI integration, managed
-`EDIT` execution, PostgreSQL managed-generation parity, retention/cleanup, the
-public v0.3 release, and deployment.
+JSON/Markdown audit reporting, public application/operator commands, ordinary
+`search`/`ask` generation selection, operator review UI integration, managed
+`EDIT` execution, PostgreSQL managed-bootstrap/generation parity, multi-event
+operator support, retention/cleanup, the public v0.3 release, and deployment.

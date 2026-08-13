@@ -63,11 +63,21 @@ from mastervault.change_control.managed_review import (
     NoChangeImpactCard,
     PatchReconstructionAttestation,
     SourceNoteProjectionBinding,
+    WorkspaceGenerationZeroManifestBinding,
+    WorkspaceGenerationZeroOriginBasis,
 )
 from mastervault.change_control.models import (
     TemporalState,
     canonical_json_bytes,
     resolve_document_temporality,
+)
+from mastervault.change_control.operator_run import (
+    OperatorRunCommand,
+    OperatorRunLinkCommand,
+    OperatorRunLinkKind,
+    OperatorRunLinkRecord,
+    OperatorRunRecord,
+    OperatorRunView,
 )
 from mastervault.change_control.store import (
     ChangeControlConflictError,
@@ -81,6 +91,15 @@ from mastervault.change_control.store import (
     _require_canonical_utc,
     _require_contiguous,
     _require_operation_id,
+)
+from mastervault.change_control.workspace_bootstrap import (
+    MAX_WORKSPACE_INVENTORY_PAYLOAD_BYTES_V1,
+    LegacyIndexReadinessReceipt,
+    VerifiedWorkspaceBootstrapCapability,
+    WorkspaceBootstrapIntent,
+    WorkspaceBootstrapInventory,
+    WorkspaceBootstrapState,
+    WorkspaceInventoryReceipt,
 )
 from mastervault.storage.base import SCHEMA_VERSION
 
@@ -218,8 +237,83 @@ class ManagedGenerationActivationState:
     activation_receipt: ManagedGenerationActivationReceipt | None
 
 
+@dataclass(frozen=True)
+class AuthorityVerificationContext:
+    """Exactly one trusted generation-zero reconstruction context."""
+
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None
+    prechange_head: AggregateHeadBinding | None = None
+    verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None = None
+
+    def __post_init__(self) -> None:
+        legacy = self.verified_bootstrap is not None or self.prechange_head is not None
+        workspace = self.verified_workspace_bootstrap is not None
+        if legacy == workspace:
+            raise TypeError("exactly one legacy or workspace bootstrap context is required")
+        if legacy and (
+            self.verified_bootstrap is None or self.prechange_head is None
+        ):
+            raise TypeError("legacy authority context requires capability and prechange head")
+
+    @classmethod
+    def legacy(
+        cls,
+        *,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        prechange_head: AggregateHeadBinding,
+    ) -> AuthorityVerificationContext:
+        return cls(verified_bootstrap=verified_bootstrap, prechange_head=prechange_head)
+
+    @classmethod
+    def workspace(
+        cls,
+        capability: VerifiedWorkspaceBootstrapCapability,
+    ) -> AuthorityVerificationContext:
+        return cls(verified_workspace_bootstrap=capability)
+
+
+def _authority_context(
+    *,
+    authority_context: AuthorityVerificationContext | None,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None,
+    prechange_head: AggregateHeadBinding | None,
+) -> AuthorityVerificationContext:
+    if authority_context is not None:
+        if verified_bootstrap is not None or prechange_head is not None:
+            raise TypeError(
+                "authority_context cannot be mixed with legacy bootstrap arguments"
+            )
+        return authority_context
+    if verified_bootstrap is None or prechange_head is None:
+        raise TypeError(
+            "either authority_context or the complete legacy bootstrap pair is required"
+        )
+    return AuthorityVerificationContext.legacy(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=prechange_head,
+    )
+
+
 def _canonical_model_json(model: BaseModel) -> str:
     return canonical_json_bytes(model.model_dump(mode="json")).decode("utf-8")
+
+
+def _same_inventory_receipt_inputs(
+    left: WorkspaceInventoryReceipt, right: WorkspaceInventoryReceipt
+) -> bool:
+    excluded = {"receipt_id", "receipt_sha256", "recorded_at"}
+    return left.model_dump(mode="json", exclude=excluded) == right.model_dump(
+        mode="json", exclude=excluded
+    )
+
+
+def _same_index_readiness_inputs(
+    left: LegacyIndexReadinessReceipt, right: LegacyIndexReadinessReceipt
+) -> bool:
+    excluded = {"receipt_id", "receipt_sha256", "ready_at"}
+    return left.model_dump(mode="json", exclude=excluded) == right.model_dump(
+        mode="json", exclude=excluded
+    )
 
 
 def _require_v2_managed_review_write(bundle: ManagedRevisionReviewBundle) -> None:
@@ -306,6 +400,759 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
 
     def _operation_owner(self, operation_id: str) -> tuple[str, str] | None:
         return self._global_operation_owner(operation_id)
+
+    def _read_workspace_bootstrap_in_transaction(
+        self, bootstrap_id: str
+    ) -> WorkspaceBootstrapState | None:
+        intent_row = self.conn.execute(
+            "SELECT * FROM change_control_workspace_bootstrap_intents WHERE bootstrap_id=?",
+            (bootstrap_id,),
+        ).fetchone()
+        if intent_row is None:
+            return None
+        intent = _decode_model(
+            WorkspaceBootstrapIntent,
+            str(intent_row["payload_json"]),
+            label="workspace bootstrap intent",
+        )
+        if not (
+            str(intent_row["bootstrap_id"]) == intent.bootstrap_id == bootstrap_id
+            and str(intent_row["intent_sha256"]) == intent.intent_sha256
+            and str(intent_row["operation_id"]) == intent.operation_id
+            and str(intent_row["aggregate_id"]) == intent.aggregate_id
+            and str(intent_row["inventory_id"]) == intent.inventory_id
+            and str(intent_row["inventory_sha256"]) == intent.inventory_sha256
+            and int(intent_row["payload_schema_version"]) == intent.schema_version == 1
+        ):
+            raise ChangeControlCorruptionError(
+                "workspace bootstrap intent columns differ from canonical evidence"
+            )
+        _require_canonical_utc(str(intent_row["created_at"]))
+
+        inventory_row = self.conn.execute(
+            "SELECT * FROM change_control_workspace_inventories WHERE bootstrap_id=?",
+            (bootstrap_id,),
+        ).fetchone()
+        if inventory_row is None:
+            raise ChangeControlCorruptionError(
+                "workspace bootstrap intent lacks its immutable inventory"
+            )
+        if (
+            len(str(inventory_row["payload_json"]).encode("utf-8"))
+            > MAX_WORKSPACE_INVENTORY_PAYLOAD_BYTES_V1
+        ):
+            raise ChangeControlCorruptionError(
+                "workspace bootstrap inventory exceeds its canonical payload limit"
+            )
+        inventory = _decode_model(
+            WorkspaceBootstrapInventory,
+            str(inventory_row["payload_json"]),
+            label="workspace bootstrap inventory",
+        )
+        if not (
+            str(inventory_row["inventory_id"])
+            == inventory.inventory_id
+            == intent.inventory_id
+            and str(inventory_row["inventory_sha256"])
+            == inventory.inventory_sha256
+            == intent.inventory_sha256
+            and str(inventory_row["bootstrap_id"]) == bootstrap_id
+            and int(inventory_row["payload_schema_version"])
+            == inventory.schema_version
+            == 1
+        ):
+            raise ChangeControlCorruptionError(
+                "workspace inventory columns differ from canonical evidence"
+            )
+        _require_canonical_utc(str(inventory_row["stored_at"]))
+
+        inventory_receipt_row = self.conn.execute(
+            "SELECT * FROM change_control_workspace_inventory_receipts "
+            "WHERE bootstrap_id=?",
+            (bootstrap_id,),
+        ).fetchone()
+        inventory_receipt: WorkspaceInventoryReceipt | None = None
+        if inventory_receipt_row is not None:
+            inventory_receipt = _decode_model(
+                WorkspaceInventoryReceipt,
+                str(inventory_receipt_row["payload_json"]),
+                label="workspace inventory receipt",
+            )
+            if not (
+                str(inventory_receipt_row["bootstrap_id"])
+                == inventory_receipt.bootstrap_id
+                == bootstrap_id
+                and str(inventory_receipt_row["receipt_id"])
+                == inventory_receipt.receipt_id
+                and str(inventory_receipt_row["receipt_sha256"])
+                == inventory_receipt.receipt_sha256
+                and str(inventory_receipt_row["operation_id"])
+                == inventory_receipt.operation_id
+                and str(inventory_receipt_row["aggregate_operation_id"])
+                == inventory_receipt.aggregate_operation_id
+                and str(inventory_receipt_row["aggregate_id"])
+                == inventory_receipt.aggregate_id
+                and int(inventory_receipt_row["aggregate_revision"])
+                == inventory_receipt.aggregate_revision
+                and str(inventory_receipt_row["aggregate_sha256"])
+                == inventory_receipt.aggregate_sha256
+                and str(inventory_receipt_row["inventory_id"])
+                == inventory_receipt.inventory_id
+                and str(inventory_receipt_row["inventory_sha256"])
+                == inventory_receipt.inventory_sha256
+                and int(inventory_receipt_row["payload_schema_version"])
+                == inventory_receipt.schema_version
+                == 1
+                and _require_canonical_utc(str(inventory_receipt_row["recorded_at"]))
+                == inventory_receipt.recorded_at
+            ):
+                raise ChangeControlCorruptionError(
+                    "workspace inventory receipt columns differ from canonical evidence"
+                )
+
+        readiness_row = self.conn.execute(
+            "SELECT * FROM change_control_legacy_index_readiness_receipts "
+            "WHERE bootstrap_id=?",
+            (bootstrap_id,),
+        ).fetchone()
+        readiness: LegacyIndexReadinessReceipt | None = None
+        if readiness_row is not None:
+            readiness = _decode_model(
+                LegacyIndexReadinessReceipt,
+                str(readiness_row["payload_json"]),
+                label="legacy index readiness receipt",
+            )
+            if not (
+                str(readiness_row["bootstrap_id"]) == readiness.bootstrap_id == bootstrap_id
+                and str(readiness_row["receipt_id"]) == readiness.receipt_id
+                and str(readiness_row["receipt_sha256"]) == readiness.receipt_sha256
+                and str(readiness_row["operation_id"]) == readiness.operation_id
+                and str(readiness_row["inventory_receipt_id"])
+                == readiness.inventory_receipt_id
+                and str(readiness_row["inventory_receipt_sha256"])
+                == readiness.inventory_receipt_sha256
+                and str(readiness_row["index_logical_fingerprint"])
+                == readiness.index_logical_fingerprint
+                and str(readiness_row["index_file_sha256"])
+                == readiness.index_file_sha256
+                and int(readiness_row["index_file_byte_count"])
+                == readiness.index_file_byte_count
+                and int(readiness_row["index_schema_version"])
+                == readiness.index_schema_version
+                and str(readiness_row["embedding_model"]) == readiness.embedding_model
+                and int(readiness_row["embedding_dimensions"])
+                == readiness.embedding_dimensions
+                and int(readiness_row["payload_schema_version"])
+                == readiness.schema_version
+                == 1
+                and _require_canonical_utc(str(readiness_row["ready_at"]))
+                == readiness.ready_at
+            ):
+                raise ChangeControlCorruptionError(
+                    "legacy index readiness columns differ from canonical evidence"
+                )
+        try:
+            return WorkspaceBootstrapState(
+                intent=intent,
+                inventory=inventory,
+                inventory_receipt=inventory_receipt,
+                index_readiness_receipt=readiness,
+            )
+        except ValueError as exc:
+            raise ChangeControlCorruptionError(
+                "workspace bootstrap persistence chain is inconsistent"
+            ) from exc
+
+    def claim_workspace_bootstrap(
+        self,
+        *,
+        intent: WorkspaceBootstrapIntent,
+        inventory: WorkspaceBootstrapInventory,
+    ) -> WorkspaceBootstrapState:
+        """Claim one inert immutable manifest and its bounded inventory."""
+
+        intent = WorkspaceBootstrapIntent.model_validate_json(
+            canonical_json_bytes(intent.model_dump(mode="json"))
+        )
+        inventory = WorkspaceBootstrapInventory.model_validate_json(
+            canonical_json_bytes(inventory.model_dump(mode="json"))
+        )
+        candidate = WorkspaceBootstrapState(intent=intent, inventory=inventory)
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(intent.operation_id)
+            if owner is not None:
+                if owner != ("workspace-bootstrap-intent", intent.bootstrap_id):
+                    raise ChangeControlIdempotencyError(
+                        "workspace-bootstrap operation_id is already owned by another write"
+                    )
+                existing = self._read_workspace_bootstrap_in_transaction(intent.bootstrap_id)
+                if (
+                    existing is None
+                    or existing.intent != intent
+                    or existing.inventory != inventory
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "workspace-bootstrap operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            if self._read_workspace_bootstrap_in_transaction(intent.bootstrap_id) is not None:
+                raise ChangeControlIdempotencyError(
+                    "workspace bootstrap already exists under another operation_id"
+                )
+            inventory_owner = self.conn.execute(
+                "SELECT bootstrap_id FROM change_control_workspace_bootstrap_intents "
+                "WHERE inventory_id=?",
+                (intent.inventory_id,),
+            ).fetchone()
+            if inventory_owner is not None:
+                raise ChangeControlIdempotencyError(
+                    "workspace inventory is already claimed under another operation_id"
+                )
+            created_at = _now()
+            self.conn.execute(
+                "INSERT INTO change_control_workspace_bootstrap_intents VALUES "
+                "(?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    intent.bootstrap_id,
+                    intent.intent_sha256,
+                    intent.operation_id,
+                    intent.aggregate_id,
+                    intent.inventory_id,
+                    intent.inventory_sha256,
+                    _canonical_model_json(intent),
+                    created_at,
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_workspace_inventories VALUES "
+                "(?, ?, ?, 1, ?, ?)",
+                (
+                    inventory.inventory_id,
+                    inventory.inventory_sha256,
+                    intent.bootstrap_id,
+                    _canonical_model_json(inventory),
+                    created_at,
+                ),
+            )
+            result = self._read_workspace_bootstrap_in_transaction(intent.bootstrap_id)
+            assert result == candidate
+            self._assert_foreign_keys()
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_workspace_inventory(
+        self, receipt: WorkspaceInventoryReceipt
+    ) -> WorkspaceBootstrapState:
+        """Record exact verified workspace bytes and their temporal aggregate."""
+
+        receipt = WorkspaceInventoryReceipt.model_validate_json(
+            canonical_json_bytes(receipt.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            state = self._read_workspace_bootstrap_in_transaction(receipt.bootstrap_id)
+            if state is None:
+                raise ChangeControlReviewMissingError("workspace bootstrap intent does not exist")
+            owner = self._operation_owner(receipt.operation_id)
+            if owner is not None:
+                if owner[0] != "workspace-inventory":
+                    raise ChangeControlIdempotencyError(
+                        "workspace-inventory operation_id is already owned by another write"
+                    )
+                if state.inventory_receipt is None or not _same_inventory_receipt_inputs(
+                    state.inventory_receipt, receipt
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "workspace-inventory operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return state
+            if state.inventory_receipt is not None:
+                raise ChangeControlIdempotencyError(
+                    "workspace inventory receipt already exists under another operation_id"
+                )
+            expected = WorkspaceBootstrapState(
+                intent=state.intent,
+                inventory=state.inventory,
+                inventory_receipt=receipt,
+            )
+            aggregate_operation = self.conn.execute(
+                "SELECT * FROM change_control_operations WHERE operation_id=?",
+                (receipt.aggregate_operation_id,),
+            ).fetchone()
+            snapshot = self._snapshot_in_transaction(receipt.aggregate_id)
+            if aggregate_operation is None or snapshot is None or not (
+                str(aggregate_operation["aggregate_id"]) == receipt.aggregate_id
+                and aggregate_operation["expected_revision"] is None
+                and str(aggregate_operation["aggregate_sha256"])
+                == receipt.aggregate_sha256
+                and int(aggregate_operation["committed_revision"])
+                == receipt.aggregate_revision
+                and int(aggregate_operation["changed"]) == 1
+                and snapshot.revision == receipt.aggregate_revision
+                and snapshot.aggregate_sha256 == receipt.aggregate_sha256
+            ):
+                raise ManagedReviewAuthorityError(
+                    "workspace inventory does not bind an exact create-only aggregate commit"
+                )
+            declared_documents = {
+                item.document.document_version_id: item.document
+                for item in state.inventory.managed_source_notes
+            }
+            persisted_documents = {
+                item.document_version_id: item
+                for item in snapshot.aggregate.documents.documents
+            }
+            if persisted_documents != declared_documents:
+                raise ManagedReviewAuthorityError(
+                    "workspace aggregate documents differ from explicit managed SourceNotes"
+                )
+            self.conn.execute(
+                "INSERT INTO change_control_workspace_inventory_receipts VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    receipt.bootstrap_id,
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    receipt.operation_id,
+                    receipt.aggregate_operation_id,
+                    receipt.aggregate_id,
+                    receipt.aggregate_revision,
+                    receipt.aggregate_sha256,
+                    receipt.inventory_id,
+                    receipt.inventory_sha256,
+                    _canonical_model_json(receipt),
+                    receipt.recorded_at,
+                ),
+            )
+            result = self._read_workspace_bootstrap_in_transaction(receipt.bootstrap_id)
+            assert result == expected
+            self._assert_foreign_keys()
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_legacy_index_readiness(
+        self, receipt: LegacyIndexReadinessReceipt
+    ) -> WorkspaceBootstrapState:
+        """Record verifier-derived logical and physical legacy-index readiness."""
+
+        receipt = LegacyIndexReadinessReceipt.model_validate_json(
+            canonical_json_bytes(receipt.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            state = self._read_workspace_bootstrap_in_transaction(receipt.bootstrap_id)
+            if state is None or state.inventory_receipt is None:
+                raise ChangeControlReviewMissingError(
+                    "legacy-index readiness requires a workspace inventory receipt"
+                )
+            owner = self._operation_owner(receipt.operation_id)
+            if owner is not None:
+                if owner[0] != "legacy-index-readiness":
+                    raise ChangeControlIdempotencyError(
+                        "legacy-index operation_id is already owned by another write"
+                    )
+                if state.index_readiness_receipt is None or not _same_index_readiness_inputs(
+                    state.index_readiness_receipt, receipt
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "legacy-index operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return state
+            if state.index_readiness_receipt is not None:
+                raise ChangeControlIdempotencyError(
+                    "legacy-index readiness already exists under another operation_id"
+                )
+            expected = WorkspaceBootstrapState(
+                intent=state.intent,
+                inventory=state.inventory,
+                inventory_receipt=state.inventory_receipt,
+                index_readiness_receipt=receipt,
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_legacy_index_readiness_receipts VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    receipt.bootstrap_id,
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    receipt.operation_id,
+                    receipt.inventory_receipt_id,
+                    receipt.inventory_receipt_sha256,
+                    receipt.index_logical_fingerprint,
+                    receipt.index_file_sha256,
+                    receipt.index_file_byte_count,
+                    receipt.index_schema_version,
+                    receipt.embedding_model,
+                    receipt.embedding_dimensions,
+                    _canonical_model_json(receipt),
+                    receipt.ready_at,
+                ),
+            )
+            result = self._read_workspace_bootstrap_in_transaction(receipt.bootstrap_id)
+            assert result == expected
+            self._assert_foreign_keys()
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_workspace_bootstrap(self, bootstrap_id: str) -> WorkspaceBootstrapState | None:
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            result = self._read_workspace_bootstrap_in_transaction(bootstrap_id)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def _read_operator_run_in_transaction(self, run_id: str) -> OperatorRunView | None:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_operator_runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        record = _decode_model(
+            OperatorRunRecord,
+            str(row["payload_json"]),
+            label="operator run",
+        )
+        command = record.command
+        if not (
+            str(row["run_id"]) == command.run_id
+            and str(row["run_sha256"]) == command.run_sha256
+            and str(row["operation_id"]) == command.operation_id
+            and str(row["aggregate_id"]) == command.aggregate_id
+            and str(row["base_authority_id"]) == command.base_authority_id
+            and int(row["base_authority_revision"]) == command.base_authority_revision
+            and str(row["base_active_pointer_sha256"])
+            == command.base_active_pointer_sha256
+            and int(row["payload_schema_version"])
+            == record.schema_version
+            == command.schema_version
+            == 1
+            and _require_canonical_utc(str(row["created_at"])) == record.created_at
+        ):
+            raise ChangeControlCorruptionError(
+                "operator run columns differ from canonical navigation evidence"
+            )
+        link_rows = self.conn.execute(
+            "SELECT * FROM change_control_operator_run_links "
+            "WHERE run_id=? ORDER BY sequence",
+            (run_id,),
+        ).fetchall()
+        _require_contiguous(link_rows, "sequence")
+        links: list[OperatorRunLinkRecord] = []
+        for link_row in link_rows:
+            link = _decode_model(
+                OperatorRunLinkRecord,
+                str(link_row["payload_json"]),
+                label="operator run link",
+            )
+            item = link.command
+            if not (
+                str(link_row["run_id"]) == item.run_id == run_id
+                and int(link_row["sequence"]) == link.sequence
+                and str(link_row["link_id"]) == item.link_id
+                and str(link_row["link_sha256"]) == item.link_sha256
+                and str(link_row["operation_id"]) == item.operation_id
+                and str(link_row["link_kind"]) == item.kind.value
+                and str(link_row["target_id"]) == item.target_id
+                and str(link_row["target_sha256"]) == item.target_sha256
+                and int(link_row["payload_schema_version"])
+                == link.schema_version
+                == item.schema_version
+                == 1
+                and _require_canonical_utc(str(link_row["recorded_at"]))
+                == link.recorded_at
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator link columns differ from canonical navigation evidence"
+                )
+            links.append(link)
+        try:
+            return OperatorRunView(record=record, links=tuple(links))
+        except ValueError as exc:
+            raise ChangeControlCorruptionError(
+                "operator run navigation links are inconsistent"
+            ) from exc
+
+    def _validate_extension_records(self) -> None:
+        bootstrap_rows = self.conn.execute(
+            "SELECT bootstrap_id FROM change_control_workspace_bootstrap_intents "
+            "ORDER BY bootstrap_id"
+        ).fetchall()
+        for row in bootstrap_rows:
+            if self._read_workspace_bootstrap_in_transaction(str(row["bootstrap_id"])) is None:
+                raise ChangeControlCorruptionError(
+                    "workspace bootstrap disappeared during validation"
+                )
+        run_rows = self.conn.execute(
+            "SELECT run_id FROM change_control_operator_runs ORDER BY run_id"
+        ).fetchall()
+        for row in run_rows:
+            if self._read_operator_run_in_transaction(str(row["run_id"])) is None:
+                raise ChangeControlCorruptionError("operator run disappeared during validation")
+
+    def create_operator_run(self, command: OperatorRunCommand) -> OperatorRunView:
+        """Create or replay navigation rooted at an exact committed authority."""
+
+        command = OperatorRunCommand.model_validate_json(
+            canonical_json_bytes(command.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(command.operation_id)
+            if owner is not None:
+                if owner != ("operator-run", command.run_id):
+                    raise ChangeControlIdempotencyError(
+                        "operator-run operation_id is already owned by another write"
+                    )
+                existing = self._read_operator_run_in_transaction(command.run_id)
+                if existing is None or existing.record.command != command:
+                    raise ChangeControlIdempotencyError(
+                        "operator-run operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            existing = self._read_operator_run_in_transaction(command.run_id)
+            if existing is not None:
+                raise ChangeControlIdempotencyError(
+                    "operator run already exists under another operation_id"
+                )
+            authority = self.conn.execute(
+                "SELECT authority_id,authority_revision,active_generation_number,"
+                "active_pointer_sha256 FROM change_control_active_generation "
+                "WHERE aggregate_id=?",
+                (command.aggregate_id,),
+            ).fetchone()
+            if authority is None or not (
+                str(authority["authority_id"]) == command.base_authority_id
+                and int(authority["authority_revision"])
+                == command.base_authority_revision
+                == 0
+                and int(authority["active_generation_number"]) == 0
+                and str(authority["active_pointer_sha256"])
+                == command.base_active_pointer_sha256
+            ):
+                raise ManagedReviewStaleError(
+                    "operator run requires the exact committed generation-zero authority"
+                )
+            record = OperatorRunRecord(command=command, created_at=_now())
+            self.conn.execute(
+                "INSERT INTO change_control_operator_runs VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    command.run_id,
+                    command.run_sha256,
+                    command.operation_id,
+                    command.aggregate_id,
+                    command.base_authority_id,
+                    command.base_authority_revision,
+                    command.base_active_pointer_sha256,
+                    _canonical_model_json(record),
+                    record.created_at,
+                ),
+            )
+            result = self._read_operator_run_in_transaction(command.run_id)
+            assert result is not None
+            self._assert_foreign_keys()
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def _verify_operator_link_target(
+        self,
+        command: OperatorRunLinkCommand,
+        run: OperatorRunView,
+    ) -> None:
+        table_binding = {
+            OperatorRunLinkKind.BOOTSTRAP_INTENT: (
+                "change_control_workspace_bootstrap_intents",
+                "bootstrap_id",
+                "intent_sha256",
+            ),
+            OperatorRunLinkKind.WORKSPACE_INVENTORY: (
+                "change_control_workspace_inventory_receipts",
+                "receipt_id",
+                "receipt_sha256",
+            ),
+            OperatorRunLinkKind.LEGACY_INDEX_READINESS: (
+                "change_control_legacy_index_readiness_receipts",
+                "receipt_id",
+                "receipt_sha256",
+            ),
+        }.get(command.kind)
+        if table_binding is not None:
+            table, identity_column, sha_column = table_binding
+            row = self.conn.execute(
+                f"SELECT {sha_column} AS sha FROM {table} WHERE {identity_column}=?",
+                (command.target_id,),
+            ).fetchone()
+            if row is None or str(row["sha"]) != command.target_sha256:
+                raise ChangeControlCorruptionError(
+                    "operator link target cannot be reopened exactly"
+                )
+        elif command.kind == OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY:
+            base = run.record.command
+            authority = self.conn.execute(
+                "SELECT authority_id,authority_revision,active_generation_number,"
+                "active_pointer_sha256 FROM change_control_active_generation "
+                "WHERE aggregate_id=?",
+                (base.aggregate_id,),
+            ).fetchone()
+            if not (
+                command.target_id == base.base_authority_id
+                and command.target_sha256 == base.base_active_pointer_sha256
+                and authority is not None
+                and str(authority["authority_id"]) == command.target_id
+                and int(authority["authority_revision"])
+                == base.base_authority_revision
+                == 0
+                and int(authority["active_generation_number"]) == 0
+                and str(authority["active_pointer_sha256"])
+                == command.target_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator authority link target cannot be reopened exactly"
+                )
+        else:
+            raise ManagedReviewAuthorityError(
+                "operator link kind has no authoritative target resolver"
+            )
+
+    def record_operator_run_link(
+        self, command: OperatorRunLinkCommand
+    ) -> OperatorRunView:
+        """Append or replay one typed navigation link without granting authority."""
+
+        command = OperatorRunLinkCommand.model_validate_json(
+            canonical_json_bytes(command.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            run = self._read_operator_run_in_transaction(command.run_id)
+            if run is None:
+                raise ChangeControlReviewMissingError("operator run does not exist")
+            owner = self._operation_owner(command.operation_id)
+            if owner is not None:
+                if owner != ("operator-run-link", command.link_id):
+                    raise ChangeControlIdempotencyError(
+                        "operator-link operation_id is already owned by another write"
+                    )
+                existing = next(
+                    (item for item in run.links if item.command.link_id == command.link_id),
+                    None,
+                )
+                if existing is None or existing.command != command:
+                    raise ChangeControlIdempotencyError(
+                        "operator-link operation_id was reused for different inputs"
+                    )
+                self._verify_operator_link_target(existing.command, run)
+                self._commit()
+                return run
+            if any(item.command.kind == command.kind for item in run.links):
+                raise ChangeControlIdempotencyError(
+                    "operator run link kind is already bound by another operation"
+                )
+            self._verify_operator_link_target(command, run)
+            record = OperatorRunLinkRecord(
+                command=command,
+                sequence=len(run.links),
+                recorded_at=_now(),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_operator_run_links VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    command.run_id,
+                    record.sequence,
+                    command.link_id,
+                    command.link_sha256,
+                    command.operation_id,
+                    command.kind.value,
+                    command.target_id,
+                    command.target_sha256,
+                    _canonical_model_json(record),
+                    record.recorded_at,
+                ),
+            )
+            result = self._read_operator_run_in_transaction(command.run_id)
+            assert result is not None
+            self._assert_foreign_keys()
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_operator_run(self, run_id: str) -> OperatorRunView | None:
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            result = self._read_operator_run_in_transaction(run_id)
+            if result is not None:
+                for link in result.links:
+                    self._verify_operator_link_target(link.command, result)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
 
     @staticmethod
     def _resolve_contract_and_artifacts(
@@ -527,6 +1374,10 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         verified_bootstrap: VerifiedAnalysisBootstrapCapability,
         prechange_head: AggregateHeadBinding,
     ) -> AuthorityRevisionBinding:
+        context = AuthorityVerificationContext.legacy(
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         candidate = AuthorityRevisionBinding.create_generation_zero(
             analysis_bootstrap=verified_bootstrap.binding,
             prechange_head=prechange_head,
@@ -559,20 +1410,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     )
                 existing = self._read_active_authority(
                     candidate.aggregate_id,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 if existing != candidate:
                     raise ChangeControlIdempotencyError(
                         "generation-zero operation_id was reused for different authority"
                     )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return existing
             if existing_row is not None:
                 existing = self._read_active_authority(
                     candidate.aggregate_id,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 if existing == candidate:
                     raise ChangeControlIdempotencyError(
@@ -618,7 +1467,151 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
+            return candidate
+        except BaseException as exc:
+            if not self.conn.in_transaction:
+                raise
+            self._rollback_operation_error(exc)
+            raise
+
+    def initialize_workspace_generation_zero(
+        self,
+        *,
+        verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability,
+        evidence_guard: Callable[[], None] | None = None,
+    ) -> AuthorityRevisionBinding:
+        """Initialize generation zero from exact, freshly guarded workspace evidence.
+
+        ``evidence_guard`` is the application-owned cross-resource handoff.  It
+        runs while this store holds ``BEGIN IMMEDIATE`` and again after a new
+        authority row has been staged but before commit.  A filesystem drift
+        failure therefore rolls the authority transaction back instead of
+        leaving a pointer based on evidence that changed during the handoff.
+        The capability itself also owns a mandatory fresh verifier; an optional
+        caller guard can only add a stricter check, never replace that verifier.
+        """
+
+        try:
+            capability_state = verified_workspace_bootstrap.verify()
+            inventory_receipt, index_receipt = capability_state.require_complete()
+            candidate = AuthorityRevisionBinding.create_workspace_generation_zero(
+                intent=capability_state.intent,
+                inventory_receipt=inventory_receipt,
+                index_receipt=index_receipt,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ChangeControlCorruptionError(
+                "workspace generation zero requires a valid complete verifier capability"
+            ) from exc
+        operation_id = _require_operation_id(
+            f"managed-generation-zero:{candidate.active_pointer_sha256}"
+        )
+        context = AuthorityVerificationContext.workspace(verified_workspace_bootstrap)
+
+        def verify_current_evidence() -> None:
+            try:
+                current_state = verified_workspace_bootstrap.verify()
+            except (TypeError, ValueError) as exc:
+                raise ManagedReviewAuthorityError(
+                    "workspace generation-zero evidence cannot be freshly verified"
+                ) from exc
+            if current_state != capability_state:
+                raise ManagedReviewAuthorityError(
+                    "workspace generation-zero evidence changed during authority handoff"
+                )
+            if evidence_guard is not None:
+                evidence_guard()
+
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            durable_state = self._read_workspace_bootstrap_in_transaction(
+                capability_state.intent.bootstrap_id
+            )
+            if durable_state != capability_state:
+                raise ManagedReviewAuthorityError(
+                    "workspace capability differs from exact durable bootstrap evidence"
+                )
+            verify_current_evidence()
+            owner = self._operation_owner(operation_id)
+            existing_row = self.conn.execute(
+                "SELECT * FROM change_control_active_generation WHERE aggregate_id=?",
+                (candidate.aggregate_id,),
+            ).fetchone()
+            if owner is not None:
+                if owner != ("generation-zero", candidate.aggregate_id):
+                    raise ChangeControlIdempotencyError(
+                        "operation_id is already owned by another write"
+                    )
+                existing = self._read_active_authority(
+                    candidate.aggregate_id,
+                    authority_context=context,
+                )
+                if existing != candidate:
+                    raise ChangeControlIdempotencyError(
+                        "workspace generation-zero operation_id was reused for different authority"
+                    )
+                verify_current_evidence()
+                self._commit()
+                verify_current_evidence()
+                return existing
+            if existing_row is not None:
+                existing = self._read_active_authority(
+                    candidate.aggregate_id,
+                    authority_context=context,
+                )
+                if existing == candidate:
+                    raise ChangeControlIdempotencyError(
+                        "workspace generation zero exists under another operation_id"
+                    )
+                raise ChangeControlConflictError(
+                    "a different active-generation pointer already exists"
+                )
+            if not isinstance(candidate.origin_basis, WorkspaceGenerationZeroOriginBasis):
+                raise ChangeControlCorruptionError(
+                    "workspace generation-zero candidate has an invalid origin kind"
+                )
+            manifest = candidate.origin_basis.generation_zero_manifest
+            created_at = _now()
+            self.conn.execute(
+                "INSERT INTO change_control_generation_manifests VALUES "
+                "(?, ?, ?, ?, ?, 'generation-zero', 0, NULL, 1, ?, ?)",
+                (
+                    manifest.manifest_id,
+                    candidate.aggregate_id,
+                    candidate.active_generation.generation_id,
+                    candidate.active_generation.generation_number,
+                    manifest.manifest_sha256,
+                    _canonical_model_json(manifest),
+                    created_at,
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_active_generation VALUES "
+                "(?, ?, ?, ?, 'verified-workspace-bootstrap', ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    candidate.aggregate_id,
+                    operation_id,
+                    candidate.authority_id,
+                    candidate.authority_revision,
+                    candidate.active_generation.generation_id,
+                    candidate.active_generation.generation_number,
+                    candidate.active_generation.manifest_sha256,
+                    candidate.active_pointer_sha256,
+                    _canonical_model_json(candidate),
+                    created_at,
+                ),
+            )
+            verify_current_evidence()
+            self._assert_foreign_keys()
+            self._commit()
+            verify_current_evidence()
             return candidate
         except BaseException as exc:
             if not self.conn.in_transaction:
@@ -630,8 +1623,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self,
         aggregate_id: str,
         *,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> AuthorityRevisionBinding:
         row = self.conn.execute(
             "SELECT * FROM change_control_active_generation WHERE aggregate_id=?",
@@ -663,8 +1655,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             authority,
             initialization_operation_id=str(row["initialization_operation_id"]),
             initialized_at=_require_canonical_utc(str(row["initialized_at"])),
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=authority_context,
         )
         return authority
 
@@ -672,8 +1663,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self,
         authority: AuthorityRevisionBinding,
         *,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> None:
         """Reopen any bounded historical authority through immutable evidence."""
 
@@ -690,8 +1680,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             authority,
             initialization_operation_id=str(row["initialization_operation_id"]),
             initialized_at=_require_canonical_utc(str(row["initialized_at"])),
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=authority_context,
         )
 
     def _verify_authority_chain(
@@ -700,8 +1689,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         *,
         initialization_operation_id: str,
         initialized_at: str,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> None:
         """Verify one authority through at most 32 exact managed successors."""
 
@@ -720,7 +1708,10 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
             seen_authorities.add(current.authority_id)
             seen_generations.add(current.active_generation.generation_id)
-            if isinstance(current.origin_basis, GenerationZeroOriginBasis):
+            if isinstance(
+                current.origin_basis,
+                (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+            ):
                 manifest_row = self.conn.execute(
                     "SELECT * FROM change_control_generation_manifests WHERE generation_id=?",
                     (current.active_generation.generation_id,),
@@ -729,11 +1720,21 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlCorruptionError(
                         "generation-zero manifest is absent from authority chain"
                     )
-                manifest = _decode_model(
-                    GenerationZeroManifestBinding,
-                    str(manifest_row["payload_json"]),
-                    label="generation-zero manifest",
+                manifest: (
+                    GenerationZeroManifestBinding | WorkspaceGenerationZeroManifestBinding
                 )
+                if isinstance(current.origin_basis, GenerationZeroOriginBasis):
+                    manifest = _decode_model(
+                        GenerationZeroManifestBinding,
+                        str(manifest_row["payload_json"]),
+                        label="generation-zero manifest",
+                    )
+                else:
+                    manifest = _decode_model(
+                        WorkspaceGenerationZeroManifestBinding,
+                        str(manifest_row["payload_json"]),
+                        label="generation-zero manifest",
+                    )
                 if not (
                     current.authority_revision == 0
                     and current.active_generation.generation_number == 0
@@ -760,12 +1761,49 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlCorruptionError(
                         "generation-zero initialization operation is not deterministic"
                     )
-                self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
-                verify_generation_zero_authority(
-                    authority=current,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
-                )
+                if isinstance(current.origin_basis, GenerationZeroOriginBasis):
+                    verified_bootstrap = authority_context.verified_bootstrap
+                    prechange_head = authority_context.prechange_head
+                    if verified_bootstrap is None or prechange_head is None:
+                        raise ManagedReviewAuthorityError(
+                            "seed authority requires the exact legacy bootstrap context"
+                        )
+                    self._verify_bootstrap_operations(verified_bootstrap, prechange_head)
+                    verify_generation_zero_authority(
+                        authority=current,
+                        verified_bootstrap=verified_bootstrap,
+                        prechange_head=prechange_head,
+                    )
+                else:
+                    capability = authority_context.verified_workspace_bootstrap
+                    if capability is None:
+                        raise ManagedReviewAuthorityError(
+                            "workspace authority requires the exact workspace capability"
+                        )
+                    try:
+                        state = capability.verify()
+                        inventory_receipt, index_receipt = state.require_complete()
+                    except (TypeError, ValueError) as exc:
+                        raise ManagedReviewAuthorityError(
+                            "workspace bootstrap capability cannot be verified"
+                        ) from exc
+                    durable = self._read_workspace_bootstrap_in_transaction(
+                        state.intent.bootstrap_id
+                    )
+                    if durable != state:
+                        raise ManagedReviewAuthorityError(
+                            "workspace capability differs from durable bootstrap evidence"
+                        )
+                    try:
+                        current.verify_workspace_generation_zero_origin(
+                            intent=state.intent,
+                            inventory_receipt=inventory_receipt,
+                            index_receipt=index_receipt,
+                        )
+                    except ValueError as exc:
+                        raise ManagedReviewAuthorityError(
+                            "workspace generation zero differs from verified evidence"
+                        ) from exc
                 return
 
             origin = current.origin_basis
@@ -807,9 +1845,15 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self,
         aggregate_id: str,
         *,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> AuthorityRevisionBinding:
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -820,10 +1864,9 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_global_operation_ownership()
             result = self._read_active_authority(
                 aggregate_id,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return result
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -833,8 +1876,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self,
         bundle: ManagedRevisionReviewBundle,
         *,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> AuthorityRevisionBinding:
         expected_head = bundle.review_base.review_open_head
         snapshot = self._snapshot_in_transaction(expected_head.aggregate_id)
@@ -874,8 +1916,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
         authority = self._read_active_authority(
             expected_head.aggregate_id,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=authority_context,
         )
         if authority != bundle.review_base.authority:
             raise ManagedReviewStaleError("managed review active-generation authority is stale")
@@ -1066,9 +2107,15 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         command: ManagedRevisionReviewRequestCommand,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedRevisionReviewRequestReceipt:
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         command = ManagedRevisionReviewRequestCommand.model_validate_json(command.model_dump_json())
         _require_v2_managed_review_write(command.bundle)
         self._resolve_contract_and_artifacts(command.bundle, resolver)
@@ -1095,17 +2142,15 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 self._assert_temporal_prerequisite(existing.command.bundle)
                 self._assert_live_or_decided_request_authority(
                     existing,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 receipt = self._append_request_delivery(existing, replayed=True)
-                self.conn.execute("COMMIT")
+                self._commit()
                 return receipt
 
             authority = self._assert_live_review_base(
                 command.bundle,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             self._assert_temporal_prerequisite(command.bundle)
             if (
@@ -1165,7 +2210,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
             receipt = self._append_request_delivery(record, replayed=False)
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return receipt
         except BaseException as exc:
             if not self.conn.in_transaction:
@@ -1257,12 +2302,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         operation_id: str,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedRevisionReviewRequestRecord | None:
         """Reopen immutable request evidence without consulting mutable live heads."""
 
         operation_id = _require_operation_id(operation_id)
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -1273,7 +2324,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_global_operation_ownership()
             owner = self._operation_owner(operation_id)
             if owner is None:
-                self.conn.execute("COMMIT")
+                self._commit()
                 return None
             if owner[0] != "managed-request":
                 raise ChangeControlIdempotencyError(
@@ -1286,10 +2337,9 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._assert_temporal_prerequisite(record.command.bundle)
             self._assert_live_or_decided_request_authority(
                 record,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return record
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -1331,9 +2381,15 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         command: ManagedRevisionDecisionCommand,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedRevisionDecisionReceipt:
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         command = ManagedRevisionDecisionCommand.model_validate_json(command.model_dump_json())
         _require_v2_managed_review_write(command.bundle)
         _reject_deferred_managed_edits(command)
@@ -1365,11 +2421,10 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 self._assert_temporal_prerequisite(existing.command.bundle)
                 self._verify_stored_authority_chain(
                     existing.command.expected_authority,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 receipt = self._append_decision_delivery(existing, replayed=True)
-                self.conn.execute("COMMIT")
+                self._commit()
                 return receipt
 
             if command.request_record != stored:
@@ -1388,8 +2443,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
             self._assert_live_review_base(
                 stored.command.bundle,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             self._assert_temporal_prerequisite(stored.command.bundle)
             rebuilt = ManagedRevisionDecisionCommand.create(
@@ -1478,7 +2532,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
             receipt = self._append_decision_delivery(record, replayed=False)
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return receipt
         except BaseException as exc:
             if not self.conn.in_transaction:
@@ -1657,15 +2711,13 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self,
         record: ManagedRevisionReviewRequestRecord,
         *,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> None:
         # Exact operation replay is a delivery fact, not a second attempt to
         # open the request. It remains replayable after aggregate staleness.
         self._verify_stored_authority_chain(
             record.command.bundle.review_base.authority,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=authority_context,
         )
 
     def get_managed_review(
@@ -1673,9 +2725,15 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         request_id: str,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedRevisionReviewStoreView:
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -1702,8 +2760,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
             current_authority = self._read_active_authority(
                 request.command.bundle.review_base.authority.aggregate_id,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             decision_row = self.conn.execute(
                 "SELECT 1 FROM change_control_managed_review_decisions WHERE request_id=?",
@@ -1715,8 +2772,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 try:
                     self._assert_live_review_base(
                         request.command.bundle,
-                        verified_bootstrap=verified_bootstrap,
-                        prechange_head=prechange_head,
+                        authority_context=context,
                     )
                 except ManagedReviewStaleError:
                     lifecycle = ManagedRevisionStoreLifecycle.STALE
@@ -1727,8 +2783,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 self._assert_temporal_prerequisite(decision.command.bundle)
                 self._verify_stored_authority_chain(
                     decision.command.expected_authority,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 receipt = self._initial_decision_receipt(decision)
                 lifecycle = ManagedRevisionStoreLifecycle.DECIDED
@@ -1741,7 +2796,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 decision_record=decision,
                 receipt=receipt,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return view
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -1968,12 +3023,14 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         command: ManagedActivationCommand,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext,
     ) -> ManagedRevisionDecisionRecord:
         expected = command.expected_authority
         if not (
-            isinstance(expected.origin_basis, GenerationZeroOriginBasis)
+            isinstance(
+                expected.origin_basis,
+                (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+            )
             and expected.authority_revision == 0
             and expected.active_generation.generation_number == 0
         ):
@@ -2023,8 +3080,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         self._assert_temporal_prerequisite(decision.command.bundle)
         self._verify_stored_authority_chain(
             command.expected_authority,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=prechange_head,
+            authority_context=authority_context,
         )
         try:
             successor = AuthorityRevisionBinding.create_managed_successor(
@@ -2046,12 +3102,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         command: ManagedActivationCommand,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedActivationIntentRecord:
         """Create or exactly replay the sole operation-owned activation intent."""
 
         command = ManagedActivationCommand.model_validate_json(command.model_dump_json())
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN IMMEDIATE")
         try:
@@ -2063,8 +3125,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_activation_command(
                 command,
                 resolver=resolver,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             owner = self._operation_owner(command.operation_id)
             if owner is not None:
@@ -2077,7 +3138,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlIdempotencyError(
                         "managed activation operation_id was reused for different inputs"
                     )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return existing
             if (
                 self.conn.execute(
@@ -2091,8 +3152,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
             current = self._read_active_authority(
                 command.expected_authority.aggregate_id,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             if current != command.expected_authority:
                 raise ManagedGenerationActivationStaleError(
@@ -2123,7 +3183,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return record
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2188,7 +3248,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                         "managed publication ordinal was reused for different evidence"
                     )
                 self._read_publication_events(event.activation_id)
-                self.conn.execute("COMMIT")
+                self._commit()
                 return persisted
             if event.ordinal != len(self._read_publication_events(event.activation_id)):
                 raise ManagedGenerationActivationError(
@@ -2211,7 +3271,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return event
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2260,7 +3320,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlIdempotencyError(
                         "managed index readiness was reused for different evidence"
                     )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return existing
             self.conn.execute(
                 "INSERT INTO change_control_index_generation_receipts VALUES "
@@ -2281,7 +3341,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return receipt
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2292,12 +3352,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         operation_id: str,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedGenerationActivationState | None:
         """Reopen exact durable activation evidence without writing a delivery row."""
 
         operation_id = _require_operation_id(operation_id)
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -2308,7 +3374,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_global_operation_ownership()
             owner = self._operation_owner(operation_id)
             if owner is None:
-                self.conn.execute("COMMIT")
+                self._commit()
                 return None
             if owner[0] != "managed-activation":
                 raise ChangeControlIdempotencyError(
@@ -2318,8 +3384,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_activation_command(
                 intent.command,
                 resolver=resolver,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             state = ManagedGenerationActivationState(
                 intent=intent,
@@ -2327,7 +3392,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 index_receipt=self._read_index_receipt(intent.command.activation_id),
                 activation_receipt=self._read_activation_receipt(intent.command.activation_id),
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return state
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2350,14 +3415,14 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_global_operation_ownership()
             owner = self._operation_owner(operation_id)
             if owner is None:
-                self.conn.execute("COMMIT")
+                self._commit()
                 return None
             if owner[0] != "managed-activation":
                 raise ChangeControlIdempotencyError(
                     "operation_id is already owned by another write"
                 )
             request_id = self._read_activation_intent(owner[1]).command.request_id
-            self.conn.execute("COMMIT")
+            self._commit()
             return request_id
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2368,11 +3433,17 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         aggregate_id: str,
         *,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
     ) -> ManagedGenerationActivationState | None:
         """Return exact effect evidence for the active managed successor, if any."""
 
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -2383,19 +3454,20 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._validate_global_operation_ownership()
             authority = self._read_active_authority(
                 aggregate_id,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
-            if isinstance(authority.origin_basis, GenerationZeroOriginBasis):
-                self.conn.execute("COMMIT")
+            if isinstance(
+                authority.origin_basis,
+                (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+            ):
+                self._commit()
                 return None
             receipt = self._read_generation_activation_receipt_by_authority(authority.authority_id)
             intent = self._read_activation_intent(receipt.activation_id)
             self._validate_activation_command(
                 intent.command,
                 resolver=resolver,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             state = ManagedGenerationActivationState(
                 intent=intent,
@@ -2403,7 +3475,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 index_receipt=self._read_index_receipt(receipt.activation_id),
                 activation_receipt=receipt,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return state
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2415,13 +3487,19 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         *,
         capability: RepositoryVerifiedManagedGenerationEffects,
         resolver: ManagedReviewRepositoryResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-        prechange_head: AggregateHeadBinding,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
+        prechange_head: AggregateHeadBinding | None = None,
+        authority_context: AuthorityVerificationContext | None = None,
         failure_hook: Callable[[str], None] | None = None,
     ) -> ManagedGenerationActivationReceipt:
         """Atomically CAS authority and commit its exact immutable activation receipt."""
 
         command = ManagedActivationCommand.model_validate_json(command.model_dump_json())
+        context = _authority_context(
+            authority_context=authority_context,
+            verified_bootstrap=verified_bootstrap,
+            prechange_head=prechange_head,
+        )
         self._require_ready()
         self._begin("BEGIN IMMEDIATE")
         try:
@@ -2433,8 +3511,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             decision = self._validate_activation_command(
                 command,
                 resolver=resolver,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             intent = self._read_activation_intent(command.activation_id)
             if intent.command != command:
@@ -2467,19 +3544,17 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             if existing is not None:
                 active = self._read_active_authority(
                     command.expected_authority.aggregate_id,
-                    verified_bootstrap=verified_bootstrap,
-                    prechange_head=prechange_head,
+                    authority_context=context,
                 )
                 if active != existing.activated_authority:
                     raise ChangeControlCorruptionError(
                         "recorded activation is not the exact active authority"
                     )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return existing
             current = self._read_active_authority(
                 command.expected_authority.aggregate_id,
-                verified_bootstrap=verified_bootstrap,
-                prechange_head=prechange_head,
+                authority_context=context,
             )
             if current != command.expected_authority:
                 raise ManagedGenerationActivationStaleError(
@@ -2550,7 +3625,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self._assert_foreign_keys()
-            self.conn.execute("COMMIT")
+            self._commit()
             return receipt
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -2558,6 +3633,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
 
 
 __all__ = [
+    "AuthorityVerificationContext",
     "ManagedGenerationActivationError",
     "ManagedGenerationActivationStaleError",
     "ManagedGenerationActivationState",

@@ -14,13 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, SupportsIndex
 
-from mastervault.change_control._repository_files import (
-    RepositoryFileBoundaryError,
-    RepositoryFileIntegrityError,
-    canonical_repo_relative,
-    require_exact_repository_path,
-    verified_repository_root,
-)
 from mastervault.change_control.inference_repository import (
     MAX_PENDING_FILES_PER_DIRECTORY_V1,
     FilesystemInferenceEvidenceRepository,
@@ -39,8 +32,16 @@ from mastervault.change_control.managed_generation import (
 from mastervault.change_control.managed_review import (
     GenerationPublicationBinding,
     GenerationZeroOriginBasis,
+    WorkspaceGenerationZeroOriginBasis,
 )
 from mastervault.change_control.models import canonical_json_bytes
+from mastervault.change_control.repository_files import (
+    RepositoryFileBoundaryError,
+    RepositoryFileIntegrityError,
+    canonical_repo_relative,
+    require_exact_repository_path,
+    verified_repository_root,
+)
 from mastervault.providers import EmbeddingProvider
 from mastervault.storage.base import SCHEMA_VERSION, StorageError
 from mastervault.storage.sqlite import SqliteBackend
@@ -589,7 +590,10 @@ class ManagedGenerationRepository:
     def _require_generation_zero_command(command: ManagedActivationCommand) -> None:
         expected = command.expected_authority
         if not (
-            isinstance(expected.origin_basis, GenerationZeroOriginBasis)
+            isinstance(
+                expected.origin_basis,
+                (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+            )
             and expected.authority_revision == 0
             and expected.active_generation.generation_number == 0
         ):

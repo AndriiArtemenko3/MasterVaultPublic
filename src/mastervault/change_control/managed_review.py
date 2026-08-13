@@ -35,6 +35,11 @@ from mastervault.change_control.models import (
     normalize_logical_key,
 )
 from mastervault.change_control.review import normalize_actor_id, normalize_review_rationale
+from mastervault.change_control.workspace_bootstrap import (
+    LegacyIndexReadinessReceipt,
+    WorkspaceBootstrapIntent,
+    WorkspaceInventoryReceipt,
+)
 
 MAX_MANAGED_TARGETS_V1 = 16
 MAX_MANAGED_REVISION_PLANS_V1 = 8
@@ -1512,6 +1517,104 @@ class GenerationZeroOriginBasis(_StrictFrozenModel):
         return self
 
 
+class WorkspaceGenerationZeroManifestBinding(_StrictFrozenModel):
+    """Deterministic base manifest over a verified complete workspace."""
+
+    schema_version: Literal[1] = 1
+    manifest_id: str = Field(pattern=_ID_PATTERNS["mzeromanifest"].pattern)
+    manifest_sha256: str = Field(pattern=SHA256_PATTERN)
+    encoding: Literal["verified-workspace-bootstrap-v1"] = "verified-workspace-bootstrap-v1"
+    bootstrap_id: str = Field(pattern=r"^workspacebootstrap:[0-9a-f]{64}$")
+    intent_sha256: str = Field(pattern=SHA256_PATTERN)
+    inventory_receipt_id: str = Field(
+        pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$"
+    )
+    inventory_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    index_receipt_id: str = Field(pattern=r"^legacyindexreceipt:[0-9a-f]{64}$")
+    index_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    prechange_head: AggregateHeadBinding
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"manifest_id", "manifest_sha256"})
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        digest = _sha256(self._payload())
+        if self.manifest_sha256 != digest or self.manifest_id != f"mzeromanifest:{digest}":
+            raise ValueError("workspace generation-zero manifest differs from exact evidence")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        intent: WorkspaceBootstrapIntent,
+        inventory_receipt: WorkspaceInventoryReceipt,
+        index_receipt: LegacyIndexReadinessReceipt,
+        prechange_head: AggregateHeadBinding,
+    ) -> Self:
+        if not (
+            inventory_receipt.bootstrap_id == intent.bootstrap_id
+            and inventory_receipt.aggregate_id == intent.aggregate_id == prechange_head.aggregate_id
+            and inventory_receipt.aggregate_revision == prechange_head.revision
+            and inventory_receipt.aggregate_sha256 == prechange_head.aggregate_sha256
+            and inventory_receipt.inventory_id == intent.inventory_id
+            and inventory_receipt.inventory_sha256 == intent.inventory_sha256
+            and index_receipt.bootstrap_id == intent.bootstrap_id
+            and index_receipt.inventory_receipt_id == inventory_receipt.receipt_id
+            and index_receipt.inventory_receipt_sha256 == inventory_receipt.receipt_sha256
+        ):
+            raise ValueError("workspace generation zero requires one exact bootstrap chain")
+        values = {
+            "schema_version": 1,
+            "encoding": "verified-workspace-bootstrap-v1",
+            "bootstrap_id": intent.bootstrap_id,
+            "intent_sha256": intent.intent_sha256,
+            "inventory_receipt_id": inventory_receipt.receipt_id,
+            "inventory_receipt_sha256": inventory_receipt.receipt_sha256,
+            "index_receipt_id": index_receipt.receipt_id,
+            "index_receipt_sha256": index_receipt.receipt_sha256,
+            "prechange_head": prechange_head.model_dump(mode="json"),
+        }
+        digest = _sha256(values)
+        return _validate_canonical_json(
+            cls,
+            {"manifest_id": f"mzeromanifest:{digest}", "manifest_sha256": digest, **values},
+        )
+
+
+class WorkspaceGenerationZeroOriginBasis(_StrictFrozenModel):
+    origin_kind: Literal["verified-workspace-bootstrap"] = "verified-workspace-bootstrap"
+    authoritative_repository_resolution_required: Literal[True] = True
+    bootstrap_id: str = Field(pattern=r"^workspacebootstrap:[0-9a-f]{64}$")
+    intent_sha256: str = Field(pattern=SHA256_PATTERN)
+    inventory_receipt_id: str = Field(
+        pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$"
+    )
+    inventory_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    index_receipt_id: str = Field(pattern=r"^legacyindexreceipt:[0-9a-f]{64}$")
+    index_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    prechange_head: AggregateHeadBinding
+    generation_zero_manifest: WorkspaceGenerationZeroManifestBinding
+    generation_zero_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _bootstrap(self) -> Self:
+        manifest = self.generation_zero_manifest
+        if not (
+            manifest.bootstrap_id == self.bootstrap_id
+            and manifest.intent_sha256 == self.intent_sha256
+            and manifest.inventory_receipt_id == self.inventory_receipt_id
+            and manifest.inventory_receipt_sha256 == self.inventory_receipt_sha256
+            and manifest.index_receipt_id == self.index_receipt_id
+            and manifest.index_receipt_sha256 == self.index_receipt_sha256
+            and manifest.prechange_head == self.prechange_head
+            and self.generation_zero_manifest_sha256 == manifest.manifest_sha256
+        ):
+            raise ValueError("workspace generation-zero origin differs from exact receipts")
+        return self
+
+
 class ManagedDecisionOriginBasis(_StrictFrozenModel):
     origin_kind: Literal["managed-decision"] = "managed-decision"
     authoritative_record_resolution_required: Literal[True] = True
@@ -1533,7 +1636,11 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
     authority_revision: int = Field(ge=0)
     active_generation: ContentAddressedGenerationBinding
     active_pointer_sha256: str = Field(pattern=SHA256_PATTERN)
-    origin_basis: GenerationZeroOriginBasis | ManagedDecisionOriginBasis = Field(
+    origin_basis: (
+        GenerationZeroOriginBasis
+        | WorkspaceGenerationZeroOriginBasis
+        | ManagedDecisionOriginBasis
+    ) = Field(
         discriminator="origin_kind"
     )
 
@@ -1553,13 +1660,16 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def _identity(self) -> Self:
-        if isinstance(self.origin_basis, GenerationZeroOriginBasis):
-            seed_origin = self.origin_basis
+        if isinstance(
+            self.origin_basis,
+            (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis),
+        ):
+            zero_origin = self.origin_basis
             if self.authority_revision != 0:
                 raise ValueError("generation-zero authority revision must be zero")
             if self.active_generation.generation_number != 0 or (
                 self.active_generation.manifest_sha256
-                != seed_origin.generation_zero_manifest_sha256
+                != zero_origin.generation_zero_manifest_sha256
             ):
                 raise ValueError("verified seed origin is valid only for exact generation zero")
         else:
@@ -1586,7 +1696,11 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
         aggregate_id: str,
         authority_revision: int,
         active_generation: ContentAddressedGenerationBinding,
-        origin_basis: GenerationZeroOriginBasis | ManagedDecisionOriginBasis,
+        origin_basis: (
+            GenerationZeroOriginBasis
+            | WorkspaceGenerationZeroOriginBasis
+            | ManagedDecisionOriginBasis
+        ),
     ) -> Self:
         pointer = {
             "aggregate_id": _exact_logical_key(aggregate_id, label="aggregate_id"),
@@ -1662,6 +1776,67 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
         if self != expected:
             raise ValueError(
                 "generation-zero authority does not resolve to exact verified bootstrap roots"
+            )
+
+    @classmethod
+    def create_workspace_generation_zero(
+        cls,
+        *,
+        intent: WorkspaceBootstrapIntent,
+        inventory_receipt: WorkspaceInventoryReceipt,
+        index_receipt: LegacyIndexReadinessReceipt,
+    ) -> Self:
+        prechange_head = AggregateHeadBinding.create(
+            aggregate_id=inventory_receipt.aggregate_id,
+            revision=inventory_receipt.aggregate_revision,
+            aggregate_sha256=inventory_receipt.aggregate_sha256,
+        )
+        manifest = WorkspaceGenerationZeroManifestBinding.create(
+            intent=intent,
+            inventory_receipt=inventory_receipt,
+            index_receipt=index_receipt,
+            prechange_head=prechange_head,
+        )
+        generation = ContentAddressedGenerationBinding.create(
+            generation_number=0,
+            manifest_sha256=manifest.manifest_sha256,
+        )
+        origin = WorkspaceGenerationZeroOriginBasis(
+            authoritative_repository_resolution_required=True,
+            bootstrap_id=intent.bootstrap_id,
+            intent_sha256=intent.intent_sha256,
+            inventory_receipt_id=inventory_receipt.receipt_id,
+            inventory_receipt_sha256=inventory_receipt.receipt_sha256,
+            index_receipt_id=index_receipt.receipt_id,
+            index_receipt_sha256=index_receipt.receipt_sha256,
+            prechange_head=prechange_head,
+            generation_zero_manifest=manifest,
+            generation_zero_manifest_sha256=manifest.manifest_sha256,
+        )
+        return cls._create(
+            aggregate_id=intent.aggregate_id,
+            authority_revision=0,
+            active_generation=generation,
+            origin_basis=origin,
+        )
+
+    def verify_workspace_generation_zero_origin(
+        self,
+        *,
+        intent: WorkspaceBootstrapIntent,
+        inventory_receipt: WorkspaceInventoryReceipt,
+        index_receipt: LegacyIndexReadinessReceipt,
+    ) -> None:
+        if not isinstance(self.origin_basis, WorkspaceGenerationZeroOriginBasis):
+            raise ValueError("workspace verification requires a verified-workspace origin")
+        expected = self.create_workspace_generation_zero(
+            intent=intent,
+            inventory_receipt=inventory_receipt,
+            index_receipt=index_receipt,
+        )
+        if self != expected:
+            raise ValueError(
+                "workspace generation-zero authority does not resolve to exact receipts"
             )
 
     @classmethod
@@ -4892,6 +5067,8 @@ __all__ = [
     "ManagedImpactOutputRefBinding",
     "ManagedInferenceContractBinding",
     "ManagedDecisionOriginBasis",
+    "WorkspaceGenerationZeroManifestBinding",
+    "WorkspaceGenerationZeroOriginBasis",
     "ManagedReviewBaseBinding",
     "ManagedReviewLifecycleStatus",
     "ManagedRevisionDecisionCommand",

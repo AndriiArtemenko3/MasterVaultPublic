@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
+import stat
 from collections import defaultdict
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -63,12 +66,14 @@ from mastervault.change_control.review import (
 from mastervault.document_intelligence.models import EvidenceRef, StructuralEvidenceRef
 
 _STORE_IDENTITY = "mastervault.change-control.sqlite"
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 5
 _MODEL_SCHEMA_VERSION = 1
 _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "sqlite"
 _MIGRATION_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
+_SQLITE_HEADER_MAGIC = b"SQLite format 3\x00"
+_SQLITE_ROLLBACK_JOURNAL_HEADER_MODES = b"\x01\x01"
 
 _AGGREGATE_TABLES_CHILD_FIRST = (
     "change_control_temporal_constraint_bases",
@@ -118,17 +123,31 @@ _MANAGED_GENERATION_EFFECT_TABLES = {
     "change_control_index_generation_receipts",
     "change_control_generation_activation_receipts",
 }
-_EXPECTED_TABLES = _V3_EXPECTED_TABLES | _MANAGED_GENERATION_EFFECT_TABLES
+_V4_EXPECTED_TABLES = _V3_EXPECTED_TABLES | _MANAGED_GENERATION_EFFECT_TABLES
+_WORKSPACE_BOOTSTRAP_APPLICATION_TABLES = {
+    "change_control_workspace_bootstrap_intents",
+    "change_control_workspace_inventories",
+    "change_control_workspace_inventory_receipts",
+    "change_control_legacy_index_readiness_receipts",
+    "change_control_operator_runs",
+    "change_control_operator_run_links",
+}
+_EXPECTED_TABLES = _V4_EXPECTED_TABLES | _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES
 _EXPECTED_TABLES_BY_VERSION = {
     1: _V1_EXPECTED_TABLES,
     2: _V2_EXPECTED_TABLES,
     3: _V3_EXPECTED_TABLES,
-    4: _EXPECTED_TABLES,
+    4: _V4_EXPECTED_TABLES,
+    5: _EXPECTED_TABLES,
 }
 
 
 class ChangeControlStoreError(RuntimeError):
     """Base error for the dedicated change-control store."""
+
+
+class ChangeControlPlatformUnsupportedError(ChangeControlStoreError):
+    """The host lacks a mandatory secure SQLite authority primitive."""
 
 
 class ChangeControlConflictError(ChangeControlStoreError):
@@ -178,6 +197,344 @@ class ChangeControlCommit:
     changed: bool
     committed_at: str
     replayed: bool = False
+
+
+def _inode(info: os.stat_result) -> tuple[int, int]:
+    return info.st_dev, info.st_ino
+
+
+def _stable_file_identity(
+    info: os.stat_result,
+) -> tuple[int, int, int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_uid,
+        info.st_mode,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        info.st_nlink,
+    )
+
+
+def _require_secure_open_platform() -> None:
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "getuid", "pread")
+    if os.name != "posix" or any(not hasattr(os, name) for name in required):
+        raise ChangeControlPlatformUnsupportedError(
+            "platform cannot pin the change-control SQLite database without following links"
+        )
+    if os.open not in os.supports_dir_fd or os.stat not in os.supports_dir_fd:
+        raise ChangeControlPlatformUnsupportedError(
+            "platform lacks descriptor-relative change-control database inspection"
+        )
+    if os.stat not in os.supports_follow_symlinks:
+        raise ChangeControlPlatformUnsupportedError(
+            "platform cannot inspect the change-control database without following links"
+        )
+
+
+def _require_case_exact_entry(parent_fd: int, name: str, *, required: bool) -> bool:
+    try:
+        matches = [entry for entry in os.listdir(parent_fd) if entry.casefold() == name.casefold()]
+    except OSError as exc:
+        raise ChangeControlCorruptionError(
+            "change-control database directory cannot be inspected exactly"
+        ) from exc
+    if not matches:
+        if required:
+            raise ChangeControlCorruptionError("change-control database path does not exist")
+        return False
+    if len(matches) != 1 or matches[0] != name:
+        raise ChangeControlCorruptionError(
+            "change-control database path is case-ambiguous or not canonical"
+        )
+    return True
+
+
+@dataclass
+class _PinnedChangeControlDatabase:
+    path: Path
+    parent_fd: int
+    file_fd: int
+    name: str
+    initial_identity: tuple[int, int, int, int, int, int, int, int]
+
+    def close(self) -> None:
+        file_fd, parent_fd = self.file_fd, self.parent_fd
+        self.file_fd = -1
+        self.parent_fd = -1
+        if file_fd >= 0:
+            os.close(file_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+    def verify(self, *, unchanged: bool = False, require_nonempty: bool = False) -> os.stat_result:
+        if self.file_fd < 0 or self.parent_fd < 0:
+            raise ChangeControlCorruptionError(
+                "change-control database descriptor guard is closed"
+            )
+        try:
+            opened = os.fstat(self.file_fd)
+            current = os.stat(
+                self.name,
+                dir_fd=self.parent_fd,
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            raise ChangeControlCorruptionError(
+                "change-control database path changed while pinned"
+            ) from exc
+        current_parent_fd = -1
+        try:
+            current_parent_fd = _open_secure_parent(self.path, create=False)
+            current_parent = os.fstat(current_parent_fd)
+            pinned_parent = os.fstat(self.parent_fd)
+        finally:
+            if current_parent_fd >= 0:
+                os.close(current_parent_fd)
+        if _inode(current_parent) != _inode(pinned_parent):
+            raise ChangeControlCorruptionError(
+                "change-control database parent path was substituted while pinned"
+            )
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(current.st_mode)
+            or opened.st_uid != os.getuid()
+            or current.st_uid != os.getuid()
+            or opened.st_nlink != 1
+            or current.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or stat.S_IMODE(current.st_mode) != 0o600
+            or _inode(opened) != _inode(current)
+            or (require_nonempty and (opened.st_size <= 0 or current.st_size <= 0))
+        ):
+            raise ChangeControlCorruptionError(
+                "change-control database is not one private regular pinned inode"
+            )
+        if unchanged and (
+            _stable_file_identity(opened) != self.initial_identity
+            or _stable_file_identity(current) != self.initial_identity
+        ):
+            raise ChangeControlCorruptionError(
+                "change-control database changed during read-only inspection"
+            )
+        return opened
+
+    def reject_sidecars(self, *, allow_rollback_journal: bool) -> None:
+        try:
+            names = os.listdir(self.parent_fd)
+        except OSError as exc:
+            raise ChangeControlCorruptionError(
+                "change-control database sidecars cannot be inspected"
+            ) from exc
+        folded = {name.casefold() for name in names}
+        suffixes = ["-wal", "-shm"]
+        if not allow_rollback_journal:
+            suffixes.append("-journal")
+        for suffix in suffixes:
+            if f"{self.name}{suffix}".casefold() in folded:
+                raise ChangeControlCorruptionError(
+                    "secure change-control inspection refuses transaction sidecars"
+                )
+
+    def verify_rollback_journal_header(self, *, allow_empty: bool) -> None:
+        """Require a pinned SQLite file to declare rollback-journal read/write modes."""
+
+        opened = self.verify(require_nonempty=not allow_empty)
+        if opened.st_size == 0 and allow_empty:
+            return
+        try:
+            header = os.pread(self.file_fd, 20, 0)
+        except OSError as exc:
+            raise ChangeControlCorruptionError(
+                "change-control SQLite header cannot be read from its pinned inode"
+            ) from exc
+        if (
+            len(header) != 20
+            or header[:16] != _SQLITE_HEADER_MAGIC
+            or header[18:20] != _SQLITE_ROLLBACK_JOURNAL_HEADER_MODES
+        ):
+            raise ChangeControlCorruptionError(
+                "change-control SQLite authority is not an exact rollback-journal database"
+            )
+
+
+def _open_secure_parent(path: Path, *, create: bool) -> int:
+    _require_secure_open_platform()
+    if not path.is_absolute() or "." in path.parts or ".." in path.parts or path.name == "":
+        raise ChangeControlStoreError(
+            "secure change-control database path must be absolute and canonical"
+        )
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    current_fd = -1
+    try:
+        current_fd = os.open("/", directory_flags)
+        for component in path.parent.parts[1:]:
+            present = _require_case_exact_entry(current_fd, component, required=False)
+            if not present:
+                if not create:
+                    raise ChangeControlCorruptionError(
+                        "change-control database directory does not exist"
+                    )
+                with suppress(FileExistsError):
+                    os.mkdir(component, mode=0o700, dir_fd=current_fd)
+                _require_case_exact_entry(current_fd, component, required=True)
+            inspected = os.stat(component, dir_fd=current_fd, follow_symlinks=False)
+            if not stat.S_ISDIR(inspected.st_mode):
+                raise ChangeControlCorruptionError(
+                    "change-control database parent is not a directory"
+                )
+            next_fd = os.open(component, directory_flags, dir_fd=current_fd)
+            opened = os.fstat(next_fd)
+            if not stat.S_ISDIR(opened.st_mode) or _inode(opened) != _inode(inspected):
+                os.close(next_fd)
+                raise ChangeControlCorruptionError(
+                    "change-control database parent changed while traversing"
+                )
+            os.close(current_fd)
+            current_fd = next_fd
+        parent = os.fstat(current_fd)
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid != os.getuid()
+            or stat.S_IMODE(parent.st_mode) != 0o700
+        ):
+            raise ChangeControlCorruptionError(
+                "change-control database parent is not a private owner-controlled directory"
+            )
+        result = current_fd
+        current_fd = -1
+        return result
+    except ChangeControlStoreError:
+        raise
+    except OSError as exc:
+        raise ChangeControlCorruptionError(
+            "change-control database parent cannot be pinned exactly"
+        ) from exc
+    finally:
+        if current_fd >= 0:
+            os.close(current_fd)
+
+
+def _pin_change_control_database(
+    path: Path,
+    *,
+    create: bool,
+    read_only: bool,
+) -> _PinnedChangeControlDatabase:
+    parent_fd = -1
+    file_fd = -1
+    try:
+        parent_fd = _open_secure_parent(path, create=create)
+        present = _require_case_exact_entry(parent_fd, path.name, required=False)
+        flags = os.O_RDONLY if read_only else os.O_RDWR
+        flags |= os.O_NOFOLLOW | os.O_NONBLOCK
+        if not present:
+            if not create or read_only:
+                raise ChangeControlCorruptionError(
+                    "change-control database path does not exist"
+                )
+            try:
+                file_fd = os.open(
+                    path.name,
+                    flags | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                    dir_fd=parent_fd,
+                )
+            except FileExistsError:
+                _require_case_exact_entry(parent_fd, path.name, required=True)
+                file_fd = os.open(path.name, flags, dir_fd=parent_fd)
+        else:
+            inspected = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+            file_fd = os.open(path.name, flags, dir_fd=parent_fd)
+            if _inode(os.fstat(file_fd)) != _inode(inspected):
+                raise ChangeControlCorruptionError(
+                    "change-control database inode changed while opening"
+                )
+        opened = os.fstat(file_fd)
+        pinned = _PinnedChangeControlDatabase(
+            path=path,
+            parent_fd=parent_fd,
+            file_fd=file_fd,
+            name=path.name,
+            initial_identity=_stable_file_identity(opened),
+        )
+        parent_fd = -1
+        file_fd = -1
+        pinned.verify(require_nonempty=read_only)
+        pinned.reject_sidecars(allow_rollback_journal=not read_only)
+        pinned.verify_rollback_journal_header(allow_empty=not read_only)
+        return pinned
+    except ChangeControlStoreError:
+        raise
+    except OSError as exc:
+        raise ChangeControlCorruptionError(
+            "change-control SQLite database cannot be pinned exactly"
+        ) from exc
+    finally:
+        if file_fd >= 0:
+            os.close(file_fd)
+        if parent_fd >= 0:
+            os.close(parent_fd)
+
+
+def _descriptor_alias(pinned: _PinnedChangeControlDatabase) -> Path:
+    expected = _inode(pinned.verify(require_nonempty=True))
+    for candidate in (
+        Path(f"/proc/self/fd/{pinned.file_fd}"),
+        Path(f"/dev/fd/{pinned.file_fd}"),
+    ):
+        probe = -1
+        try:
+            probe = os.open(candidate, os.O_RDONLY | os.O_NONBLOCK)
+            if _inode(os.fstat(probe)) == expected:
+                return candidate
+        except OSError:
+            continue
+        finally:
+            if probe >= 0:
+                os.close(probe)
+    raise ChangeControlPlatformUnsupportedError(
+        "platform cannot bind SQLite to the pinned change-control database descriptor"
+    )
+
+
+def _verify_sqlite_locator(
+    conn: sqlite3.Connection,
+    pinned: _PinnedChangeControlDatabase,
+) -> None:
+    try:
+        databases = conn.execute("PRAGMA database_list").fetchall()
+    except sqlite3.Error as exc:
+        raise ChangeControlCorruptionError(
+            "SQLite cannot report its change-control database locator"
+        ) from exc
+    main = [row for row in databases if str(row[1]) == "main"]
+    if len(main) != 1:
+        raise ChangeControlCorruptionError(
+            "SQLite did not open exactly one main change-control database"
+        )
+    reported = Path(str(main[0][2]))
+    if not reported.is_absolute():
+        raise ChangeControlCorruptionError(
+            "SQLite reported a non-absolute change-control database locator"
+        )
+    reported_fd = -1
+    try:
+        reported_fd = os.open(reported, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        reported_info = os.fstat(reported_fd)
+    except OSError as exc:
+        raise ChangeControlCorruptionError(
+            "SQLite-reported change-control database locator cannot be pinned"
+        ) from exc
+    finally:
+        if reported_fd >= 0:
+            os.close(reported_fd)
+    if _inode(reported_info) != _inode(pinned.verify()):
+        raise ChangeControlCorruptionError(
+            "SQLite opened a different change-control database inode"
+        )
 
 
 def _now() -> str:
@@ -293,15 +650,106 @@ class SqliteChangeControlStore:
         migrations_dir: Path | None = None,
         *,
         timeout_seconds: float = 30.0,
+        secure_open: bool = False,
+        read_only: bool = False,
     ) -> None:
         if timeout_seconds < 0:
             raise ValueError("timeout_seconds must be non-negative")
+        if read_only and not secure_open:
+            raise ValueError("read_only requires secure_open")
         self.db_path = Path(db_path)
         self.migrations_dir = migrations_dir or _DEFAULT_MIGRATIONS_DIR
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.db_path), timeout=timeout_seconds)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA foreign_keys = ON")
+        self._read_only = read_only
+        self._pinned_database: _PinnedChangeControlDatabase | None = None
+        conn: sqlite3.Connection | None = None
+        try:
+            if secure_open:
+                self._pinned_database = _pin_change_control_database(
+                    self.db_path,
+                    create=not read_only,
+                    read_only=read_only,
+                )
+                if read_only:
+                    alias = _descriptor_alias(self._pinned_database)
+                    conn = sqlite3.connect(
+                        f"{alias.as_uri()}?mode=ro&immutable=1",
+                        timeout=timeout_seconds,
+                        uri=True,
+                    )
+                else:
+                    conn = sqlite3.connect(str(self.db_path), timeout=timeout_seconds)
+                _verify_sqlite_locator(conn, self._pinned_database)
+            else:
+                self.db_path.parent.mkdir(parents=True, exist_ok=True)
+                conn = sqlite3.connect(str(self.db_path), timeout=timeout_seconds)
+            self.conn = conn
+            self.conn.row_factory = sqlite3.Row
+            self.conn.execute("PRAGMA foreign_keys = ON")
+            if self._pinned_database is not None and not read_only:
+                self._set_secure_rollback_journal_mode()
+                self._verify_secure_sqlite_authority(
+                    reject_sidecars=True,
+                    allow_empty=True,
+                )
+            if read_only:
+                self.conn.execute("PRAGMA query_only = ON")
+                if int(self.conn.execute("PRAGMA query_only").fetchone()[0]) != 1:
+                    raise ChangeControlCorruptionError(
+                        "change-control read-only connection is not query-only"
+                    )
+                if self._pinned_database is None:
+                    raise AssertionError("read-only store lost its descriptor guard")
+                self._verify_secure_sqlite_authority(
+                    reject_sidecars=True,
+                    allow_empty=False,
+                )
+        except BaseException:
+            if conn is not None:
+                conn.close()
+            if self._pinned_database is not None:
+                self._pinned_database.close()
+                self._pinned_database = None
+            raise
+
+    def _set_secure_rollback_journal_mode(self) -> None:
+        try:
+            row = self.conn.execute("PRAGMA journal_mode = DELETE").fetchone()
+        except sqlite3.Error as exc:
+            raise ChangeControlCorruptionError(
+                "change-control SQLite rollback-journal mode cannot be configured"
+            ) from exc
+        if row is None or len(row) != 1 or str(row[0]) != "delete":
+            raise ChangeControlCorruptionError(
+                "change-control SQLite journal_mode is not exactly delete"
+            )
+
+    def _verify_secure_sqlite_authority(
+        self,
+        *,
+        reject_sidecars: bool,
+        allow_empty: bool,
+    ) -> None:
+        pinned = self._pinned_database
+        if pinned is None:
+            return
+        if reject_sidecars:
+            pinned.reject_sidecars(allow_rollback_journal=not self._read_only)
+        pinned.verify(
+            unchanged=self._read_only,
+            require_nonempty=self._read_only or not allow_empty,
+        )
+        pinned.verify_rollback_journal_header(allow_empty=allow_empty)
+        if not self._read_only:
+            try:
+                row = self.conn.execute("PRAGMA journal_mode").fetchone()
+            except sqlite3.Error as exc:
+                raise ChangeControlCorruptionError(
+                    "change-control SQLite journal_mode cannot be verified"
+                ) from exc
+            if row is None or len(row) != 1 or str(row[0]) != "delete":
+                raise ChangeControlCorruptionError(
+                    "change-control SQLite journal_mode is not exactly delete"
+                )
 
     def _migration_files(self) -> dict[int, Path]:
         files: dict[int, Path] = {}
@@ -444,14 +892,40 @@ class SqliteChangeControlStore:
         return version
 
     def _begin(self, statement: str) -> None:
+        if self._pinned_database is not None:
+            self._pinned_database.verify(
+                unchanged=self._read_only,
+                require_nonempty=self._read_only,
+            )
         try:
             self.conn.execute(statement)
+            self._verify_secure_sqlite_authority(
+                reject_sidecars=False,
+                allow_empty=not self._read_only,
+            )
         except sqlite3.Error as exc:
             if _is_busy_error(exc):
                 raise ChangeControlBusyError("change-control SQLite database is busy") from exc
             raise ChangeControlCorruptionError(
                 "change-control SQLite transaction could not start"
             ) from exc
+        except BaseException:
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
+            raise
+
+    def _commit(self) -> None:
+        """Commit only while a secure-open store still owns its exact inode."""
+
+        self._verify_secure_sqlite_authority(
+            reject_sidecars=False,
+            allow_empty=not self._read_only,
+        )
+        self.conn.execute("COMMIT")
+        self._verify_secure_sqlite_authority(
+            reject_sidecars=True,
+            allow_empty=False,
+        )
 
     def _rollback_operation_error(self, exc: BaseException) -> None:
         if self.conn.in_transaction:
@@ -464,11 +938,34 @@ class SqliteChangeControlStore:
             ) from exc
 
     def init_schema(self) -> None:
+        if self._read_only:
+            raise ChangeControlStoreError(
+                "read-only change-control store cannot initialize or migrate schema"
+            )
         if self.conn.in_transaction:
             raise ChangeControlStoreError("cannot initialize inside an existing transaction")
+        self._require_ready()
         migrations = self._migration_files()
-        self._begin("BEGIN IMMEDIATE")
+        initial_meta = self._read_meta()
+        if initial_meta is None:
+            if self._user_tables():
+                raise ChangeControlCorruptionError(
+                    "refusing to adopt an unidentified SQLite database"
+                )
+            initial_version = 0
+        else:
+            initial_version = self._validate_identity(require_current=False)
+        rebuilds_foreign_key_parent = initial_version < 5 <= _SCHEMA_VERSION
+        foreign_keys_suspended = False
         try:
+            if rebuilds_foreign_key_parent:
+                self.conn.execute("PRAGMA foreign_keys = OFF")
+                foreign_keys_suspended = True
+                if int(self.conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 0:
+                    raise ChangeControlStoreError(
+                        "cannot suspend foreign keys for the schema-v5 parent-table rebuild"
+                    )
+            self._begin("BEGIN IMMEDIATE")
             meta = self._read_meta()
             if meta is None:
                 existing = self._user_tables()
@@ -479,6 +976,10 @@ class SqliteChangeControlStore:
                 version = 0
             else:
                 version = self._validate_identity(require_current=False)
+            # Another process may have completed the same packaged migration
+            # while this connection waited for BEGIN IMMEDIATE.  The exact
+            # identity/ledger validation above makes that benign convergence,
+            # not corruption; continue from the now-authoritative version.
             for next_version in range(version + 1, _SCHEMA_VERSION + 1):
                 path = migrations[next_version]
                 for statement in self._sql_statements(path.read_text(encoding="utf-8")):
@@ -515,17 +1016,34 @@ class SqliteChangeControlStore:
                     (next_version, path.stem, self._migration_checksum(path), _now()),
                 )
             self._validate_identity()
-            self.conn.execute("COMMIT")
+            self._assert_foreign_keys()
+            if self._pinned_database is not None:
+                self._pinned_database.verify()
+            self._commit()
+            if self._pinned_database is not None:
+                self._pinned_database.verify()
         except BaseException as exc:
             if self.conn.in_transaction:
                 self.conn.execute("ROLLBACK")
             if _is_busy_error(exc):
                 raise ChangeControlBusyError("change-control SQLite database is busy") from exc
             raise
+        finally:
+            if foreign_keys_suspended:
+                self.conn.execute("PRAGMA foreign_keys = ON")
+                if int(self.conn.execute("PRAGMA foreign_keys").fetchone()[0]) != 1:
+                    raise ChangeControlStoreError(
+                        "foreign keys were not restored after schema initialization"
+                    )
 
     def _require_ready(self) -> None:
         if self.conn.in_transaction:
             raise ChangeControlStoreError("change-control operations cannot join a transaction")
+        if self._pinned_database is not None:
+            self._verify_secure_sqlite_authority(
+                reject_sidecars=True,
+                allow_empty=not self._read_only,
+            )
 
     def _deliver_commit(self, result: ChangeControlCommit) -> ChangeControlCommit:
         """Return a result only after its transaction has committed."""
@@ -569,7 +1087,7 @@ class SqliteChangeControlStore:
                 (aggregate_id,),
             ).fetchone()
             rows = self._capture_rows(aggregate_id)
-            self.conn.execute("COMMIT")
+            self._commit()
         except BaseException as exc:
             self._rollback_operation_error(exc)
             raise
@@ -682,7 +1200,7 @@ class SqliteChangeControlStore:
                     committed_at=str(receipt["committed_at"]),
                     replayed=True,
                 )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return self._deliver_commit(result)
 
             if head is None:
@@ -707,7 +1225,7 @@ class SqliteChangeControlStore:
                         revision=current_revision,
                         changed=False,
                     )
-                    self.conn.execute("COMMIT")
+                    self._commit()
                     return self._deliver_commit(
                         ChangeControlCommit(
                             aggregate_id=replacement.aggregate_id,
@@ -756,7 +1274,7 @@ class SqliteChangeControlStore:
                 revision=revision,
                 changed=True,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return self._deliver_commit(
                 ChangeControlCommit(
                     aggregate_id=replacement.aggregate_id,
@@ -790,7 +1308,7 @@ class SqliteChangeControlStore:
         return None
 
     def _global_operation_owner(self, operation_id: str) -> tuple[str, str] | None:
-        """Resolve one operation ID across every v3 write authority."""
+        """Resolve one operation ID across every installed write authority."""
 
         matches: list[tuple[str, str]] = []
         queries = (
@@ -818,6 +1336,36 @@ class SqliteChangeControlStore:
                 "change_control_managed_activation_intents",
                 "operation_id",
                 "activation_id",
+            ),
+            (
+                "workspace-bootstrap-intent",
+                "change_control_workspace_bootstrap_intents",
+                "operation_id",
+                "bootstrap_id",
+            ),
+            (
+                "workspace-inventory",
+                "change_control_workspace_inventory_receipts",
+                "operation_id",
+                "receipt_id",
+            ),
+            (
+                "legacy-index-readiness",
+                "change_control_legacy_index_readiness_receipts",
+                "operation_id",
+                "receipt_id",
+            ),
+            (
+                "operator-run",
+                "change_control_operator_runs",
+                "operation_id",
+                "run_id",
+            ),
+            (
+                "operator-run-link",
+                "change_control_operator_run_links",
+                "operation_id",
+                "link_id",
             ),
         )
         tables = self._user_tables()
@@ -856,6 +1404,30 @@ class SqliteChangeControlStore:
             selects.append(
                 "SELECT operation_id, 'managed-activation' "
                 "FROM change_control_managed_activation_intents"
+            )
+        if "change_control_workspace_bootstrap_intents" in tables:
+            selects.append(
+                "SELECT operation_id, 'workspace-bootstrap-intent' "
+                "FROM change_control_workspace_bootstrap_intents"
+            )
+        if "change_control_workspace_inventory_receipts" in tables:
+            selects.append(
+                "SELECT operation_id, 'workspace-inventory' "
+                "FROM change_control_workspace_inventory_receipts"
+            )
+        if "change_control_legacy_index_readiness_receipts" in tables:
+            selects.append(
+                "SELECT operation_id, 'legacy-index-readiness' "
+                "FROM change_control_legacy_index_readiness_receipts"
+            )
+        if "change_control_operator_runs" in tables:
+            selects.append(
+                "SELECT operation_id, 'operator-run' FROM change_control_operator_runs"
+            )
+        if "change_control_operator_run_links" in tables:
+            selects.append(
+                "SELECT operation_id, 'operator-run-link' "
+                "FROM change_control_operator_run_links"
             )
         rows = self.conn.execute(
             "SELECT operation_id, owner FROM ("
@@ -1128,7 +1700,7 @@ class SqliteChangeControlStore:
                     lifecycle=self._review_lifecycle(existing),
                     replayed=True,
                 )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return self._deliver_review_request(result)
 
             current = self._snapshot_in_transaction(command.aggregate_id)
@@ -1251,7 +1823,7 @@ class SqliteChangeControlStore:
                 request_payload_sha256=payload_sha,
             )
             result = HumanReviewRequestReceipt(request=request, lifecycle=ReviewLifecycle.OPEN)
-            self.conn.execute("COMMIT")
+            self._commit()
             return self._deliver_review_request(result)
         except BaseException as exc:
             if not self.conn.in_transaction:
@@ -1276,7 +1848,7 @@ class SqliteChangeControlStore:
                 lifecycle=self._review_lifecycle(request),
                 decision=decision,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return view
         except BaseException as exc:
             self._rollback_operation_error(exc)
@@ -1374,7 +1946,7 @@ class SqliteChangeControlStore:
                     aggregate_sha256=decision.decided_aggregate_sha256,
                     replayed=True,
                 )
-                self.conn.execute("COMMIT")
+                self._commit()
                 return self._deliver_review_decision(result)
 
             request = self._read_review_request(command.request_id)
@@ -1460,7 +2032,7 @@ class SqliteChangeControlStore:
                 aggregate_revision=revision,
                 aggregate_sha256=digest,
             )
-            self.conn.execute("COMMIT")
+            self._commit()
             return self._deliver_review_decision(result)
         except BaseException as exc:
             if not self.conn.in_transaction:
@@ -2071,7 +2643,22 @@ class SqliteChangeControlStore:
         return constraints
 
     def close(self) -> None:
-        self.conn.close()
+        verification_error: BaseException | None = None
+        try:
+            if self._pinned_database is not None:
+                self._verify_secure_sqlite_authority(
+                    reject_sidecars=True,
+                    allow_empty=not self._read_only,
+                )
+        except BaseException as exc:
+            verification_error = exc
+        finally:
+            self.conn.close()
+            if self._pinned_database is not None:
+                self._pinned_database.close()
+                self._pinned_database = None
+        if verification_error is not None:
+            raise verification_error
 
     def _assert_foreign_keys(self) -> None:
         if self.conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
@@ -2148,6 +2735,10 @@ class SqliteChangeControlStore:
             raise ChangeControlCorruptionError("persisted operation receipt is invalid") from exc
         except (IndexError, TypeError, ValueError) as exc:
             raise ChangeControlCorruptionError("persisted operation receipt is invalid") from exc
+        self._validate_extension_records()
+
+    def _validate_extension_records(self) -> None:
+        """Validate schema-extension records in a more specific store subclass."""
 
     def _validate_reviews(self) -> None:
         try:
