@@ -98,7 +98,11 @@ from mastervault.change_control.operator_run import (
 )
 from mastervault.change_control.query_generation import QueryGenerationMetadataV1
 from mastervault.change_control.regression_baseline import GenerationZeroBaselineReceiptV1
-from mastervault.change_control.review import ReviewDisposition
+from mastervault.change_control.review import (
+    ReviewDisposition,
+    ReviewSubjectSnapshot,
+    subject_from_aggregate,
+)
 from mastervault.change_control.store import (
     ChangeControlConflictError,
     ChangeControlCorruptionError,
@@ -1877,6 +1881,52 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._rollback_operation_error(exc)
             raise
 
+    def _resolve_operator_temporal_review_authority(
+        self,
+        run: OperatorRunView,
+        *,
+        resolver: OperatorRunAuthorityResolver | None,
+    ) -> tuple[TemporalProposalCommit, tuple[ReviewSubjectSnapshot, ...]]:
+        if resolver is None:
+            raise ManagedReviewAuthorityError(
+                "operator temporal-review target requires a repository authority resolver"
+            )
+        proposal_link = next(
+            (
+                item.command
+                for item in run.links
+                if item.command.kind == OperatorRunLinkKind.TEMPORAL_PROPOSAL
+            ),
+            None,
+        )
+        if proposal_link is None:
+            raise ChangeControlCorruptionError(
+                "operator temporal-review target lacks its run proposal"
+            )
+        commit = resolver.resolve_temporal_proposal(
+            run_id=run.record.command.run_id,
+            target_id=proposal_link.target_id,
+            target_sha256=proposal_link.target_sha256,
+        )
+        if not (
+            commit.operation_id == proposal_link.target_id
+            and commit.aggregate_id == run.record.command.aggregate_id
+            and commit.revision == 3
+            and commit.aggregate_sha256 == commit.proposal.binding.proposed_aggregate_sha256
+        ):
+            raise ChangeControlCorruptionError(
+                "operator temporal-review proposal differs from its exact run link"
+            )
+        subjects: list[ReviewSubjectSnapshot] = []
+        for ref in commit.proposal.review_subjects:
+            subject = subject_from_aggregate(commit.proposal.proposed_aggregate, ref)
+            if subject is None:
+                raise ChangeControlCorruptionError(
+                    "operator temporal-review proposal omits a linked review subject"
+                )
+            subjects.append(ReviewSubjectSnapshot.create(ref.kind, subject))
+        return commit, tuple(subjects)
+
     def _verify_operator_link_target(
         self,
         command: OperatorRunLinkCommand,
@@ -1900,36 +1950,6 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 "receipt_id",
                 "receipt_sha256",
             ),
-            OperatorRunLinkKind.REGRESSION_SUITE: (
-                "change_control_regression_suite_admission_receipts",
-                "receipt_id",
-                "receipt_sha256",
-            ),
-            OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST: (
-                "change_control_review_requests",
-                "request_id",
-                "request_payload_sha256",
-            ),
-            OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION: (
-                "change_control_review_decisions",
-                "request_id",
-                "decision_payload_sha256",
-            ),
-            OperatorRunLinkKind.MANAGED_REVIEW_REQUEST: (
-                "change_control_managed_review_request_records",
-                "request_id",
-                "record_sha256",
-            ),
-            OperatorRunLinkKind.MANAGED_REVIEW_DECISION: (
-                "change_control_managed_review_decisions",
-                "decision_id",
-                "record_sha256",
-            ),
-            OperatorRunLinkKind.ACTIVATION_OPERATION: (
-                "change_control_generation_activation_receipts",
-                "receipt_id",
-                "receipt_sha256",
-            ),
         }.get(command.kind)
         if table_binding is not None:
             table, identity_column, sha_column = table_binding
@@ -1941,9 +1961,144 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 raise ChangeControlCorruptionError(
                     "operator link target cannot be reopened exactly"
                 )
+        elif command.kind == OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST:
+            temporal_request = self._read_review_request(command.target_id)
+            proposal_commit, expected_subjects = self._resolve_operator_temporal_review_authority(
+                run, resolver=resolver
+            )
+            proposal = proposal_commit.proposal
+            if temporal_request is None or not (
+                temporal_request.request_payload_sha256 == command.target_sha256
+                and temporal_request.aggregate_id == run.record.command.aggregate_id
+                and proposal_commit.aggregate_id == temporal_request.aggregate_id
+                and proposal_commit.revision == temporal_request.base_revision
+                and proposal_commit.aggregate_sha256 == temporal_request.base_aggregate_sha256
+                and proposal.proposed_aggregate == temporal_request.base_aggregate
+                and expected_subjects == temporal_request.subjects
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator temporal-review request differs from its exact run proposal"
+                )
+        elif command.kind == OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION:
+            temporal_decision = self._read_review_decision(command.target_id)
+            temporal_decision_request = self._read_review_request(command.target_id)
+            request_link = next(
+                (
+                    item.command
+                    for item in run.links
+                    if item.command.kind == OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST
+                ),
+                None,
+            )
+            proposal_commit, expected_subjects = self._resolve_operator_temporal_review_authority(
+                run, resolver=resolver
+            )
+            proposal = proposal_commit.proposal
+            if (
+                temporal_decision is None
+                or temporal_decision_request is None
+                or request_link is None
+                or not (
+                    temporal_decision.decision_payload_sha256 == command.target_sha256
+                    and temporal_decision.request_id == request_link.target_id == command.target_id
+                    and temporal_decision_request.request_payload_sha256
+                    == request_link.target_sha256
+                    and temporal_decision_request.aggregate_id
+                    == run.record.command.aggregate_id
+                    == proposal_commit.aggregate_id
+                    and temporal_decision_request.base_revision == proposal_commit.revision
+                    and temporal_decision_request.base_aggregate_sha256
+                    == proposal_commit.aggregate_sha256
+                    and temporal_decision_request.base_aggregate == proposal.proposed_aggregate
+                    and temporal_decision_request.subjects == expected_subjects
+                )
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator temporal-review decision differs from its exact run request"
+                )
+        elif command.kind == OperatorRunLinkKind.MANAGED_REVIEW_REQUEST:
+            managed_request = self._read_request_record(command.target_id)
+            if not (
+                managed_request.record_sha256 == command.target_sha256
+                and managed_request.command.bundle.run_binding.run_id == command.run_id
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator managed-review request belongs to another run"
+                )
+        elif command.kind == OperatorRunLinkKind.MANAGED_REVIEW_DECISION:
+            row = self.conn.execute(
+                "SELECT request_id FROM change_control_managed_review_decisions "
+                "WHERE decision_id=? AND record_sha256=?",
+                (command.target_id, command.target_sha256),
+            ).fetchone()
+            managed_decision = (
+                self._read_decision_record(str(row["request_id"])) if row is not None else None
+            )
+            if managed_decision is None or (
+                managed_decision.command.request_record.command.bundle.run_binding.run_id
+                != command.run_id
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator managed-review decision belongs to another run"
+                )
+        elif command.kind == OperatorRunLinkKind.ACTIVATION_OPERATION:
+            row = self.conn.execute(
+                "SELECT activation_id FROM change_control_generation_activation_receipts "
+                "WHERE receipt_id=? AND receipt_sha256=?",
+                (command.target_id, command.target_sha256),
+            ).fetchone()
+            activation_id = str(row["activation_id"]) if row is not None else ""
+            activation_receipt = self._read_activation_receipt(activation_id)
+            activation_intent = (
+                self._read_activation_intent(activation_id)
+                if activation_receipt is not None
+                else None
+            )
+            activation_request = (
+                self._read_request_record(activation_intent.command.request_id)
+                if activation_intent is not None
+                else None
+            )
+            activation_baseline = (
+                self._read_activation_baseline_binding_in_transaction(activation_id)
+                if activation_intent is not None
+                else None
+            )
+            if (
+                activation_receipt is None
+                or activation_intent is None
+                or activation_request is None
+                or not (
+                    activation_request.command.bundle.run_binding.run_id == command.run_id
+                    and activation_baseline is not None
+                    and activation_baseline.run_id == command.run_id
+                )
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator activation receipt belongs to another run"
+                )
+        elif command.kind == OperatorRunLinkKind.REGRESSION_SUITE:
+            row = self.conn.execute(
+                "SELECT intent_id FROM change_control_regression_suite_admission_receipts "
+                "WHERE receipt_id=? AND receipt_sha256=?",
+                (command.target_id, command.target_sha256),
+            ).fetchone()
+            suite = (
+                self._read_suite_admission_in_transaction(str(row["intent_id"]))
+                if row is not None
+                else None
+            )
+            if suite is None or suite.intent.run_id != command.run_id:
+                raise ChangeControlCorruptionError(
+                    "operator regression-suite target cannot reopen its exact run authority"
+                )
         elif command.kind == OperatorRunLinkKind.INCOMING_SOURCE:
             record = self._read_incoming_receipt_in_transaction(command.target_id)
-            if record is None or record.receipt_sha256 != command.target_sha256:
+            if (
+                record is None
+                or record.receipt_sha256 != command.target_sha256
+                or record.intent.run_id != command.run_id
+            ):
                 raise ChangeControlCorruptionError(
                     "operator incoming target cannot reopen its SQLite receipt"
                 )
@@ -1969,6 +2124,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             if (
                 baseline is None
                 or baseline.baseline_receipt.receipt_sha256 != command.target_sha256
+                or baseline.baseline_receipt.authority.run_id != command.run_id
             ):
                 raise ChangeControlCorruptionError(
                     "operator baseline target cannot reopen its SQLite receipt"
@@ -2372,8 +2528,6 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     return OperatorRunPhase.COMPLETED_NO_OP
             return OperatorRunPhase.AWAITING_MANAGED_REVIEW
         if OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST in links:
-            return OperatorRunPhase.AWAITING_TEMPORAL_REVIEW
-        if OperatorRunLinkKind.TEMPORAL_PROPOSAL in links:
             return OperatorRunPhase.AWAITING_TEMPORAL_REVIEW
         return OperatorRunPhase.BOOTSTRAPPED
 
@@ -4974,6 +5128,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
         prechange_head: AggregateHeadBinding | None = None,
         authority_context: AuthorityVerificationContext | None = None,
+        baseline_guard: Callable[[], None] | None = None,
         failure_hook: Callable[[str], None] | None = None,
     ) -> ManagedGenerationActivationReceipt:
         """Atomically CAS authority and commit its exact immutable activation receipt."""
@@ -5012,6 +5167,10 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ManagedGenerationActivationError(
                         "synchronous activation requires its exact generation-zero baseline"
                     )
+                if baseline_guard is None:
+                    raise ManagedGenerationActivationError(
+                        "synchronous activation requires a live external baseline guard"
+                    )
             intent = self._read_activation_intent(command.activation_id)
             if intent.command != command:
                 raise ChangeControlIdempotencyError(
@@ -5042,6 +5201,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
             existing = self._read_activation_receipt(command.activation_id)
             if existing is not None:
+                if baseline_guard is not None:
+                    baseline_guard()
                 active = self._read_active_authority(
                     command.expected_authority.aggregate_id,
                     authority_context=context,
@@ -5058,6 +5219,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     index_receipt=index_receipt,
                 )
                 return existing
+            if baseline_guard is not None:
+                baseline_guard()
             current = self._read_active_authority(
                 command.expected_authority.aggregate_id,
                 authority_context=context,
@@ -5121,6 +5284,8 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
             if failure_hook is not None:
                 failure_hook("authority-updated-before-receipt")
+            if baseline_guard is not None:
+                baseline_guard()
             RepositoryVerifiedManagedGenerationEffects.verify(
                 capability,
                 command=command,

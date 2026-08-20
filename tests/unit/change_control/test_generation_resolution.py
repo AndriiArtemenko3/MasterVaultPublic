@@ -33,6 +33,7 @@ from mastervault.change_control.models import (
     DocumentVersionMetadata,
     TemporalState,
 )
+from mastervault.sync.indexer import ExactVaultNoteInput
 
 
 def _document() -> DocumentVersionMetadata:
@@ -127,6 +128,135 @@ def test_resolve_generation_notes_preserves_reviewed_source_bytes(tmp_path: Path
     ) == (ResolvedGenerationSourceNote(entry=entry, content=content, workspace=workspace),)
 
 
+def test_resolve_generation_notes_retains_exact_base_workspace(tmp_path: Path) -> None:
+    content = b"---\ntype: source\n---\n\nUnchanged workspace bytes.\n"
+    snapshot_sha = "a" * 64
+    binding = ReviewedSourceBinding(
+        reviewed_inventory_sha256="b" * 64,
+        source_note_snapshot_id=f"depsource:{snapshot_sha}",
+        source_note_snapshot_sha256=snapshot_sha,
+    )
+    entry = _entry(source=binding, content=content)
+    incoming_content = b"---\ntype: source\n---\n\nAdmitted incoming bytes.\n"
+    incoming_document = DocumentVersionMetadata.create(
+        document_id="incoming-policy",
+        document_family="incoming-policy",
+        version_label="v1",
+        source_path="raw/incoming-policy.md",
+        source_sha256="9" * 64,
+        declared_effective_from=date(2026, 2, 1),
+        role=DocumentRole.POLICY,
+        authority=DocumentAuthority.DELEGATED,
+    )
+    incoming_snapshot_sha = "8" * 64
+    incoming_binding = ReviewedSourceBinding(
+        reviewed_inventory_sha256=binding.reviewed_inventory_sha256,
+        source_note_snapshot_id=f"depsource:{incoming_snapshot_sha}",
+        source_note_snapshot_sha256=incoming_snapshot_sha,
+    )
+    incoming_entry = GenerationSourceNoteEntry.create(
+        logical_path="customer-support/sources/incoming-policy.md",
+        document=incoming_document,
+        source_note_sha256=hashlib.sha256(incoming_content).hexdigest(),
+        source_note_byte_count=len(incoming_content),
+        temporal_state=TemporalState.CURRENT,
+        included_in_serving_index=True,
+        source=incoming_binding,
+    )
+    base_workspace = tmp_path / "base-workspace"
+    generic_workspace = tmp_path / "generic-evidence"
+    source = SimpleNamespace(
+        inventory=SimpleNamespace(
+            notes=(
+                SimpleNamespace(
+                    document=entry.document,
+                    source_note_path=entry.logical_path,
+                    source_note_sha256=entry.source_note_sha256,
+                    source_note_utf8_bytes=entry.source_note_byte_count,
+                    snapshot_id=binding.source_note_snapshot_id,
+                    snapshot_sha256=binding.source_note_snapshot_sha256,
+                    source_note_utf8=content.decode("utf-8"),
+                ),
+                SimpleNamespace(
+                    document=incoming_entry.document,
+                    source_note_path=incoming_entry.logical_path,
+                    source_note_sha256=incoming_entry.source_note_sha256,
+                    source_note_utf8_bytes=incoming_entry.source_note_byte_count,
+                    snapshot_id=incoming_binding.source_note_snapshot_id,
+                    snapshot_sha256=incoming_binding.source_note_snapshot_sha256,
+                    source_note_utf8=incoming_content.decode("utf-8"),
+                ),
+            )
+        ),
+        workspace_root=generic_workspace,
+    )
+    projection = SimpleNamespace(
+        generation_id="mgeneration:" + "c" * 64,
+        entries=(entry, incoming_entry),
+    )
+
+    resolved = resolve_generation_notes(
+        source=source,
+        projection=projection,
+        state=SimpleNamespace(publication_events=()),
+        repository=SimpleNamespace(root=tmp_path / "generation-repository"),
+        base_notes=(
+            ExactVaultNoteInput(
+                rel_path=entry.logical_path,
+                content=content,
+                workspace=base_workspace,
+            ),
+        ),
+    )
+
+    assert tuple(item.workspace for item in resolved) == (base_workspace, generic_workspace)
+
+
+def test_resolve_generation_notes_rejects_same_path_base_substitution(tmp_path: Path) -> None:
+    content = b"---\ntype: source\n---\n\nReviewed bytes.\n"
+    snapshot_sha = "d" * 64
+    binding = ReviewedSourceBinding(
+        reviewed_inventory_sha256="e" * 64,
+        source_note_snapshot_id=f"depsource:{snapshot_sha}",
+        source_note_snapshot_sha256=snapshot_sha,
+    )
+    entry = _entry(source=binding, content=content)
+    source = SimpleNamespace(
+        inventory=SimpleNamespace(
+            notes=(
+                SimpleNamespace(
+                    document=entry.document,
+                    source_note_path=entry.logical_path,
+                    source_note_sha256=entry.source_note_sha256,
+                    source_note_utf8_bytes=entry.source_note_byte_count,
+                    snapshot_id=binding.source_note_snapshot_id,
+                    snapshot_sha256=binding.source_note_snapshot_sha256,
+                    source_note_utf8=content.decode("utf-8"),
+                ),
+            )
+        ),
+        workspace_root=tmp_path / "generic-evidence",
+    )
+
+    with pytest.raises(ManagedActivationServiceError, match="base-note workspace mapping"):
+        resolve_generation_notes(
+            source=source,
+            projection=SimpleNamespace(
+                generation_id="mgeneration:" + "f" * 64,
+                entries=(entry,),
+            ),
+            state=SimpleNamespace(publication_events=()),
+            repository=SimpleNamespace(root=tmp_path / "generation-repository"),
+            base_notes=(
+                ExactVaultNoteInput(
+                    rel_path=entry.logical_path,
+                    content=b"substituted",
+                    workspace=tmp_path / "base-workspace",
+                ),
+            ),
+        )
+
+
 def test_resolve_generation_notes_preserves_published_source_bytes(tmp_path: Path) -> None:
     content = b"---\ntype: source\n---\n\nPublished bytes.\n"
     binding = PublishedSourceBinding(
@@ -175,10 +305,7 @@ def test_resolve_generation_notes_preserves_published_source_bytes(tmp_path: Pat
         ResolvedGenerationSourceNote(
             entry=entry,
             content=content,
-            workspace=Repository.root
-            / "generations"
-            / projection.generation_id
-            / "canonical",
+            workspace=Repository.root / "generations" / projection.generation_id / "canonical",
         ),
     )
 
