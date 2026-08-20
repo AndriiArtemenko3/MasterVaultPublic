@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import date
 from enum import StrEnum
@@ -53,6 +54,7 @@ _REVISION_WORKLOAD_ID = r"^revisionwork:[0-9a-f]{64}$"
 _REVISION_INPUT_ID = r"^revisionin:[0-9a-f]{64}$"
 _REVISION_OUTPUT_ID = r"^revisionout:[0-9a-f]{64}$"
 _SHA256 = r"^[0-9a-f]{64}$"
+_OPERATOR_RUN_ID = re.compile(r"^operatorrun:[0-9a-f]{64}$")
 
 QuestionId = Annotated[str, Field(pattern=_QUESTION_ID)]
 
@@ -67,6 +69,12 @@ def _exact_key(value: str, *, label: str) -> str:
     if len(value.encode("utf-8")) > MAX_REVISION_PLANNING_LOGICAL_KEY_UTF8_BYTES_V1:
         raise ValueError(f"{label} exceeds the fixed v1 UTF-8 byte limit")
     return value
+
+
+def _exact_run_id(value: str) -> str:
+    if isinstance(value, str) and _OPERATOR_RUN_ID.fullmatch(value) is not None:
+        return value
+    return _exact_key(value, label="run_id")
 
 
 def _bounded_text(value: str, *, label: str, maximum: int, allow_empty: bool) -> str:
@@ -488,7 +496,7 @@ class RevisionPlanningInferenceShard(_StrictFrozenModel):
 
     @model_validator(mode="after")
     def _integrity(self) -> Self:
-        _exact_key(self.run_id, label="run_id")
+        _exact_run_id(self.run_id)
         if self.impact_workload_id != f"impactwork:{self.impact_workload_sha256}":
             raise ValueError("revision input impact workload ID differs from its SHA")
         if self.impact_result_id != f"impactresult:{self.impact_result_sha256}":
@@ -543,7 +551,7 @@ class RevisionPlanningInferenceShard(_StrictFrozenModel):
         values: dict[str, Any] = {
             "schema_version": 1,
             "algorithm_version": "recorded-revision-planning-v1",
-            "run_id": _exact_key(run_id, label="run_id"),
+            "run_id": _exact_run_id(run_id),
             "impact_workload_id": eligibility.workload_id,
             "impact_workload_sha256": eligibility.workload_sha256,
             "impact_result_id": eligibility.result_id,

@@ -285,6 +285,51 @@ def _projection(
     )
 
 
+def test_projection_accepts_only_exact_suffixless_workspace_bootstrap_raw_locator() -> None:
+    workspace_path = f"bootstrap-sources/workspace-root/{SHA_A}"
+    raw = ManagedArtifactRef.create(
+        kind=ManagedArtifactKind.RAW_SOURCE,
+        path=workspace_path,
+        sha256=SHA_B,
+        byte_count=12,
+    )
+    note = ManagedArtifactRef.create(
+        kind=ManagedArtifactKind.SOURCE_NOTE,
+        path="datasets/example/processed/source.md",
+        sha256=SHA_C,
+        byte_count=12,
+    )
+
+    projection = _projection(
+        raw=raw,
+        note=note,
+        canonical_raw_path=workspace_path,
+        canonical_note_path=note.path,
+        claims=(),
+    )
+    assert projection.canonical_raw_path == workspace_path
+
+    for invalid in (
+        "datasets/example/raw/source",
+        f"bootstrap-sources/workspace-root/not-{SHA_A}",
+        f"bootstrap-sources/workspace-root/extra/{SHA_A}",
+    ):
+        invalid_raw = ManagedArtifactRef.create(
+            kind=ManagedArtifactKind.RAW_SOURCE,
+            path=invalid,
+            sha256=SHA_B,
+            byte_count=12,
+        )
+        with pytest.raises(ValueError, match="must be Markdown"):
+            _projection(
+                raw=invalid_raw,
+                note=note,
+                canonical_raw_path=invalid,
+                canonical_note_path=note.path,
+                claims=(),
+            )
+
+
 def _target_analysis(
     key: str,
     context: Context,

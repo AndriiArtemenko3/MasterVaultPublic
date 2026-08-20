@@ -15,7 +15,9 @@ from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapabi
 from mastervault.change_control.generic_governing_source import CompositeManagedReviewResolverV2
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
+    ManagedAdoptionChoice,
     ManagedBundleOutcome,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedReviewBaseBinding,
     ManagedRevisionDecisionCommand,
     ManagedRevisionDecisionReceipt,
@@ -84,8 +86,10 @@ def _exact_run(run_binding: ManagedRunBindingV2) -> ManagedRunBindingV2:
 
 def _exact_subjects(
     subjects: tuple[ManagedRevisionPlan | NoChangeImpactCard, ...],
+    *,
+    allow_empty: bool = False,
 ) -> tuple[ManagedRevisionPlan | NoChangeImpactCard, ...]:
-    if type(subjects) is not tuple or not subjects:
+    if type(subjects) is not tuple or (not subjects and not allow_empty):
         raise ValueError("managed review requires the complete non-empty admitted subject set")
     exact: list[ManagedRevisionPlan | NoChangeImpactCard] = []
     for subject in subjects:
@@ -189,12 +193,18 @@ def open_managed_revision_review(
 ) -> ManagedRevisionReviewStoreView:
     """Open exactly one V2-admitted review and verify the authoritative reread.
 
-    Upstream ``NO_WORK`` has no V2 admission and therefore never calls this
-    service.  An empty subject set fails before any store or repository access.
+    Mechanical ``NO_WORK`` may use an empty subject set only through an exact
+    no-work admission.  Every other empty subject set fails before store access.
     """
 
     exact_run = _exact_run(run_binding)
-    subjects = _exact_subjects(admitted_subjects)
+    subjects = _exact_subjects(
+        admitted_subjects,
+        allow_empty=isinstance(
+            exact_run.revision_planning_admission,
+            ManagedNoWorkPlanningAdmissionBinding,
+        ),
+    )
     production_resolver = _require_production_resolver(resolver)
     if type(reviewed_snapshot) is not ReviewedTemporalSnapshotAuthority:
         raise TypeError("managed review requires exact reviewed temporal authority")
@@ -344,8 +354,10 @@ def open_managed_revision_review(
 
 def _exact_selections(
     selections: tuple[ManagedRevisionReviewSelection, ...],
+    *,
+    allow_empty: bool = False,
 ) -> tuple[ManagedRevisionReviewSelection, ...]:
-    if type(selections) is not tuple or not selections:
+    if type(selections) is not tuple or (not selections and not allow_empty):
         raise ManagedReviewSelectionError("managed decision requires a non-empty selection set")
     exact = tuple(
         ManagedRevisionReviewSelection.model_validate_json(
@@ -373,6 +385,7 @@ def decide_managed_revision_review(
     store: SqliteManagedChangeControlStore,
     request_id: str,
     selections: tuple[ManagedRevisionReviewSelection, ...],
+    adoption_choice: ManagedAdoptionChoice | None = None,
     resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
     verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
     prechange_head: AggregateHeadBinding,
@@ -383,7 +396,6 @@ def decide_managed_revision_review(
 ) -> ManagedRevisionReviewStoreView:
     """Decide from SQLite-owned targets; caller input contains only target choices."""
 
-    exact_selections = _exact_selections(selections)
     production_resolver = _require_production_resolver(resolver)
     exact_prechange = AggregateHeadBinding.model_validate_json(
         canonical_json_bytes(prechange_head.model_dump(mode="json"))
@@ -405,6 +417,19 @@ def decide_managed_revision_review(
     if before.lifecycle == ManagedRevisionStoreLifecycle.STALE:
         raise ManagedReviewStaleError("stale managed review cannot accept a new decision")
     targets = {item.target_id: item for item in before.request_record.command.bundle.targets}
+    adoption_only = not targets and isinstance(
+        getattr(
+            before.request_record.command.bundle.run_binding,
+            "revision_planning_admission",
+            None,
+        ),
+        ManagedNoWorkPlanningAdmissionBinding,
+    )
+    exact_selections = _exact_selections(selections, allow_empty=adoption_only)
+    if adoption_only != (adoption_choice is not None):
+        raise ManagedReviewSelectionError(
+            "adoption choice is required only for an exact zero-target review"
+        )
     if tuple(item.target_id for item in exact_selections) != tuple(sorted(targets)):
         raise ManagedReviewSelectionError(
             "managed decision requires exactly one selection for every stored target"
@@ -436,14 +461,18 @@ def decide_managed_revision_review(
             )
         )
     bundle_outcome = (
-        ManagedBundleOutcome.REJECTED
-        if all(item.disposition == ManagedRevisionDisposition.REJECT for item in outcomes)
+        ManagedBundleOutcome.ACCEPTED
+        if adoption_choice == ManagedAdoptionChoice.ADOPT
+        else ManagedBundleOutcome.REJECTED
+        if adoption_choice == ManagedAdoptionChoice.REJECT
+        or all(item.disposition == ManagedRevisionDisposition.REJECT for item in outcomes)
         else ManagedBundleOutcome.ACCEPTED
     )
     command = ManagedRevisionDecisionCommand.create(
         operation_id=operation_id,
         request_record=before.request_record,
         bundle_outcome=bundle_outcome,
+        adoption_choice=adoption_choice,
         reviewer_id=reviewer_id,
         rationale=rationale,
         items=tuple(outcomes),

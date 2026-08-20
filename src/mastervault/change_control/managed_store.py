@@ -56,11 +56,14 @@ from mastervault.change_control.managed_review import (
     ManagedGoverningSourceAdoptionBinding,
     ManagedImpactAnalysisEvidenceBinding,
     ManagedInferenceContractBinding,
+    ManagedNoWorkAnalysisSetBindingV4,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedRevisionDecisionCommand,
     ManagedRevisionDecisionReceipt,
     ManagedRevisionDecisionRecord,
     ManagedRevisionDisposition,
     ManagedRevisionPlan,
+    ManagedRevisionPlanningAdmissionAuthority,
     ManagedRevisionPlanningAdmissionBinding,
     ManagedRevisionReviewBundle,
     ManagedRevisionReviewRequestCommand,
@@ -157,8 +160,8 @@ class ManagedReviewRepositoryResolver(Protocol):
     ) -> ManagedImpactAnalysisEvidenceBinding: ...
 
     def resolve_revision_planning_admission(
-        self, binding: ManagedRevisionPlanningAdmissionBinding
-    ) -> ManagedRevisionPlanningAdmissionBinding: ...
+        self, binding: ManagedRevisionPlanningAdmissionAuthority
+    ) -> ManagedRevisionPlanningAdmissionAuthority: ...
 
     def resolve_governing_source_adoption(
         self, binding: GoverningSourceAdoptionAuthority
@@ -213,7 +216,7 @@ class OperatorRunAuthorityResolver(Protocol):
 
     def resolve_operator_revision_planning(
         self, *, run_id: str, target_id: str, target_sha256: str
-    ) -> ManagedRevisionPlanningAdmissionBinding | RevisionPlanningWorkload: ...
+    ) -> ManagedRevisionPlanningAdmissionAuthority | RevisionPlanningWorkload: ...
 
     def resolve_generation_zero_baseline(
         self, record: GenerationZeroBaselineStoreRecordV1
@@ -2164,16 +2167,33 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 target_id=command.target_id,
                 target_sha256=command.target_sha256,
             )
-            if isinstance(planning, ManagedRevisionPlanningAdmissionBinding):
+            if isinstance(
+                planning,
+                (
+                    ManagedRevisionPlanningAdmissionBinding,
+                    ManagedNoWorkPlanningAdmissionBinding,
+                ),
+            ):
+                if type(planning) not in {
+                    ManagedRevisionPlanningAdmissionBinding,
+                    ManagedNoWorkPlanningAdmissionBinding,
+                }:
+                    raise ChangeControlCorruptionError(
+                        "operator planning resolver returned a substituted admission type"
+                    )
                 exact = (
                     planning.run_id == command.run_id
                     and planning.admission_id == command.target_id
                     and planning.admission_sha256 == command.target_sha256
                 )
-            else:
+            elif type(planning) is RevisionPlanningWorkload:
                 exact = (
                     planning.workload_id == command.target_id
                     and planning.workload_sha256 == command.target_sha256
+                )
+            else:
+                raise ChangeControlCorruptionError(
+                    "operator planning resolver returned an unsupported authority type"
                 )
             if not exact:
                 raise ChangeControlCorruptionError(
@@ -2668,21 +2688,38 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             analyses: dict[str, ManagedAnalysisSetAuthority] = {
                 item.analysis_set_id: item
                 for item in models
-                if isinstance(item, (ManagedAnalysisSetBinding, GenericManagedAnalysisSetBindingV3))
+                if isinstance(
+                    item,
+                    (
+                        ManagedAnalysisSetBinding,
+                        GenericManagedAnalysisSetBindingV3,
+                        ManagedNoWorkAnalysisSetBindingV4,
+                    ),
+                )
             }
             if len(analyses) != 1:
                 raise ValueError("managed evidence must bind exactly one analysis set")
             analysis = next(iter(analyses.values()))
-            impact_evidence = analysis.impact_evidence
-            if analysis.schema_version not in (2, 3) or impact_evidence is None:
-                raise ValueError("new managed review authority requires exact impact evidence")
-            resolved_impact = resolver.resolve_impact_analysis_evidence(impact_evidence)
-            if resolved_impact != impact_evidence:
-                raise ValueError("resolved impact evidence differs from the managed analysis")
+            impact_evidence = getattr(analysis, "impact_evidence", None)
+            if isinstance(analysis, ManagedNoWorkAnalysisSetBindingV4):
+                if impact_evidence is not None:
+                    raise ValueError("no-work analysis cannot carry fabricated impact evidence")
+            else:
+                if analysis.schema_version not in (2, 3) or impact_evidence is None:
+                    raise ValueError("new managed review authority requires exact impact evidence")
+                resolved_impact = resolver.resolve_impact_analysis_evidence(impact_evidence)
+                if resolved_impact != impact_evidence:
+                    raise ValueError("resolved impact evidence differs from the managed analysis")
             planning_admissions = {
                 item.admission_id: item
                 for item in models
-                if isinstance(item, ManagedRevisionPlanningAdmissionBinding)
+                if isinstance(
+                    item,
+                    (
+                        ManagedRevisionPlanningAdmissionBinding,
+                        ManagedNoWorkPlanningAdmissionBinding,
+                    ),
+                )
             }
             if planning_admissions:
                 if len(planning_admissions) != 1:
@@ -3799,27 +3836,44 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 raise ChangeControlIdempotencyError(
                     "logical managed review request already exists under another operation_id"
                 )
-            overlap = self.conn.execute(
-                "SELECT 1 FROM change_control_managed_review_targets AS target "
-                "JOIN change_control_managed_review_bundles AS bundle "
-                "ON bundle.bundle_id=target.bundle_id "
-                "JOIN change_control_managed_review_request_records AS request "
-                "ON request.bundle_id=bundle.bundle_id "
-                "LEFT JOIN change_control_managed_review_decisions AS decision "
-                "ON decision.request_id=request.request_id "
-                "WHERE bundle.aggregate_id=? AND bundle.authority_id=? "
-                "AND bundle.base_revision=? AND bundle.base_aggregate_sha256=? "
-                "AND target.target_key IN ("
-                + ",".join("?" for _ in command.bundle.targets)
-                + ") AND decision.request_id IS NULL LIMIT 1",
-                (
-                    command.bundle.review_base.review_open_head.aggregate_id,
-                    authority.authority_id,
-                    command.bundle.review_base.review_open_head.revision,
-                    command.bundle.review_base.review_open_head.aggregate_sha256,
-                    *(target.target_key for target in command.bundle.targets),
-                ),
-            ).fetchone()
+            overlap_parameters = (
+                command.bundle.review_base.review_open_head.aggregate_id,
+                authority.authority_id,
+                command.bundle.review_base.review_open_head.revision,
+                command.bundle.review_base.review_open_head.aggregate_sha256,
+            )
+            if command.bundle.targets:
+                overlap = self.conn.execute(
+                    "SELECT 1 FROM change_control_managed_review_bundles AS bundle "
+                    "LEFT JOIN change_control_managed_review_targets AS target "
+                    "ON bundle.bundle_id=target.bundle_id "
+                    "JOIN change_control_managed_review_request_records AS request "
+                    "ON request.bundle_id=bundle.bundle_id "
+                    "LEFT JOIN change_control_managed_review_decisions AS decision "
+                    "ON decision.request_id=request.request_id "
+                    "WHERE bundle.aggregate_id=? AND bundle.authority_id=? "
+                    "AND bundle.base_revision=? AND bundle.base_aggregate_sha256=? "
+                    "AND (target.target_key IN ("
+                    + ",".join("?" for _ in command.bundle.targets)
+                    + ") OR target.target_key IS NULL) "
+                    "AND decision.request_id IS NULL LIMIT 1",
+                    (
+                        *overlap_parameters,
+                        *(target.target_key for target in command.bundle.targets),
+                    ),
+                ).fetchone()
+            else:
+                overlap = self.conn.execute(
+                    "SELECT 1 FROM change_control_managed_review_bundles AS bundle "
+                    "JOIN change_control_managed_review_request_records AS request "
+                    "ON request.bundle_id=bundle.bundle_id "
+                    "LEFT JOIN change_control_managed_review_decisions AS decision "
+                    "ON decision.request_id=request.request_id "
+                    "WHERE bundle.aggregate_id=? AND bundle.authority_id=? "
+                    "AND bundle.base_revision=? AND bundle.base_aggregate_sha256=? "
+                    "AND decision.request_id IS NULL LIMIT 1",
+                    overlap_parameters,
+                ).fetchone()
             if overlap is not None:
                 raise ChangeControlConflictError(
                     "managed review overlaps an open target at the same authority"
@@ -4086,6 +4140,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 operation_id=command.operation_id,
                 request_record=stored,
                 bundle_outcome=command.bundle_outcome,
+                adoption_choice=command.adoption_choice,
                 reviewer_id=command.reviewer_id,
                 rationale=command.rationale,
                 items=command.items,

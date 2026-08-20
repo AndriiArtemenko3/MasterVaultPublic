@@ -28,6 +28,7 @@ from mastervault.change_control.change_application_contracts import (
     ChangeVerificationResultV1,
     GenerationZeroBaselineSummaryV1,
     IncomingEvidenceSummaryV1,
+    ManagedAdoptionChoiceV1,
     ManagedReviewChoiceV1,
     ManagedReviewDecisionDocumentV1,
     ManagedReviewDecisionItemV1,
@@ -55,6 +56,43 @@ def _authority(*, active: bool = True) -> AuthoritySummaryV1:
         active_pointer_sha256=SHA,
         is_active=active,
     )
+
+
+def test_adoption_only_review_packet_and_decision_require_explicit_authority() -> None:
+    packet = ChangeReviewPacketV1(
+        run_id=RUN_ID,
+        stage=ChangeReviewStageV1.MANAGED,
+        request_id=f"mrequest:{SHA}",
+        request_sha256=SHA,
+        subjects=(),
+        adoption_only=True,
+        governing_source_adoption_id=f"mgoverningsource:{SHA}",
+        governing_source_adoption_sha256=SHA,
+    )
+    decision = ManagedReviewDecisionDocumentV1.create(
+        run_id=RUN_ID,
+        request_id=packet.request_id,
+        request_sha256=packet.request_sha256,
+        operation_id="contract:adoption-only",
+        reviewer_id="reviewer@example.test",
+        rationale="Explicitly adopt the exact reviewed governing source.",
+        decisions=(),
+        adoption_choice=ManagedAdoptionChoiceV1.ADOPT,
+    )
+
+    assert packet.subjects == () and packet.adoption_only
+    assert decision.decisions == ()
+    assert decision.adoption_choice == ManagedAdoptionChoiceV1.ADOPT
+    with pytest.raises(ValidationError, match="adoption choice"):
+        ManagedReviewDecisionDocumentV1.create(
+            run_id=RUN_ID,
+            request_id=packet.request_id,
+            request_sha256=packet.request_sha256,
+            operation_id="contract:ambiguous-empty",
+            reviewer_id="reviewer@example.test",
+            rationale="An empty target list must never imply adoption.",
+            decisions=(),
+        )
 
 
 def _status() -> ChangeRunStatusV1:
@@ -206,6 +244,74 @@ def test_decision_documents_are_stage_discriminated_canonical_and_content_bound(
         )
     assert "edit" not in {item.value for item in ManagedReviewChoiceV1}
     assert "edit" not in {item.value for item in TemporalReviewChoiceV1}
+
+
+def test_managed_decision_preserves_frozen_legacy_bytes_and_scopes_adoption_choice() -> None:
+    item = ManagedReviewDecisionItemV1(
+        subject_id=f"mtarget:{'b' * 64}",
+        subject_sha256="b" * 64,
+        subject_kind=ChangeReviewSubjectKindV1.MANAGED_REVISION_PLAN,
+        choice=ManagedReviewChoiceV1.APPROVE,
+    )
+    legacy = ManagedReviewDecisionDocumentV1.create(
+        run_id="operatorrun:" + "1" * 64,
+        request_id=f"mrequest:{SHA}",
+        request_sha256=SHA,
+        operation_id="review:managed-legacy",
+        reviewer_id="reviewer:one",
+        rationale="Approve the exact legacy target.",
+        decisions=(item,),
+    )
+    frozen = (
+        b'{"decisions":[{"choice":"approve","subject_id":"mtarget:'
+        + b"b" * 64
+        + b'","subject_kind":"managed-revision-plan","subject_sha256":"'
+        + b"b" * 64
+        + b'"}],"operation_id":"review:managed-legacy","rationale":"Approve the exact '
+        b'legacy target.","request_id":"mrequest:'
+        + b"a" * 64
+        + b'","request_sha256":"'
+        + b"a" * 64
+        + b'","reviewer_id":"reviewer:one","run_id":"operatorrun:'
+        + b"1" * 64
+        + b'","schema_version":1,"stage":"managed"}'
+    )
+
+    assert canonical_json_bytes(legacy.model_dump(mode="json")) == frozen
+    assert legacy.canonical_sha256 == (
+        "6e56dc690cbd6639db487638664889f9fcb656cdb2e74311bcd1d78808a9425a"
+    )
+    assert "adoption_choice" not in legacy.model_dump(mode="json")
+    assert parse_review_decision_document_v1(frozen) == legacy
+
+    explicit_null = {**legacy.model_dump(mode="json"), "adoption_choice": None}
+    with pytest.raises(ValidationError, match="omitted or an explicit"):
+        parse_review_decision_document_v1(canonical_json_bytes(explicit_null))
+    with pytest.raises(ValidationError, match="either target decisions or one adoption choice"):
+        ManagedReviewDecisionDocumentV1.create(
+            **{
+                key: value
+                for key, value in legacy.model_dump().items()
+                if key not in {"stage", "decisions"}
+            },
+            decisions=(item,),
+            adoption_choice=ManagedAdoptionChoiceV1.ADOPT,
+        )
+
+    adoption = ManagedReviewDecisionDocumentV1.create(
+        run_id=legacy.run_id,
+        request_id=legacy.request_id,
+        request_sha256=legacy.request_sha256,
+        operation_id="review:managed-adoption",
+        reviewer_id=legacy.reviewer_id,
+        rationale="Adopt the exact reviewed governing source.",
+        decisions=(),
+        adoption_choice=ManagedAdoptionChoiceV1.ADOPT,
+    )
+    assert adoption.model_dump(mode="json")["adoption_choice"] == "adopt"
+    assert parse_review_decision_document_v1(
+        canonical_json_bytes(adoption.model_dump(mode="json"))
+    ) == adoption
 
 
 def test_review_packet_is_path_free_stage_exact_and_preserves_source_text() -> None:

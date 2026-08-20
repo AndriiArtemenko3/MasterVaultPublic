@@ -15,9 +15,17 @@ import os
 import re
 from enum import StrEnum
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from mastervault.change_control.models import SHA256_PATTERN, canonical_json_bytes
 from mastervault.change_control.operator_run import decode_operator_run_cursor
@@ -215,6 +223,11 @@ class ManagedReviewChoiceV1(StrEnum):
     CONFIRM_NO_CHANGE = "confirm-no-change"
 
 
+class ManagedAdoptionChoiceV1(StrEnum):
+    ADOPT = "adopt"
+    REJECT = "reject"
+
+
 class StartChangeRequestV1(_StrictFrozenModel):
     schema_version: Literal[1] = 1
     operation_id: str
@@ -324,7 +337,7 @@ class ChangeReviewEvidenceSummaryV1(_StrictFrozenModel):
     stage: ChangeReviewStageV1
     request_id: str
     request_sha256: str = Field(pattern=SHA256_PATTERN)
-    subject_count: int = Field(ge=1)
+    subject_count: int = Field(ge=0)
     decision_id: str | None = None
     decision_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
 
@@ -614,7 +627,14 @@ class ChangeReviewPacketV1(_StrictFrozenModel):
     stage: ChangeReviewStageV1
     request_id: str
     request_sha256: str = Field(pattern=SHA256_PATTERN)
-    subjects: tuple[ChangeReviewSubjectV1, ...] = Field(min_length=1)
+    subjects: tuple[ChangeReviewSubjectV1, ...]
+    adoption_only: bool = False
+    governing_source_adoption_id: str | None = Field(
+        default=None, pattern=r"^mgoverningsource:[0-9a-f]{64}$"
+    )
+    governing_source_adoption_sha256: str | None = Field(
+        default=None, pattern=SHA256_PATTERN
+    )
 
     @field_validator("request_id")
     @classmethod
@@ -645,6 +665,19 @@ class ChangeReviewPacketV1(_StrictFrozenModel):
             item.subject_kind in temporal for item in self.subjects
         ):
             raise ValueError("managed packet contains a temporal subject")
+        adoption_pair = (
+            self.governing_source_adoption_id is not None
+            and self.governing_source_adoption_sha256 is not None
+            and self.governing_source_adoption_id
+            == f"mgoverningsource:{self.governing_source_adoption_sha256}"
+        )
+        if self.adoption_only:
+            if self.stage != ChangeReviewStageV1.MANAGED or self.subjects or not adoption_pair:
+                raise ValueError("adoption-only packet requires exact zero-subject authority")
+        elif not self.subjects or self.governing_source_adoption_id is not None or (
+            self.governing_source_adoption_sha256 is not None
+        ):
+            raise ValueError("ordinary review packet requires subjects and no adoption-only fields")
         request_prefix = "reviewreq:" if self.stage == ChangeReviewStageV1.TEMPORAL else "mrequest:"
         if re.fullmatch(rf"{request_prefix}[0-9a-f]{{64}}", self.request_id) is None:
             raise ValueError("review packet request ID differs from its exact stage")
@@ -765,7 +798,22 @@ class TemporalReviewDecisionDocumentV1(_ReviewDecisionDocumentBase):
 
 class ManagedReviewDecisionDocumentV1(_ReviewDecisionDocumentBase):
     stage: Literal[ChangeReviewStageV1.MANAGED] = ChangeReviewStageV1.MANAGED
-    decisions: tuple[ManagedReviewDecisionItemV1, ...] = Field(min_length=1)
+    decisions: tuple[ManagedReviewDecisionItemV1, ...]
+    adoption_choice: ManagedAdoptionChoiceV1 | None = None
+
+    @field_validator("adoption_choice", mode="before")
+    @classmethod
+    def _reject_explicit_null_adoption_choice(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("adoption_choice must be omitted or an explicit adopt/reject choice")
+        return value
+
+    @model_serializer(mode="wrap")
+    def _preserve_legacy_decision_bytes(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.adoption_choice is None:
+            values.pop("adoption_choice", None)
+        return values
 
     @field_validator("decisions")
     @classmethod
@@ -781,6 +829,10 @@ class ManagedReviewDecisionDocumentV1(_ReviewDecisionDocumentBase):
     def _request_stage(self) -> Self:
         if re.fullmatch(r"mrequest:[0-9a-f]{64}", self.request_id) is None:
             raise ValueError("managed decision requires an exact managed request ID")
+        if bool(self.decisions) == (self.adoption_choice is not None):
+            raise ValueError(
+                "managed decision requires either target decisions or one adoption choice"
+            )
         return self
 
     @classmethod
@@ -927,6 +979,7 @@ __all__ = [
     "ChangeVerificationResultV1",
     "GenerationZeroBaselineSummaryV1",
     "IncomingEvidenceSummaryV1",
+    "ManagedAdoptionChoiceV1",
     "ManagedReviewChoiceV1",
     "ManagedReviewDecisionDocumentV1",
     "ManagedReviewDecisionItemV1",

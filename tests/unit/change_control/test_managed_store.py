@@ -38,6 +38,7 @@ from mastervault.change_control.managed_review import (
     GroundedArtifactCitation,
     InferenceExecutionMode,
     InferenceUsage,
+    ManagedAdoptionChoice,
     ManagedAnalysisSetBinding,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -48,6 +49,8 @@ from mastervault.change_control.managed_review import (
     ManagedImpactBatchMemberBinding,
     ManagedImpactOutputRefBinding,
     ManagedInferenceContractBinding,
+    ManagedNoWorkAnalysisSetBindingV4,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedReviewBaseBinding,
     ManagedRevisionDecisionCommand,
     ManagedRevisionDisposition,
@@ -172,7 +175,11 @@ class _Resolver:
         *,
         approved_projection_ids: set[str] | None = None,
         impact_evidence: ManagedImpactAnalysisEvidenceBinding | None = None,
-        revision_admission: ManagedRevisionPlanningAdmissionBinding | None = None,
+        revision_admission: (
+            ManagedRevisionPlanningAdmissionBinding
+            | ManagedNoWorkPlanningAdmissionBinding
+            | None
+        ) = None,
         governing_source_adoption: ManagedGoverningSourceAdoptionBinding | None = None,
     ) -> None:
         self.contract = contract
@@ -1103,6 +1110,81 @@ def test_operator_run_navigation_is_post_authority_typed_and_replayable(
     store.close()
 
 
+def test_operator_revision_link_accepts_exact_no_work_admission_only(
+    tmp_path: Path,
+) -> None:
+    scenario = _no_change_scenario(tmp_path / "state.sqlite3")
+    zero = _zero_target_adoption_scenario(
+        scenario,
+        operation_id="operator-run:no-work-review",
+    )
+    original = zero.bundle.run_binding.revision_planning_admission
+    assert isinstance(original, ManagedNoWorkPlanningAdmissionBinding)
+    operator = OperatorRunCommand.create(
+        operation_id="operator-run:no-work",
+        aggregate_id=scenario.authority.aggregate_id,
+        base_authority_id=scenario.authority.authority_id,
+        base_authority_revision=scenario.authority.authority_revision,
+        base_active_pointer_sha256=scenario.authority.active_pointer_sha256,
+    )
+    run = scenario.store.create_operator_run(operator)
+    values = original.model_dump(mode="json")
+    for key in ("schema_version", "admission_id", "admission_sha256", "run_id", "targets"):
+        values.pop(key)
+    admission = ManagedNoWorkPlanningAdmissionBinding.create(
+        run_id=operator.run_id,
+        **values,
+    )
+
+    class PlanningResolver:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def resolve_operator_revision_planning(self, **_kwargs: object) -> object:
+            return self.value
+
+    link = OperatorRunLinkCommand.create(
+        operation_id="operator-run:no-work:planning-link",
+        run_id=operator.run_id,
+        kind=OperatorRunLinkKind.REVISION_PLANNING,
+        target_id=admission.admission_id,
+        target_sha256=admission.admission_sha256,
+    )
+    linked = scenario.store.record_operator_run_link(
+        link,
+        resolver=PlanningResolver(admission),  # type: ignore[arg-type]
+    )
+    assert scenario.store.record_operator_run_link(
+        link,
+        resolver=PlanningResolver(admission),  # type: ignore[arg-type]
+    ) == linked
+
+    for label, target_id, target_sha256, resolved in (
+        (
+            "wrong-id",
+            "mrevisionadmission:" + "0" * 64,
+            admission.admission_sha256,
+            admission,
+        ),
+        ("wrong-sha", admission.admission_id, "0" * 64, admission),
+        ("wrong-type", admission.admission_id, admission.admission_sha256, object()),
+    ):
+        invalid = OperatorRunLinkCommand.create(
+            operation_id=f"operator-run:no-work:{label}",
+            run_id=operator.run_id,
+            kind=OperatorRunLinkKind.REVISION_PLANNING,
+            target_id=target_id,
+            target_sha256=target_sha256,
+        )
+        with pytest.raises(ChangeControlCorruptionError, match="planning"):
+            scenario.store._verify_operator_link_target(  # noqa: SLF001
+                invalid,
+                run,
+                resolver=PlanningResolver(resolved),  # type: ignore[arg-type]
+            )
+    scenario.store.close()
+
+
 def _no_change_scenario(path: Path) -> _Scenario:
     store, bootstrap, prechange_head = _bootstrapped_store(path)
     authority = store.initialize_generation_zero(
@@ -1765,6 +1847,85 @@ def _no_change_variant_scenario(scenario: _Scenario) -> _Scenario:
         ("NO_CHANGE_REQUIRED",),
         request_operation_id="managed-store:overlapping-request",
         request_rationale="Attempt a second request over the same still-open target.",
+    )
+
+
+def _zero_target_adoption_scenario(
+    scenario: _Scenario, *, operation_id: str
+) -> _Scenario:
+    run = scenario.bundle.run_binding
+    assert isinstance(run, ManagedRunBindingV2)
+    ordinary_admission = run.revision_planning_admission
+    assert isinstance(ordinary_admission, ManagedRevisionPlanningAdmissionBinding)
+    evidence_sha = hashlib.sha256(b"managed-store-no-work-evidence").hexdigest()
+    workload_sha = hashlib.sha256(b"managed-store-no-work-workload").hexdigest()
+    analysis = ManagedNoWorkAnalysisSetBindingV4.create(
+        analysis_bootstrap=run.analysis_set.analysis_bootstrap,
+        candidate_result_sha256=run.analysis_set.candidate_result_sha256,
+        classification_result_sha256=run.analysis_set.classification_result_sha256,
+        attention_result_sha256=run.analysis_set.attention_result_sha256,
+        impact_result_sha256=hashlib.sha256(b"managed-store-empty-impact").hexdigest(),
+        no_work_evidence_id=f"no-work-planning:{evidence_sha}",
+        no_work_evidence_sha256=evidence_sha,
+        global_relevant_claim_revision_ids=(
+            run.analysis_set.global_relevant_claim_revision_ids
+        ),
+    )
+    admission = ManagedNoWorkPlanningAdmissionBinding.create(
+        run_id=run.run_id,
+        repository_id=ordinary_admission.repository_id,
+        workload_id=f"revisionwork:{workload_sha}",
+        workload_sha256=workload_sha,
+        analysis_set=analysis,
+        analysis_set_id=analysis.analysis_set_id,
+        analysis_set_sha256=analysis.analysis_set_sha256,
+        reviewed_snapshot_binding_id=ordinary_admission.reviewed_snapshot_binding_id,
+        reviewed_snapshot_binding_sha256=(
+            ordinary_admission.reviewed_snapshot_binding_sha256
+        ),
+        temporal_decision_record_sha256=(ordinary_admission.temporal_decision_record_sha256),
+        no_work_evidence_id=analysis.no_work_evidence_id,
+        no_work_evidence_sha256=analysis.no_work_evidence_sha256,
+    )
+    zero_run = ManagedRunBindingV2.create(
+        run_id=run.run_id,
+        operation_id=run.operation_id,
+        prechange_head=run.prechange_head,
+        analysis_head=run.analysis_head,
+        algorithm_manifest_sha256=run.algorithm_manifest_sha256,
+        inference_contract=run.inference_contract,
+        analysis_set=analysis,
+        revision_planning_admission=admission,
+        governing_source_adoption=run.governing_source_adoption,
+    )
+    bundle = ManagedRevisionReviewBundle.create(
+        run_binding=zero_run,
+        review_base=scenario.bundle.review_base,
+        temporal_prerequisite=scenario.bundle.temporal_prerequisite,
+        targets=(),
+    )
+    resolver = _Resolver(
+        scenario.resolver.contract,
+        scenario.resolver.manifest,
+        scenario.resolver.artifacts,
+        approved_projection_ids=scenario.resolver.approved_projection_ids,
+        revision_admission=admission,
+        governing_source_adoption=scenario.resolver.governing_source_adoption,
+    )
+    command = ManagedRevisionReviewRequestCommand.create(
+        bundle=bundle,
+        operation_id=operation_id,
+        requester_id="operator@example.test",
+        rationale="Review the exact zero-target governing-source adoption.",
+    )
+    return _Scenario(
+        store=scenario.store,
+        bootstrap=scenario.bootstrap,
+        prechange_head=scenario.prechange_head,
+        authority=scenario.authority,
+        resolver=resolver,
+        bundle=bundle,
+        request_command=command,
     )
 
 
@@ -2453,6 +2614,74 @@ def test_operation_collision_and_overlapping_open_target_fail_closed(tmp_path: P
             "SELECT count(*) FROM change_control_managed_review_request_records"
         ).fetchone()[0]
         == 1
+    )
+    scenario.store.close()
+
+
+@pytest.mark.parametrize("zero_target_first", (False, True))
+def test_open_zero_target_review_owns_the_whole_exact_authority_in_both_orders(
+    tmp_path: Path, zero_target_first: bool
+) -> None:
+    scenario = _no_change_scenario(tmp_path / "state.sqlite3")
+    zero = _zero_target_adoption_scenario(
+        scenario,
+        operation_id="managed-store:zero-target-request",
+    )
+    first = zero if zero_target_first else scenario
+    competing = scenario if zero_target_first else zero
+
+    initial = _create_managed_request(first)
+    replay = _create_managed_request(first)
+    assert not initial.replayed and replay.replayed
+    with pytest.raises(ChangeControlConflictError, match="overlaps an open target"):
+        _create_managed_request(competing)
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_request_records"
+        ).fetchone()[0]
+        == 1
+    )
+    scenario.store.close()
+
+
+def test_closed_zero_target_review_releases_exact_authority_for_new_request(
+    tmp_path: Path,
+) -> None:
+    scenario = _no_change_scenario(tmp_path / "state.sqlite3")
+    zero = _zero_target_adoption_scenario(
+        scenario,
+        operation_id="managed-store:closed-zero-target-request",
+    )
+    _create_managed_request(zero)
+    open_view = scenario.store.get_managed_review(
+        zero.request_command.request_id,
+        resolver=zero.resolver,
+        verified_bootstrap=scenario.bootstrap.verification_capability,
+        prechange_head=scenario.prechange_head,
+    )
+    rejection = ManagedRevisionDecisionCommand.create(
+        operation_id="managed-store:closed-zero-target-decision",
+        request_record=open_view.request_record,
+        bundle_outcome=ManagedBundleOutcome.REJECTED,
+        adoption_choice=ManagedAdoptionChoice.REJECT,
+        reviewer_id="reviewer@example.test",
+        rationale="Reject this governing-source adoption without changing authority.",
+        items=(),
+    )
+    scenario.store.decide_managed_review(
+        rejection,
+        resolver=zero.resolver,
+        verified_bootstrap=scenario.bootstrap.verification_capability,
+        prechange_head=scenario.prechange_head,
+    )
+
+    admitted = _create_managed_request(scenario)
+    assert not admitted.replayed
+    assert (
+        scenario.store.conn.execute(
+            "SELECT count(*) FROM change_control_managed_review_request_records"
+        ).fetchone()[0]
+        == 2
     )
     scenario.store.close()
 
