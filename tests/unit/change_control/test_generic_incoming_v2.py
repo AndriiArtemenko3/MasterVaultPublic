@@ -289,6 +289,27 @@ def test_repository_rejects_non_private_member_mode(tmp_path: Path) -> None:
         repository.reopen(capability.bundle_id)
 
 
+@pytest.mark.parametrize("artifact_kind", ("bundle", "admission"))
+def test_repository_rejects_noncanonical_receipt_bytes(
+    tmp_path: Path, artifact_kind: str
+) -> None:
+    source, workspace = _write(tmp_path, "Returns require a receipt.\n")
+    admission = admit_generic_incoming_markdown_v2(source, active_workspace=workspace)
+    live = ground_generic_extraction_v2(admission, _result("Returns require a receipt."))
+    repository = FilesystemGenericIncomingRepositoryV2(tmp_path / "evidence")
+    capability = repository.persist(admission, live)
+    evidence = repository.resolve_verified_evidence(capability)
+    if artifact_kind == "bundle":
+        relative = f"generic-incoming/v2/bundles/{capability.bundle_sha256}.json"
+    else:
+        relative = evidence.bundle.admission_receipt_locator
+    artifact = repository.root / relative
+    artifact.write_bytes(artifact.read_bytes() + b"\n")
+
+    with pytest.raises(GenericIncomingRepositoryError, match="not canonical"):
+        repository.reopen(capability.bundle_id)
+
+
 def test_repository_replay_requires_recorded_live(tmp_path: Path) -> None:
     source, workspace = _write(tmp_path, "Returns require a receipt.\n")
     admission = admit_generic_incoming_markdown_v2(source, active_workspace=workspace)

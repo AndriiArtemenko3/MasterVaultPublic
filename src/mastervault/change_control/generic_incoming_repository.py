@@ -455,7 +455,10 @@ class FilesystemGenericIncomingRepositoryV2:
             content = self._backend._read_optional(locator, limit=_MAX_RECEIPT, label=label)
             if content is None:
                 raise GenericIncomingRepositoryError(f"{label} is missing")
-            return model.model_validate_json(content)
+            parsed = model.model_validate_json(content, strict=True)
+            if content != canonical_json_bytes(parsed.model_dump(mode="json")):
+                raise GenericIncomingRepositoryError(f"{label} is not canonical")
+            return parsed
         except (ValidationError, InferenceEvidenceRepositoryError) as exc:
             raise GenericIncomingRepositoryError(f"{label} is corrupt") from exc
 
