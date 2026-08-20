@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any, SupportsIndex
 
 from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
 from mastervault.change_control.bootstrap import incoming_claim_evidence_sha256
@@ -245,6 +246,33 @@ class ApprovedManagedGoverningSourceAuthority:
 
 
 @dataclass(frozen=True)
+class ApprovedManagedRevisionPlanningAdmissionAuthority:
+    """Process-local reviewed authority for one exact planning admission."""
+
+    admission: ManagedRevisionPlanningAdmissionBinding
+    reviewed_snapshot: ReviewedTemporalSnapshotAuthority
+
+    def __post_init__(self) -> None:
+        if type(self.admission) is not ManagedRevisionPlanningAdmissionBinding:
+            raise TypeError("approved revision admission requires an exact binding")
+        if type(self.reviewed_snapshot) is not ReviewedTemporalSnapshotAuthority:
+            raise TypeError("approved revision admission requires exact reviewed authority")
+        exact = ManagedRevisionPlanningAdmissionBinding.model_validate_json(
+            canonical_json_bytes(self.admission.model_dump(mode="json"))
+        )
+        if exact != self.admission:
+            raise ValueError("approved revision admission is not canonical")
+        self.reviewed_snapshot.verify()
+
+    def __reduce__(self) -> Any:
+        raise TypeError("approved revision admission authorities are process-local")
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> Any:
+        del protocol
+        raise TypeError("approved revision admission authorities are process-local")
+
+
+@dataclass(frozen=True)
 class ResolvedReviewedGenerationSource:
     """Freshly verified reviewed aggregate, SourceNotes, and provenance root."""
 
@@ -305,6 +333,9 @@ class RepositoryBackedManagedReviewResolver:
         canonical_root: Path,
         approved_contracts: tuple[ApprovedManagedInferenceContractAuthority, ...],
         revision_admissions: tuple[ManagedRevisionPlanningAdmissionBinding, ...] = (),
+        approved_revision_admissions: tuple[
+            ApprovedManagedRevisionPlanningAdmissionAuthority, ...
+        ] = (),
         governing_sources: tuple[ApprovedManagedGoverningSourceAuthority, ...] = (),
     ) -> None:
         if evidence_repository.root != staging_repository.root or (
@@ -338,7 +369,25 @@ class RepositoryBackedManagedReviewResolver:
         admissions = {item.admission_id: item for item in revision_admissions}
         if len(admissions) != len(revision_admissions):
             raise ValueError("managed revision admission identities must be unique")
-        self._admission_sources: dict[str, ApprovedManagedGoverningSourceAuthority] = {}
+        approved_admissions = {
+            item.admission.admission_id: item for item in approved_revision_admissions
+        }
+        if len(approved_admissions) != len(approved_revision_admissions):
+            raise ValueError("approved revision admission identities must be unique")
+        if set(admissions) & set(approved_admissions):
+            raise ValueError(
+                "revision admission cannot have both sealed and direct reviewed authority"
+            )
+        if any(
+            type(item) is not ApprovedManagedRevisionPlanningAdmissionAuthority
+            for item in approved_revision_admissions
+        ):
+            raise TypeError("approved revision admission authority type was substituted")
+        self._admission_sources: dict[
+            str,
+            ApprovedManagedGoverningSourceAuthority
+            | ApprovedManagedRevisionPlanningAdmissionAuthority,
+        ] = {}
         self._admissions: dict[str, ManagedRevisionPlanningAdmissionBinding] = {}
         for key, value in admissions.items():
             matching_sources = tuple(
@@ -368,6 +417,18 @@ class RepositoryBackedManagedReviewResolver:
                 staging_repository=self._staging,
             )
             self._admission_sources[key] = authority
+        for direct_key, direct_authority in approved_admissions.items():
+            direct_value = direct_authority.admission
+            direct_reopened = reopen_revision_planning_admission(
+                direct_value,
+                reviewed_snapshot=direct_authority.reviewed_snapshot,
+                evidence_repository=self._evidence,
+                staging_repository=self._staging,
+            )
+            if direct_reopened != direct_value:
+                raise ValueError("approved revision admission changed on initial reopen")
+            self._admissions[direct_key] = direct_reopened
+            self._admission_sources[direct_key] = direct_authority
 
     def open_algorithm_manifest(self, binding: ManagedInferenceContractBinding) -> bytes:
         approved = self._approved_contracts.get(binding.contract_binding_id)
@@ -895,6 +956,7 @@ class RepositoryBackedManagedReviewResolver:
 __all__ = [
     "ApprovedManagedGoverningSourceAuthority",
     "ApprovedManagedInferenceContractAuthority",
+    "ApprovedManagedRevisionPlanningAdmissionAuthority",
     "RepositoryBackedManagedReviewResolver",
     "ResolvedReviewedGenerationSource",
     "derive_managed_governing_source_adoption",

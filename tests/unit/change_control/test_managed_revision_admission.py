@@ -56,6 +56,7 @@ from mastervault.change_control.managed_review import (
 from mastervault.change_control.managed_review_repository import (
     ApprovedManagedGoverningSourceAuthority,
     ApprovedManagedInferenceContractAuthority,
+    ApprovedManagedRevisionPlanningAdmissionAuthority,
     RepositoryBackedManagedReviewResolver,
     derive_managed_governing_source_adoption,
 )
@@ -232,8 +233,7 @@ def _recorded_scenario(
             destination.write_bytes(content)
     run = execute_revision_planning(
         run_id=(
-            "m4-admission-full-"
-            + hashlib.sha256(str(tmp_path).encode("utf-8")).hexdigest()[:16]
+            "m4-admission-full-" + hashlib.sha256(str(tmp_path).encode("utf-8")).hexdigest()[:16]
         ),
         impact_run=impact_run,
         predecessor_snapshots=snapshots,
@@ -331,9 +331,7 @@ def _rehashed_bootstrap_with_alternate_seed(
         canonical_json_bytes(provisional._canonical_input_payload())
     ).hexdigest()
     rehashed = AnalysisBootstrapBinding.model_construct(**payload)
-    digest = hashlib.sha256(
-        canonical_json_bytes(rehashed._identity_payload())
-    ).hexdigest()
+    digest = hashlib.sha256(canonical_json_bytes(rehashed._identity_payload())).hexdigest()
     payload["binding_id"] = f"analysis-bootstrap:{digest}"
     payload["binding_sha256"] = digest
     return AnalysisBootstrapBinding.model_validate(payload)
@@ -345,9 +343,7 @@ def _recreate_governing_adoption(
 ) -> ManagedGoverningSourceAdoptionBinding:
     excluded = {"adoption_id", "adoption_sha256", "source_repository_binding_sha256"}
     values = {
-        name: getattr(binding, name)
-        for name in type(binding).model_fields
-        if name not in excluded
+        name: getattr(binding, name) for name in type(binding).model_fields if name not in excluded
     }
     values.update(updates)
     return ManagedGoverningSourceAdoptionBinding.create(**values)
@@ -736,9 +732,7 @@ def test_admission_rejects_reviewed_identity_and_step10_index_substitution(
             staging_repository=scenario.staging,
         )
 
-    forged_bootstrap = _rehashed_bootstrap_with_alternate_seed(
-        analysis.analysis_bootstrap
-    )
+    forged_bootstrap = _rehashed_bootstrap_with_alternate_seed(analysis.analysis_bootstrap)
     assert forged_bootstrap.analysis_aggregate_sha256 == (
         analysis.analysis_bootstrap.analysis_aggregate_sha256
     )
@@ -1074,9 +1068,7 @@ def test_production_resolver_requires_governing_allowlist_and_rebuilds_after_res
     try:
         reminted = resolve_reviewed_temporal_snapshot(
             restarted_store,
-            temporal_analysis_manifest_id=(
-                exact_impact_fixture.temporal_analysis_manifest_id
-            ),
+            temporal_analysis_manifest_id=(exact_impact_fixture.temporal_analysis_manifest_id),
             temporal_analysis_manifest_sha256=(
                 exact_impact_fixture.temporal_analysis_manifest_sha256
             ),
@@ -1117,6 +1109,62 @@ def test_production_resolver_requires_governing_allowlist_and_rebuilds_after_res
     )
     assert restarted.resolve_revision_planning_admission(binding) == binding
     assert restarted.resolve_governing_source_adoption(adoption) == adoption
+
+
+def test_direct_reviewed_admission_authority_reopens_and_rejects_conflicts(
+    exact_impact_fixture: _ExactImpactFixture,
+    tmp_path: Path,
+) -> None:
+    scenario = _recorded_scenario(
+        authority=exact_impact_fixture.authority,
+        workload=exact_impact_fixture.workload,
+        tmp_path=tmp_path,
+        repository_root=exact_impact_fixture.repository_root,
+    )
+    binding = _bind(scenario)
+    direct = ApprovedManagedRevisionPlanningAdmissionAuthority(
+        admission=binding,
+        reviewed_snapshot=scenario.reviewed_snapshot,
+    )
+    kwargs = {
+        "evidence_repository": FilesystemInferenceEvidenceRepository(scenario.root),
+        "staging_repository": ManagedStagingRepository(scenario.root),
+        "canonical_root": scenario.canonical_root,
+        "approved_contracts": (
+            ApprovedManagedInferenceContractAuthority(
+                contract=scenario.run.outcomes[0].execution.contract,
+                algorithm_manifest_bytes=ALGORITHM,
+            ),
+        ),
+    }
+    resolver = RepositoryBackedManagedReviewResolver(
+        **kwargs,
+        approved_revision_admissions=(direct,),
+    )
+    assert resolver.resolve_revision_planning_admission(binding) == binding
+
+    with pytest.raises(ValueError, match="identities must be unique"):
+        RepositoryBackedManagedReviewResolver(
+            **kwargs,
+            approved_revision_admissions=(direct, direct),
+        )
+    with pytest.raises(ValueError, match="both sealed and direct"):
+        RepositoryBackedManagedReviewResolver(
+            **kwargs,
+            revision_admissions=(binding,),
+            approved_revision_admissions=(direct,),
+        )
+    with pytest.raises(TypeError, match="exact reviewed authority"):
+        ApprovedManagedRevisionPlanningAdmissionAuthority(
+            admission=binding,
+            reviewed_snapshot=object(),  # type: ignore[arg-type]
+        )
+    substituted = object.__new__(ReviewedTemporalSnapshotAuthority)
+    with pytest.raises((AttributeError, TypeError, ValueError)):
+        ApprovedManagedRevisionPlanningAdmissionAuthority(
+            admission=binding,
+            reviewed_snapshot=substituted,
+        )
 
 
 def test_production_resolver_rejects_valid_but_wrong_governing_authority(
