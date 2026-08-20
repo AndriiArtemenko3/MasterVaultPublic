@@ -18,6 +18,10 @@ from mastervault.change_control.dependency_analysis import (
     CanonicalSourceNoteSnapshot,
     SourceNoteInventory,
 )
+from mastervault.change_control.generic_analysis import (
+    GenericSourceNoteInventoryResolverV2,
+    GenericVerifiedSourceNoteInventoryCapabilityV2,
+)
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
     RepositoryVerifiedInferenceEvidenceBatch,
@@ -541,7 +545,9 @@ def resolve_reviewed_temporal_snapshot(
     temporal_analysis_manifest_sha256: str,
     temporal_request_id: str,
     evidence_repository: FilesystemInferenceEvidenceRepository,
-    source_note_resolver: RepositorySourceNoteInventoryResolver,
+    source_note_resolver: (
+        RepositorySourceNoteInventoryResolver | GenericSourceNoteInventoryResolverV2
+    ),
     read_only: bool = False,
 ) -> ReviewedTemporalSnapshotAuthority:
     """Mint rev4 SourceNote authority from exact durable evidence and a decided review."""
@@ -554,7 +560,10 @@ def resolve_reviewed_temporal_snapshot(
         raise ReviewedTemporalSnapshotAuthorityError(
             "reviewed snapshot authority requires the exact filesystem evidence repository"
         )
-    if type(source_note_resolver) is not RepositorySourceNoteInventoryResolver:
+    if type(source_note_resolver) not in {
+        RepositorySourceNoteInventoryResolver,
+        GenericSourceNoteInventoryResolverV2,
+    }:
         raise ReviewedTemporalSnapshotAuthorityError(
             "reviewed snapshot authority requires the exact repository SourceNote resolver"
         )
@@ -608,7 +617,10 @@ def resolve_reviewed_temporal_snapshot(
         inventory_capability = source_note_resolver.resolve_source_note_inventory(
             snapshot=analysis_snapshot
         )
-        if type(inventory_capability) is not RepositoryVerifiedSourceNoteInventoryCapability:
+        if type(inventory_capability) not in {
+            RepositoryVerifiedSourceNoteInventoryCapability,
+            GenericVerifiedSourceNoteInventoryCapabilityV2,
+        }:
             raise ReviewedTemporalSnapshotAuthorityError(
                 "revision-2 SourceNote capability was substituted"
             )

@@ -43,10 +43,26 @@ _AFFECT_PATTERN: Final = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _CAPABILITY_TOKEN = object()
 _CAPABILITY_SECRET = os.urandom(32)
 _FORBIDDEN_KEYS = {
-    "affected", "affected_document_ids", "classification", "dependencies", "edge_label",
-    "expected_after", "expected_impacts", "expected_pair_classifications", "expected_patch",
-    "expected_patches", "expected_review_decision", "grounding_document_id", "grounding_quote",
-    "impact", "impacts", "patch", "patches", "rationale", "review_decision", "temporal_phases",
+    "affected",
+    "affected_document_ids",
+    "classification",
+    "dependencies",
+    "edge_label",
+    "expected_after",
+    "expected_impacts",
+    "expected_pair_classifications",
+    "expected_patch",
+    "expected_patches",
+    "expected_review_decision",
+    "grounding_document_id",
+    "grounding_quote",
+    "impact",
+    "impacts",
+    "patch",
+    "patches",
+    "rationale",
+    "review_decision",
+    "temporal_phases",
 }
 _FORBIDDEN_VALUE_PHRASES = {
     "evaluator answer",
@@ -60,9 +76,7 @@ _FORBIDDEN_VALUE_PHRASES = {
     "grounding document id",
     "grounding quote",
 }
-_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)(?:api[_ -]?key|bearer|password|secret|token)\s*[:=]\s*\S+"
-)
+_SECRET_ASSIGNMENT = re.compile(r"(?i)(?:api[_ -]?key|bearer|password|secret|token)\s*[:=]\s*\S+")
 _ABSOLUTE_PATH_FRAGMENT = re.compile(r"(?:^|\s)(?:/[^\s]+|[A-Za-z]:[\\/][^\s]+)")
 _ROLE_SOURCE_TYPES: Final = {
     DocumentRole.POLICY: {SourceType.POLICY},
@@ -182,6 +196,7 @@ class GenericGroundedExtractionV2(_StrictFrozenModel):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     provider_result_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider_contract: GenericGroundedClaimExtractionV2
     claims: tuple[GenericGroundedClaimV2, ...] = Field(
         min_length=1, max_length=MAX_GENERIC_CLAIMS_V2
     )
@@ -346,9 +361,7 @@ def _read_external_regular(
         requested = path.absolute()
         if any(part in {"", ".", ".."} for part in requested.parts[1:]):
             raise GenericIncomingBoundaryError("incoming source path is not canonical")
-        directory_flags = (
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        )
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
         parent_fd = os.open(requested.anchor, directory_flags)
         component_signatures: list[tuple[Path, tuple[int, int, int, int, int, int, int, int]]] = []
         current_path = Path(requested.anchor)
@@ -422,15 +435,23 @@ def _read_external_regular(
     return requested, data, expected
 
 
-def _capability_seal(metadata: GenericChangeMetadataV2, digest: str, signature: tuple[int, ...]) -> str:
+def _capability_seal(
+    metadata: GenericChangeMetadataV2, digest: str, signature: tuple[int, ...]
+) -> str:
     payload = canonical_json_bytes(
-        {"metadata": metadata.model_dump(mode="json"), "source_sha256": digest, "signature": signature}
+        {
+            "metadata": metadata.model_dump(mode="json"),
+            "source_sha256": digest,
+            "signature": signature,
+        }
     )
     return hmac.new(_CAPABILITY_SECRET, payload, hashlib.sha256).hexdigest()
 
 
 def _verify_capability(admission: VerifiedGenericIncomingV2) -> None:
-    expected = _capability_seal(admission.metadata, admission.source_sha256, admission._source_signature)
+    expected = _capability_seal(
+        admission.metadata, admission.source_sha256, admission._source_signature
+    )
     if not hmac.compare_digest(admission._seal, expected):
         raise GenericIncomingIntegrityError("generic incoming capability authentication failed")
     if _sha256(admission._source_snapshot) != admission.source_sha256:
@@ -471,12 +492,16 @@ def admit_generic_incoming_markdown_v2(
 
 def extraction_request_sha256_v2(admission: VerifiedGenericIncomingV2) -> str:
     _verify_capability(admission)
-    return _sha256(canonical_json_bytes({
-        "namespace": "mastervault.generic-grounded-extraction-request.v2",
-        "source_sha256": admission.source_sha256,
-        "document_id": admission.metadata.document_id,
-        "contract_id": "generic_grounded_claim_extraction_v2",
-    }))
+    return _sha256(
+        canonical_json_bytes(
+            {
+                "namespace": "mastervault.generic-grounded-extraction-request.v2",
+                "source_sha256": admission.source_sha256,
+                "document_id": admission.metadata.document_id,
+                "contract_id": "generic_grounded_claim_extraction_v2",
+            }
+        )
+    )
 
 
 def generic_extraction_prompt_variables_v2(
@@ -488,9 +513,7 @@ def generic_extraction_prompt_variables_v2(
     return {"document": fence(admission.source_text, "GENERIC INCOMING MARKDOWN")}
 
 
-def _resolve_quote(
-    text: str, body: str, quote: str, *, body_start: int
-) -> GenericEvidenceSpanV2:
+def _resolve_quote(text: str, body: str, quote: str, *, body_start: int) -> GenericEvidenceSpanV2:
     starts = [body_start + match.start() for match in re.finditer(re.escape(quote), body)]
     if len(starts) != 1:
         raise GenericIncomingIntegrityError("quotation must resolve exactly once in admitted bytes")
@@ -501,8 +524,10 @@ def _resolve_quote(
     prefix = text[:start]
     suffix = text[end:]
     trimmed = prefix.rstrip()
-    if start != body_start and prefix and not (
-        prefix.endswith("\n\n") or (trimmed and trimmed[-1] in ".!?")
+    if (
+        start != body_start
+        and prefix
+        and not (prefix.endswith("\n\n") or (trimmed and trimmed[-1] in ".!?"))
     ):
         raise GenericIncomingIntegrityError("quotation does not start at a sentence boundary")
     if suffix and not suffix[0].isspace():
@@ -528,24 +553,21 @@ def ground_generic_extraction_v2(
     _verify_capability(admission)
     admission.verify_current_path()
     if isinstance(provider_result, bytes):
-        raw_representation = provider_result
         try:
             parsed_json = json.loads(provider_result.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise GenericIncomingBoundaryError("provider representation is not UTF-8 JSON") from exc
     elif isinstance(provider_result, BaseModel):
         parsed_json = provider_result.model_dump(mode="json")
-        raw_representation = canonical_json_bytes(parsed_json)
     else:
         parsed_json = provider_result
-        raw_representation = canonical_json_bytes(parsed_json)
     try:
         proposed = GenericGroundedClaimExtractionV2.model_validate_json(
             canonical_json_bytes(parsed_json)
         )
     except ValidationError as exc:
         raise GenericIncomingBoundaryError(f"provider extraction is invalid: {exc}") from exc
-    provider_digest = _sha256(raw_representation)
+    provider_digest = _sha256(canonical_json_bytes(proposed.model_dump(mode="json")))
     if mode is GenericExtractionModeV2.REPLAY:
         if replay_of is None or replay_of.mode is not GenericExtractionModeV2.LIVE:
             raise GenericIncomingIntegrityError("REPLAY requires one exact prior LIVE extraction")
@@ -554,7 +576,9 @@ def ground_generic_extraction_v2(
             or replay_of.request_sha256 != extraction_request_sha256_v2(admission)
             or replay_of.provider_result_sha256 != provider_digest
         ):
-            raise GenericIncomingIntegrityError("REPLAY differs from its exact content-bound LIVE input")
+            raise GenericIncomingIntegrityError(
+                "REPLAY differs from its exact content-bound LIVE input"
+            )
     elif replay_of is not None:
         raise GenericIncomingBoundaryError("LIVE extraction cannot specify replay authority")
     source_text = admission.source_text
@@ -589,19 +613,33 @@ def ground_generic_extraction_v2(
         source_sha256=admission.source_sha256,
         request_sha256=extraction_request_sha256_v2(admission),
         provider_result_sha256=provider_digest,
+        provider_contract=proposed,
         claims=grounded,
     )
 
 
-def render_generic_source_note_v2(
-    admission: VerifiedGenericIncomingV2, extraction: GenericGroundedExtractionV2
+def render_verified_generic_source_note_projection_v2(
+    *,
+    metadata: GenericChangeMetadataV2,
+    source_sha256: str,
+    source_snapshot: bytes,
+    claims: tuple[GenericGroundedClaimV2, ...],
 ) -> bytes:
-    """Render deterministic canonical Markdown bound to the admitted raw bytes."""
+    """Purely reproduce the canonical SourceNote from already-verified evidence."""
 
-    _verify_capability(admission)
-    if extraction.source_sha256 != admission.source_sha256:
-        raise GenericIncomingIntegrityError("extraction is bound to different admitted bytes")
-    metadata = admission.metadata
+    if hashlib.sha256(source_snapshot).hexdigest() != source_sha256:
+        raise GenericIncomingIntegrityError("raw source bytes differ from their verified SHA")
+    try:
+        source_text = source_snapshot.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GenericIncomingIntegrityError("verified raw source is not UTF-8") from exc
+    if not claims:
+        raise GenericIncomingIntegrityError("generic SourceNote requires grounded claims")
+    verify_generic_grounded_claim_projection_v2(
+        metadata=metadata,
+        source_snapshot=source_snapshot,
+        claims=claims,
+    )
     frontmatter = {
         "domain": metadata.domain.value,
         "type": "source",
@@ -619,10 +657,10 @@ def render_generic_source_note_v2(
                 "affects": list(claim.affects),
                 "evidence": [],
             }
-            for claim in extraction.claims
+            for claim in claims
         ],
-        "provenance": f"generic-incoming/v2/sources/{admission.source_sha256}.md",
-        "provenance_hash": content_hash(admission.source_text),
+        "provenance": f"generic-incoming/v2/sources/{source_sha256}.md",
+        "provenance_hash": content_hash(source_text),
     }
     try:
         SourceNote.model_validate(frontmatter)
@@ -631,17 +669,100 @@ def render_generic_source_note_v2(
             "canonical generic SourceNote projection is invalid"
         ) from exc
     yaml_text = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).rstrip()
-    _yaml_text, body = _split_strict_frontmatter(admission.source_text)
+    _yaml_text, body = _split_strict_frontmatter(source_text)
     if not body.endswith("\n"):
         body += "\n"
     return f"---\n{yaml_text}\n---\n\n## Content\n\n{body}".encode()
 
 
+def verify_generic_grounded_claim_projection_v2(
+    *,
+    metadata: GenericChangeMetadataV2,
+    source_snapshot: bytes,
+    claims: tuple[GenericGroundedClaimV2, ...],
+) -> None:
+    """Revalidate exact character/UTF-8 spans and deterministic grounded identities."""
+
+    try:
+        source_text = source_snapshot.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise GenericIncomingIntegrityError("verified raw source is not UTF-8") from exc
+    _yaml_text, body = _split_strict_frontmatter(source_text)
+    body_start = len(source_text) - len(body)
+    if not claims or len(claims) > MAX_GENERIC_CLAIMS_V2:
+        raise GenericIncomingIntegrityError("grounded claim projection has invalid coverage")
+    ordered = tuple(
+        sorted(
+            claims,
+            key=lambda item: (
+                item.evidence.start_byte,
+                item.evidence.end_byte,
+                item.evidence.quote,
+            ),
+        )
+    )
+    if claims != ordered or len(
+        {(item.evidence.start_byte, item.evidence.end_byte) for item in claims}
+    ) != len(claims):
+        raise GenericIncomingIntegrityError(
+            "grounded claims must preserve unique canonical source order"
+        )
+    prefix = metadata.document_id.replace(".", "-")
+    for index, claim in enumerate(claims, start=1):
+        span = claim.evidence
+        if claim.claim_id != f"{prefix}-{index:02d}":
+            raise GenericIncomingIntegrityError(
+                "grounded claim ID differs from deterministic source order"
+            )
+        if span.start_char < body_start or span.end_char > len(source_text):
+            raise GenericIncomingIntegrityError("grounded claim lies outside the raw body")
+        if source_text[span.start_char : span.end_char] != span.quote:
+            raise GenericIncomingIntegrityError(
+                "grounded claim quote differs from exact character span"
+            )
+        encoded_prefix = source_text[: span.start_char].encode("utf-8")
+        encoded_span = source_text[: span.end_char].encode("utf-8")
+        if len(encoded_prefix) != span.start_byte or len(encoded_span) != span.end_byte:
+            raise GenericIncomingIntegrityError(
+                "grounded claim UTF-8 offsets differ from exact raw bytes"
+            )
+        expected = _resolve_quote(source_text, body, span.quote, body_start=body_start)
+        if expected != span:
+            raise GenericIncomingIntegrityError(
+                "grounded claim span differs from unique sentence-bound evidence"
+            )
+
+
+def render_generic_source_note_v2(
+    admission: VerifiedGenericIncomingV2, extraction: GenericGroundedExtractionV2
+) -> bytes:
+    """Render deterministic canonical Markdown bound to the admitted raw bytes."""
+
+    _verify_capability(admission)
+    if extraction.source_sha256 != admission.source_sha256:
+        raise GenericIncomingIntegrityError("extraction is bound to different admitted bytes")
+    return render_verified_generic_source_note_projection_v2(
+        metadata=admission.metadata,
+        source_sha256=admission.source_sha256,
+        source_snapshot=admission.source_snapshot,
+        claims=extraction.claims,
+    )
+
+
 __all__ = [
-    "GenericChangeMetadataV2", "GenericEvidenceSpanV2", "GenericExtractionModeV2",
-    "GenericGroundedClaimV2", "GenericGroundedExtractionV2", "GenericIncomingBoundaryError",
-    "GenericIncomingIntegrityError", "VerifiedGenericIncomingV2",
-    "admit_generic_incoming_markdown_v2", "extraction_request_sha256_v2",
-    "generic_extraction_prompt_variables_v2", "ground_generic_extraction_v2",
+    "GenericChangeMetadataV2",
+    "GenericEvidenceSpanV2",
+    "GenericExtractionModeV2",
+    "GenericGroundedClaimV2",
+    "GenericGroundedExtractionV2",
+    "GenericIncomingBoundaryError",
+    "GenericIncomingIntegrityError",
+    "VerifiedGenericIncomingV2",
+    "admit_generic_incoming_markdown_v2",
+    "extraction_request_sha256_v2",
+    "generic_extraction_prompt_variables_v2",
+    "ground_generic_extraction_v2",
     "render_generic_source_note_v2",
+    "render_verified_generic_source_note_projection_v2",
+    "verify_generic_grounded_claim_projection_v2",
 ]

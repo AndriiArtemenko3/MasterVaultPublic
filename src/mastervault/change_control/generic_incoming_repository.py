@@ -20,6 +20,7 @@ from mastervault.change_control.generic_incoming import (
     GenericIncomingIntegrityError,
     VerifiedGenericIncomingV2,
     render_generic_source_note_v2,
+    render_verified_generic_source_note_projection_v2,
 )
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
@@ -27,6 +28,7 @@ from mastervault.change_control.inference_repository import (
 )
 from mastervault.change_control.models import canonical_json_bytes
 from mastervault.change_control.repository_files import canonical_repo_relative
+from mastervault.contracts.generic_grounded_claims import GenericGroundedClaimExtractionV2
 
 _ROOT = "generic-incoming/v2"
 _CAPABILITY_TOKEN = object()
@@ -118,10 +120,16 @@ class GenericRecordedInferenceReceiptV2(_StrictFrozenModel):
     source_sha256: str = Field(pattern=_SHA)
     request_sha256: str = Field(pattern=_SHA)
     provider_result_sha256: str = Field(pattern=_SHA)
+    provider_contract: GenericGroundedClaimExtractionV2
     claims: tuple[GenericGroundedClaimV2, ...] = Field(min_length=1, max_length=10)
 
     @model_validator(mode="after")
     def _identity(self) -> GenericRecordedInferenceReceiptV2:
+        provider_sha = hashlib.sha256(
+            canonical_json_bytes(self.provider_contract.model_dump(mode="json"))
+        ).hexdigest()
+        if self.provider_result_sha256 != provider_sha:
+            raise ValueError("provider result SHA differs from sanitized exact contract")
         payload = self.model_dump(mode="json", exclude={"inference_sha256"})
         if hashlib.sha256(canonical_json_bytes(payload)).hexdigest() != self.inference_sha256:
             raise ValueError("inference receipt identity does not bind its canonical payload")
@@ -177,6 +185,26 @@ class RepositoryVerifiedGenericEvidenceV2:
     def __reduce_ex__(self, protocol: SupportsIndex) -> Any:
         del protocol
         raise TypeError("generic repository capabilities are process-local")
+
+
+@dataclass(frozen=True)
+class ReopenedGenericEvidenceV2:
+    """Exact typed evidence reopened through one authenticated capability."""
+
+    bundle: GenericEvidenceBundleReceiptV2
+    admission: GenericAdmissionReceiptV2
+    source: GenericSourceReceiptV2
+    projection: GenericProjectionReceiptV2
+    inference: GenericRecordedInferenceReceiptV2
+    raw_source: bytes = field(repr=False)
+    source_note: bytes = field(repr=False)
+
+    def __reduce__(self) -> Any:
+        raise TypeError("reopened generic evidence is process-local")
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> Any:
+        del protocol
+        raise TypeError("reopened generic evidence is process-local")
 
 
 def _digest_model(model: BaseModel, identity_field: str) -> str:
@@ -294,6 +322,7 @@ class FilesystemGenericIncomingRepositoryV2:
             source_sha256=extraction.source_sha256,
             request_sha256=extraction.request_sha256,
             provider_result_sha256=extraction.provider_result_sha256,
+            provider_contract=extraction.provider_contract,
             claims=extraction.claims,
         )
         return provisional.model_copy(
@@ -334,15 +363,9 @@ class FilesystemGenericIncomingRepositoryV2:
             schema_version=2,
             bundle_id=f"generic-bundle-v2:{'0' * 64}",
             bundle_sha256="0" * 64,
-            admission_receipt_locator=(
-                f"{_ROOT}/admissions/{admission.admission_sha256}.json"
-            ),
-            source_receipt_locator=(
-                f"{_ROOT}/source-receipts/{source.source_receipt_sha256}.json"
-            ),
-            projection_receipt_locator=(
-                f"{_ROOT}/projections/{projection.projection_sha256}.json"
-            ),
+            admission_receipt_locator=(f"{_ROOT}/admissions/{admission.admission_sha256}.json"),
+            source_receipt_locator=(f"{_ROOT}/source-receipts/{source.source_receipt_sha256}.json"),
+            projection_receipt_locator=(f"{_ROOT}/projections/{projection.projection_sha256}.json"),
             inference_receipt_locator=(
                 f"{_ROOT}/recorded-inferences/{inference.inference_sha256}.json"
             ),
@@ -358,7 +381,9 @@ class FilesystemGenericIncomingRepositoryV2:
             update={"bundle_id": f"generic-bundle-v2:{digest}", "bundle_sha256": digest}
         )
 
-    def _capability(self, receipt: GenericEvidenceBundleReceiptV2) -> RepositoryVerifiedGenericEvidenceV2:
+    def _capability(
+        self, receipt: GenericEvidenceBundleReceiptV2
+    ) -> RepositoryVerifiedGenericEvidenceV2:
         return RepositoryVerifiedGenericEvidenceV2(
             bundle_id=receipt.bundle_id,
             bundle_sha256=receipt.bundle_sha256,
@@ -375,16 +400,16 @@ class FilesystemGenericIncomingRepositoryV2:
         """Persist members first and the complete bundle receipt last."""
 
         if extraction.source_sha256 != admission.source_sha256:
-            raise GenericIncomingIntegrityError("extraction and admission bind different source bytes")
+            raise GenericIncomingIntegrityError(
+                "extraction and admission bind different source bytes"
+            )
         admission.verify_current_path()
         source_snapshot = admission.source_snapshot
         source_note = render_generic_source_note_v2(admission, extraction)
         admission_receipt = self._make_admission(admission)
         source_receipt = self._make_source(admission, source_note)
         inference = self._make_inference(extraction)
-        projection = self._make_projection(
-            admission, extraction, admission_receipt, source_receipt
-        )
+        projection = self._make_projection(admission, extraction, admission_receipt, source_receipt)
         bundle = self._make_bundle(admission_receipt, source_receipt, projection, inference)
         bundle_locator = f"{_ROOT}/bundles/{bundle.bundle_sha256}.json"
         live = inference.model_copy(update={"mode": GenericExtractionModeV2.LIVE})
@@ -510,28 +535,150 @@ class FilesystemGenericIncomingRepositoryV2:
     def verify_capability(
         self, capability: RepositoryVerifiedGenericEvidenceV2
     ) -> GenericEvidenceBundleReceiptV2:
-        expected = _seal(
-            self.repository_id, capability.bundle_id, capability.bundle_sha256
-        )
+        if type(capability) is not RepositoryVerifiedGenericEvidenceV2:
+            raise GenericIncomingRepositoryError("generic repository capability is invalid")
+        expected = _seal(self.repository_id, capability.bundle_id, capability.bundle_sha256)
         if (
             capability._token is not _CAPABILITY_TOKEN
             or capability.repository_id != self.repository_id
             or not hmac.compare_digest(capability._seal, expected)
         ):
             raise GenericIncomingRepositoryError("generic repository capability is invalid")
-        self.reopen(capability.bundle_id)
-        receipt = self._read_model(
-            f"{_ROOT}/bundles/{capability.bundle_sha256}.json",
-            GenericEvidenceBundleReceiptV2,
-            "generic bundle receipt",
+        return self.resolve_verified_evidence(capability).bundle
+
+    def resolve_verified_evidence(
+        self, capability: RepositoryVerifiedGenericEvidenceV2
+    ) -> ReopenedGenericEvidenceV2:
+        """Reopen one complete bundle only through its process-local capability."""
+
+        if type(capability) is not RepositoryVerifiedGenericEvidenceV2:
+            raise GenericIncomingRepositoryError("generic repository capability is invalid")
+        expected = _seal(self.repository_id, capability.bundle_id, capability.bundle_sha256)
+        if (
+            capability._token is not _CAPABILITY_TOKEN
+            or capability.repository_id != self.repository_id
+            or not hmac.compare_digest(capability._seal, expected)
+        ):
+            raise GenericIncomingRepositoryError("generic repository capability is invalid")
+        try:
+            self._assert_private_tree()
+            with self._backend._read_lock():
+                bundle = self._read_model(
+                    f"{_ROOT}/bundles/{capability.bundle_sha256}.json",
+                    GenericEvidenceBundleReceiptV2,
+                    "generic bundle receipt",
+                )
+                assert isinstance(bundle, GenericEvidenceBundleReceiptV2)
+                if (
+                    bundle.bundle_id != capability.bundle_id
+                    or bundle.bundle_sha256 != capability.bundle_sha256
+                ):
+                    raise GenericIncomingRepositoryError(
+                        "generic capability differs from reopened bundle"
+                    )
+                admission = self._read_model(
+                    bundle.admission_receipt_locator,
+                    GenericAdmissionReceiptV2,
+                    "admission receipt",
+                )
+                source = self._read_model(
+                    bundle.source_receipt_locator,
+                    GenericSourceReceiptV2,
+                    "source receipt",
+                )
+                projection = self._read_model(
+                    bundle.projection_receipt_locator,
+                    GenericProjectionReceiptV2,
+                    "projection receipt",
+                )
+                inference = self._read_model(
+                    bundle.inference_receipt_locator,
+                    GenericRecordedInferenceReceiptV2,
+                    "recorded inference receipt",
+                )
+                assert isinstance(admission, GenericAdmissionReceiptV2)
+                assert isinstance(source, GenericSourceReceiptV2)
+                assert isinstance(projection, GenericProjectionReceiptV2)
+                assert isinstance(inference, GenericRecordedInferenceReceiptV2)
+                raw = self._backend._read_optional(
+                    source.source_locator, limit=64 * 1024, label="admitted raw source"
+                )
+                note = self._backend._read_optional(
+                    source.source_note_locator,
+                    limit=max(source.source_note_byte_count, 1),
+                    label="canonical SourceNote",
+                )
+                if raw is None or note is None:
+                    raise GenericIncomingRepositoryError("generic source evidence is missing")
+                if not (
+                    admission.admission_sha256 == bundle.admission_sha256
+                    and source.source_receipt_sha256 == bundle.source_receipt_sha256
+                    and projection.projection_sha256 == bundle.projection_sha256
+                    and inference.inference_sha256 == bundle.inference_sha256
+                    and admission.source_sha256 == source.source_sha256
+                    and source.source_sha256 == projection.source_sha256
+                    and projection.source_sha256 == inference.source_sha256
+                    and projection.admission_sha256 == admission.admission_sha256
+                    and projection.source_receipt_sha256 == source.source_receipt_sha256
+                    and projection.document_id == admission.metadata.document_id
+                    and projection.document_family == admission.metadata.document_family
+                    and projection.version_label == admission.metadata.version_label
+                    and projection.claims == inference.claims
+                    and len(raw) == admission.source_byte_count == source.source_byte_count
+                    and hashlib.sha256(raw).hexdigest() == admission.source_sha256
+                    and len(note) == source.source_note_byte_count
+                    and hashlib.sha256(note).hexdigest() == source.source_note_sha256
+                ):
+                    raise GenericIncomingRepositoryError("generic bundle members disagree")
+                expected_note = render_verified_generic_source_note_projection_v2(
+                    metadata=admission.metadata,
+                    source_sha256=admission.source_sha256,
+                    source_snapshot=raw,
+                    claims=projection.claims,
+                )
+                if note != expected_note:
+                    raise GenericIncomingRepositoryError(
+                        "canonical SourceNote is not the semantic projection of raw evidence"
+                    )
+                suggested = {
+                    item.quote: (item.confidence, tuple(item.affects))
+                    for item in inference.provider_contract.claims
+                }
+                grounded = {
+                    item.statement: (item.confidence, item.affects) for item in projection.claims
+                }
+                if (
+                    len(suggested) != len(inference.provider_contract.claims)
+                    or len(grounded) != len(projection.claims)
+                    or suggested != grounded
+                ):
+                    raise GenericIncomingRepositoryError(
+                        "sanitized provider suggestions differ from grounded claim authority"
+                    )
+            self._assert_private_tree()
+        except (GenericIncomingIntegrityError, InferenceEvidenceRepositoryError) as exc:
+            raise GenericIncomingRepositoryError(
+                "cannot resolve verified generic evidence"
+            ) from exc
+        return ReopenedGenericEvidenceV2(
+            bundle=bundle,
+            admission=admission,
+            source=source,
+            projection=projection,
+            inference=inference,
+            raw_source=bytes(raw),
+            source_note=bytes(note),
         )
-        assert isinstance(receipt, GenericEvidenceBundleReceiptV2)
-        return receipt
 
 
 __all__ = [
-    "FilesystemGenericIncomingRepositoryV2", "GenericAdmissionReceiptV2",
-    "GenericEvidenceBundleReceiptV2", "GenericIncomingRepositoryError",
-    "GenericProjectionReceiptV2", "GenericRecordedInferenceReceiptV2",
-    "GenericSourceReceiptV2", "RepositoryVerifiedGenericEvidenceV2",
+    "FilesystemGenericIncomingRepositoryV2",
+    "GenericAdmissionReceiptV2",
+    "GenericEvidenceBundleReceiptV2",
+    "GenericIncomingRepositoryError",
+    "GenericProjectionReceiptV2",
+    "GenericRecordedInferenceReceiptV2",
+    "GenericSourceReceiptV2",
+    "ReopenedGenericEvidenceV2",
+    "RepositoryVerifiedGenericEvidenceV2",
 ]

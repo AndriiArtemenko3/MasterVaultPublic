@@ -12,6 +12,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generic_governing_source import CompositeManagedReviewResolverV2
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
     ManagedBundleOutcome,
@@ -34,6 +35,7 @@ from mastervault.change_control.managed_review_repository import (
     RepositoryBackedManagedReviewResolver,
 )
 from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
     ManagedReviewStaleError,
     ManagedRevisionEditDeferredError,
     ManagedRevisionReviewStoreView,
@@ -109,11 +111,34 @@ def _exact_subjects(
 
 
 def _require_production_resolver(
-    resolver: RepositoryBackedManagedReviewResolver,
-) -> RepositoryBackedManagedReviewResolver:
-    if type(resolver) is not RepositoryBackedManagedReviewResolver:
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+) -> RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2:
+    if type(resolver) not in {
+        RepositoryBackedManagedReviewResolver,
+        CompositeManagedReviewResolverV2,
+    }:
         raise TypeError("managed review service requires the production repository resolver")
     return resolver
+
+
+def _store_authority_context(
+    *,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None,
+    prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None,
+) -> AuthorityVerificationContext:
+    if authority_context is not None:
+        if type(authority_context) is not AuthorityVerificationContext:
+            raise TypeError("managed review authority context type was substituted")
+        if verified_bootstrap is not None:
+            raise TypeError("workspace authority context cannot mix with legacy bootstrap")
+        return authority_context
+    if type(verified_bootstrap) is not VerifiedAnalysisBootstrapCapability:
+        raise TypeError("legacy managed review requires exact sealed bootstrap authority")
+    return AuthorityVerificationContext.legacy(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=prechange_head,
+    )
 
 
 def _delivery_matches_request(
@@ -138,15 +163,13 @@ def _read_review(
     *,
     store: SqliteManagedChangeControlStore,
     request_id: str,
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-    prechange_head: AggregateHeadBinding,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    authority_context: AuthorityVerificationContext,
 ) -> ManagedRevisionReviewStoreView:
     return store.get_managed_review(
         request_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=authority_context,
     )
 
 
@@ -156,9 +179,10 @@ def open_managed_revision_review(
     run_binding: ManagedRunBindingV2,
     admitted_subjects: tuple[ManagedRevisionPlan | NoChangeImpactCard, ...],
     reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
     prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None = None,
     operation_id: str,
     requester_id: str,
     rationale: str,
@@ -177,6 +201,11 @@ def open_managed_revision_review(
     reviewed = reviewed_snapshot.verify()
     exact_prechange = AggregateHeadBinding.model_validate_json(
         canonical_json_bytes(prechange_head.model_dump(mode="json"))
+    )
+    store_authority = _store_authority_context(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=exact_prechange,
+        authority_context=authority_context,
     )
     requester_id = normalize_actor_id(requester_id)
     rationale = normalize_review_rationale(rationale)
@@ -238,16 +267,14 @@ def open_managed_revision_review(
     existing_record = store.find_managed_review_request_by_operation_id(
         operation_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     opening_authority = (
         existing_record.committed_authority
         if existing_record is not None
         else store.get_active_generation(
             exact_run.prechange_head.aggregate_id,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     )
     review_base = ManagedReviewBaseBinding.create(
@@ -278,8 +305,7 @@ def open_managed_revision_review(
         delivery = store.create_managed_review_request(
             command,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as exc:  # lost acknowledgement is reconciled from SQLite below
         write_error = exc
@@ -287,8 +313,7 @@ def open_managed_revision_review(
         committed = store.find_managed_review_request_by_operation_id(
             operation_id,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as read_error:
         if write_error is not None:
@@ -304,8 +329,7 @@ def open_managed_revision_review(
         store=store,
         request_id=committed.command.request_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     if view.request_record != committed:
         raise ManagedReviewServiceError(
@@ -349,9 +373,10 @@ def decide_managed_revision_review(
     store: SqliteManagedChangeControlStore,
     request_id: str,
     selections: tuple[ManagedRevisionReviewSelection, ...],
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
     prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None = None,
     operation_id: str,
     reviewer_id: str,
     rationale: str,
@@ -363,6 +388,11 @@ def decide_managed_revision_review(
     exact_prechange = AggregateHeadBinding.model_validate_json(
         canonical_json_bytes(prechange_head.model_dump(mode="json"))
     )
+    store_authority = _store_authority_context(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=exact_prechange,
+        authority_context=authority_context,
+    )
     reviewer_id = normalize_actor_id(reviewer_id)
     rationale = normalize_review_rationale(rationale)
 
@@ -370,8 +400,7 @@ def decide_managed_revision_review(
         store=store,
         request_id=request_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     if before.lifecycle == ManagedRevisionStoreLifecycle.STALE:
         raise ManagedReviewStaleError("stale managed review cannot accept a new decision")
@@ -432,8 +461,7 @@ def decide_managed_revision_review(
         delivery = store.decide_managed_review(
             command,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as exc:  # reconcile a commit whose acknowledgement was lost
         write_error = exc
@@ -442,8 +470,7 @@ def decide_managed_revision_review(
             store=store,
             request_id=request_id,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as read_error:
         if write_error is not None:

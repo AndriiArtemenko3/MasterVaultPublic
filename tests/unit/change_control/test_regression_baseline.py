@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,14 @@ from mastervault.change_control.regression_baseline import (
     execute_generation_zero_baseline,
 )
 from mastervault.change_control.regression_suite import parse_regression_suite_bytes
+from mastervault.change_control.synchronous_lifecycle_store_models import (
+    ActivationBaselineBindingV1,
+    GenerationZeroBaselineStoreRecordV1,
+    IncomingAdmissionIntentV1,
+    IncomingAdmissionRecordV1,
+    RegressionSuiteAdmissionIntentV1,
+    RegressionSuiteAdmissionRecordV1,
+)
 from mastervault.config import Settings
 from mastervault.models import ChannelRank, Confidence, Domain, Hit, RecordType
 from mastervault.pipelines.ask import AskOutcome
@@ -84,12 +93,12 @@ def _metadata() -> QueryGenerationMetadataV1:
 def _authority(metadata: QueryGenerationMetadataV1 | None = None) -> RegressionAuthorityBindingV1:
     return RegressionAuthorityBindingV1(
         run_id="operatorrun:test-baseline",
-        source_admission_id="incoming:test-source",
-        source_admission_sha256="5" * 64,
-        workspace_inventory_id="inventory:test-workspace",
-        workspace_inventory_sha256="6" * 64,
-        legacy_readiness_id="legacyindex:test-ready",
-        legacy_readiness_sha256="7" * 64,
+        incoming_admission_receipt_id="incomingreceipt:test-source",
+        incoming_admission_receipt_sha256="5" * 64,
+        workspace_inventory_receipt_id="workspaceinventoryreceipt:test-workspace",
+        workspace_inventory_receipt_sha256="6" * 64,
+        legacy_readiness_receipt_id="legacyindexreceipt:test-ready",
+        legacy_readiness_receipt_sha256="7" * 64,
         query_generation=metadata or _metadata(),
     )
 
@@ -110,11 +119,29 @@ def _settings(tmp_path: Path) -> Settings:
     )
 
 
+def _tree_snapshot(root: Path) -> tuple[tuple[str, int, int, int, bytes], ...]:
+    snapshot: list[tuple[str, int, int, int, bytes]] = []
+    for path in (root, *sorted(root.rglob("*"))):
+        info = path.lstat()
+        content = path.read_bytes() if stat.S_ISREG(info.st_mode) else b""
+        snapshot.append(
+            (
+                str(path.relative_to(root.parent)),
+                info.st_mode,
+                info.st_size,
+                info.st_mtime_ns,
+                content,
+            )
+        )
+    return tuple(snapshot)
+
+
 def _prepared(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     metadata: QueryGenerationMetadataV1 | None = None,
+    authority: RegressionAuthorityBindingV1 | None = None,
 ) -> tuple[Any, list[str], ResolvedQueryGeneration]:
     actual_metadata = metadata or _metadata()
     hit = Hit(
@@ -184,13 +211,82 @@ def _prepared(
     )
     prepared = execute_generation_zero_baseline(
         resolved=resolved,
-        authority=_authority(actual_metadata),
+        authority=authority or _authority(actual_metadata),
         suite=_suite(),
         settings=_settings(tmp_path),
         embedder=MockEmbedding(),
         llm=MockLLM(_settings(tmp_path)),
     )
     return prepared, verified, resolved
+
+
+def test_store_model_factories_round_trip_strict_nested_authority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = f"operatorrun:{'a' * 64}"
+    incoming_intent = IncomingAdmissionIntentV1.create(
+        operation_id="incoming:admit",
+        run_id=run_id,
+        bundle_id=f"generic-bundle-v2:{'b' * 64}",
+        bundle_sha256="b" * 64,
+        admission_sha256="c" * 64,
+        source_receipt_sha256="d" * 64,
+        projection_sha256="e" * 64,
+        inference_sha256="f" * 64,
+    )
+    incoming = IncomingAdmissionRecordV1.create(
+        intent=incoming_intent, admitted_at="2026-08-20T11:59:58+00:00"
+    )
+    admitted_suite = _suite()
+    suite_intent = RegressionSuiteAdmissionIntentV1.create(
+        operation_id="suite:admit",
+        run_id=run_id,
+        suite_id=admitted_suite.suite.suite_id,
+        suite_version=admitted_suite.suite.suite_version,
+        original_sha256=admitted_suite.original_sha256,
+        original_byte_count=admitted_suite.original_byte_count,
+        canonical_sha256=admitted_suite.canonical_sha256,
+        suite=admitted_suite.suite,
+    )
+    suite = RegressionSuiteAdmissionRecordV1.create(
+        intent=suite_intent, admitted_at="2026-08-20T11:59:59+00:00"
+    )
+    authority = RegressionAuthorityBindingV1(
+        run_id=run_id,
+        incoming_admission_receipt_id=incoming.receipt_id,
+        incoming_admission_receipt_sha256=incoming.receipt_sha256,
+        workspace_inventory_receipt_id=f"workspaceinventoryreceipt:{'1' * 64}",
+        workspace_inventory_receipt_sha256="1" * 64,
+        legacy_readiness_receipt_id=f"legacyindexreceipt:{'2' * 64}",
+        legacy_readiness_receipt_sha256="2" * 64,
+        query_generation=_metadata(),
+    )
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch, authority=authority)
+    capability = GenerationZeroBaselineRepository(tmp_path / "round-trip").publish(
+        prepared, captured_at="2026-08-20T12:00:00+00:00"
+    )
+    baseline = GenerationZeroBaselineStoreRecordV1.create(
+        operation_id="baseline:seal",
+        incoming_admission_receipt_id=incoming.receipt_id,
+        incoming_admission_receipt_sha256=incoming.receipt_sha256,
+        suite_admission_receipt_id=suite.receipt_id,
+        suite_admission_receipt_sha256=suite.receipt_sha256,
+        incoming_admission=incoming,
+        suite_admission=suite,
+        baseline_receipt=capability.receipt,
+        recorded_at="2026-08-20T12:00:01+00:00",
+    )
+    activation = ActivationBaselineBindingV1.create(
+        operation_id="activation:baseline",
+        activation_id=f"mactivation:{'3' * 64}",
+        activation_sha256="3" * 64,
+        run_id=run_id,
+        baseline_receipt_id=capability.receipt.receipt_id,
+        baseline_receipt_sha256=capability.receipt.receipt_sha256,
+        bound_at="2026-08-20T12:00:02+00:00",
+    )
+    for value in (incoming_intent, incoming, suite_intent, suite, baseline, activation):
+        assert type(value).model_validate_json(value.model_dump_json(), strict=True) == value
 
 
 def test_executor_buffers_complete_path_safe_pipeline_evidence_without_effects(
@@ -379,6 +475,95 @@ def test_repository_rejects_forged_capability(
 
     with pytest.raises(RegressionBaselineError, match="capability"):
         repository.verify_capability(forged)
+
+
+def test_read_only_repository_freshly_reopens_and_verifies_without_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    root = tmp_path / "repo"
+    writer = GenerationZeroBaselineRepository(root)
+    published = writer.publish(prepared, captured_at="2026-08-20T12:00:00+00:00")
+    before = _tree_snapshot(root)
+
+    reader = GenerationZeroBaselineRepository(root, create=False, read_only=True)
+    assert reader.read_only is True
+    fresh = reader.reopen(prepared.authority.run_id)
+    assert fresh.receipt == published.receipt
+    assert reader.verify_capability(fresh) == published.receipt
+    assert _tree_snapshot(root) == before
+
+    with pytest.raises(RegressionBaselineError):
+        reader.publish(prepared, captured_at="2026-08-20T12:00:00+00:00")
+    assert _tree_snapshot(root) == before
+
+
+def test_noncreating_read_only_repository_does_not_create_missing_root(tmp_path: Path) -> None:
+    missing = tmp_path / "missing"
+    with pytest.raises(RegressionBaselineError):
+        GenerationZeroBaselineRepository(missing, create=False, read_only=True)
+    assert not missing.exists()
+
+
+def test_capability_verification_rejects_invalid_types_and_other_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    repository = GenerationZeroBaselineRepository(tmp_path / "repo")
+    capability = repository.publish(prepared, captured_at="2026-08-20T12:00:00+00:00")
+
+    class DuckCapability:
+        receipt = capability.receipt
+        repository_id = capability.repository_id
+        _seal = capability._seal
+
+    for invalid in (object(), DuckCapability()):
+        with pytest.raises(RegressionBaselineError, match="capability"):
+            repository.verify_capability(invalid)  # type: ignore[arg-type]
+
+    other_root = tmp_path / "other-repo"
+    other = GenerationZeroBaselineRepository(other_root)
+    with pytest.raises(RegressionBaselineError, match="capability"):
+        other.verify_capability(capability)
+
+
+def test_fresh_reopen_rejects_self_consistent_case_descriptor_substitution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    root = tmp_path / "repo"
+    repository = GenerationZeroBaselineRepository(root)
+    capability = repository.publish(prepared, captured_at="2026-08-20T12:00:00+00:00")
+    original_case = prepared.cases[0]
+    substituted_case = baseline_module.BufferedRegressionCaseV1.create(
+        case_id=original_case.case_id,
+        case_kind=original_case.case_kind,
+        payload={**original_case.payload, "query": "Substituted query"},
+    )
+    substituted_prepared = prepared.model_copy(
+        update={"cases": (substituted_case, *prepared.cases[1:])}
+    )
+    substituted_artifact = capability.receipt.artifacts[0].model_copy(
+        update={
+            "sha256": substituted_case.payload_sha256,
+            "byte_count": substituted_case.payload_byte_count,
+        }
+    )
+    substituted_receipt = baseline_module.GenerationZeroBaselineReceiptV1.create(
+        substituted_prepared,
+        artifacts=(substituted_artifact, *capability.receipt.artifacts[1:]),
+        captured_at=capability.receipt.captured_at,
+    )
+    artifact_path = root / substituted_artifact.relative_path
+    artifact_path.write_bytes(baseline_module.canonical_json_bytes(substituted_case.payload))
+    complete_path = artifact_path.parent.parent / "COMPLETE.json"
+    complete_path.write_bytes(
+        baseline_module.canonical_json_bytes(substituted_receipt.model_dump(mode="json"))
+    )
+
+    reader = GenerationZeroBaselineRepository(root, create=False, read_only=True)
+    with pytest.raises(RegressionBaselineError, match="descriptor"):
+        reader.reopen(prepared.authority.run_id)
 
 
 def test_production_modules_do_not_import_evaluator_or_golden_schemas() -> None:

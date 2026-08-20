@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -29,7 +30,9 @@ from mastervault.change_control.query_generation import (
 from mastervault.change_control.regression_suite import (
     AdmittedRegressionSuiteV1,
     AskRegressionCaseV1,
+    RegressionSuiteError,
     SearchRegressionCaseV1,
+    parse_regression_suite_bytes,
 )
 from mastervault.config import Settings
 from mastervault.models import Hit
@@ -56,6 +59,10 @@ class _StrictFrozenModel(BaseModel):
 
 def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _reject_nonfinite_json_constant(value: str) -> object:
+    raise ValueError(f"non-finite JSON number {value}")
 
 
 def _canonical_utc(value: str) -> str:
@@ -109,12 +116,12 @@ class RegressionRuntimeIdentityV1(_StrictFrozenModel):
 class RegressionAuthorityBindingV1(_StrictFrozenModel):
     schema_version: Literal[1] = 1
     run_id: str = Field(pattern=_IDENTITY_PATTERN)
-    source_admission_id: str = Field(pattern=_IDENTITY_PATTERN)
-    source_admission_sha256: str = Field(pattern=_SHA_PATTERN)
-    workspace_inventory_id: str = Field(pattern=_IDENTITY_PATTERN)
-    workspace_inventory_sha256: str = Field(pattern=_SHA_PATTERN)
-    legacy_readiness_id: str = Field(pattern=_IDENTITY_PATTERN)
-    legacy_readiness_sha256: str = Field(pattern=_SHA_PATTERN)
+    incoming_admission_receipt_id: str = Field(pattern=_IDENTITY_PATTERN)
+    incoming_admission_receipt_sha256: str = Field(pattern=_SHA_PATTERN)
+    workspace_inventory_receipt_id: str = Field(pattern=_IDENTITY_PATTERN)
+    workspace_inventory_receipt_sha256: str = Field(pattern=_SHA_PATTERN)
+    legacy_readiness_receipt_id: str = Field(pattern=_IDENTITY_PATTERN)
+    legacy_readiness_receipt_sha256: str = Field(pattern=_SHA_PATTERN)
     query_generation: QueryGenerationMetadataV1
 
     @model_validator(mode="after")
@@ -250,6 +257,26 @@ class GenerationZeroBaselineReceiptV1(_StrictFrozenModel):
     def _identity(self) -> Self:
         if self.query_inventory != tuple(item.case_id for item in self.artifacts):
             raise ValueError("baseline receipt inventory differs from artifacts")
+        baseline_identity = {
+            "schema_version": 1,
+            "authority": self.authority.model_dump(mode="json"),
+            "suite_id": self.suite_id,
+            "suite_version": self.suite_version,
+            "suite_original_sha256": self.suite_original_sha256,
+            "suite_canonical_sha256": self.suite_canonical_sha256,
+            "runtime": self.runtime.model_dump(mode="json"),
+            "cases": [
+                {
+                    "case_id": item.case_id,
+                    "case_kind": item.case_kind,
+                    "payload_sha256": item.sha256,
+                    "payload_byte_count": item.byte_count,
+                }
+                for item in self.artifacts
+            ],
+        }
+        if self.baseline_id != f"regbaseline:{_sha(canonical_json_bytes(baseline_identity))}":
+            raise ValueError("baseline identity differs from its exact receipt descriptors")
         payload = self.model_dump(mode="json", exclude={"receipt_id", "receipt_sha256"})
         digest = _sha(canonical_json_bytes(payload))
         if self.receipt_sha256 != digest or self.receipt_id != f"regreceipt:{digest}":
@@ -525,11 +552,21 @@ def execute_generation_zero_baseline(
 class GenerationZeroBaselineRepository:
     """Create-only owner-private evidence; COMPLETE is the sole repository seal."""
 
-    def __init__(self, root: Path):
+    def __init__(
+        self,
+        root: Path,
+        *,
+        create: bool = True,
+        read_only: bool = False,
+    ) -> None:
         if not isinstance(root, Path):
             raise TypeError("baseline repository root must be pathlib.Path")
         try:
-            self._repository = FilesystemInferenceEvidenceRepository(root)
+            self._repository = FilesystemInferenceEvidenceRepository(
+                root,
+                create=create,
+                read_only=read_only,
+            )
         except InferenceEvidenceRepositoryError as exc:
             raise RegressionBaselineError(
                 "baseline repository cannot be established safely"
@@ -537,8 +574,14 @@ class GenerationZeroBaselineRepository:
         self.root = self._repository.root
         self.repository_id = self._repository.repository_id
 
+    @property
+    def read_only(self) -> bool:
+        return self._repository.read_only
+
     @staticmethod
     def _run_name(run_id: str) -> str:
+        if type(run_id) is not str or re.fullmatch(_IDENTITY_PATTERN, run_id) is None:
+            raise RegressionBaselineError("baseline run ID is invalid")
         return _sha(run_id.encode("utf-8"))
 
     def _relative(self, run_id: str, suffix: str) -> str:
@@ -696,6 +739,8 @@ class GenerationZeroBaselineRepository:
             receipt = GenerationZeroBaselineReceiptV1.model_validate_json(complete, strict=True)
         except ValueError as exc:
             raise RegressionBaselineError("baseline COMPLETE receipt is invalid") from exc
+        if complete != canonical_json_bytes(receipt.model_dump(mode="json")):
+            raise RegressionBaselineError("baseline COMPLETE receipt is not canonical")
         if receipt.authority.run_id != run_id:
             raise RegressionBaselineError("baseline COMPLETE belongs to another run")
         self._require_exact_inventory(run_id, receipt=receipt)
@@ -706,10 +751,28 @@ class GenerationZeroBaselineRepository:
         )
         if _sha(suite) != receipt.suite_canonical_sha256:
             raise RegressionBaselineError("baseline suite artifact was altered")
-        for artifact in receipt.artifacts:
-            expected_prefix = self._relative(run_id, "cases/")
-            if not artifact.relative_path.startswith(expected_prefix):
-                raise RegressionBaselineError("baseline artifact locator escapes its run")
+        try:
+            admitted_suite = parse_regression_suite_bytes(suite)
+        except RegressionSuiteError as exc:
+            raise RegressionBaselineError("baseline suite artifact is invalid") from exc
+        if (
+            suite != admitted_suite.suite.canonical_bytes
+            or admitted_suite.suite.suite_id != receipt.suite_id
+            or admitted_suite.suite.suite_version != receipt.suite_version
+            or admitted_suite.canonical_sha256 != receipt.suite_canonical_sha256
+            or tuple(item.case_id for item in admitted_suite.suite.cases) != receipt.query_inventory
+        ):
+            raise RegressionBaselineError("baseline suite descriptor differs from COMPLETE")
+        for specification, artifact in zip(
+            admitted_suite.suite.cases, receipt.artifacts, strict=True
+        ):
+            expected_relative = self._relative(run_id, f"cases/{artifact.case_id}.json")
+            if (
+                artifact.case_id != specification.case_id
+                or artifact.case_kind != specification.kind
+                or artifact.relative_path != expected_relative
+            ):
+                raise RegressionBaselineError("baseline case descriptor differs from suite")
             payload = self._read_required(
                 artifact.relative_path,
                 limit=artifact.byte_count,
@@ -717,7 +780,63 @@ class GenerationZeroBaselineRepository:
             )
             if _sha(payload) != artifact.sha256 or len(payload) != artifact.byte_count:
                 raise RegressionBaselineError("baseline case artifact was altered")
+            try:
+                case_payload = json.loads(payload, parse_constant=_reject_nonfinite_json_constant)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                raise RegressionBaselineError("baseline case artifact is invalid") from exc
+            if (
+                not isinstance(case_payload, dict)
+                or case_payload.get("case_id") != artifact.case_id
+                or case_payload.get("kind") != artifact.case_kind
+                or canonical_json_bytes(case_payload) != payload
+            ):
+                raise RegressionBaselineError(
+                    "baseline case artifact descriptor or encoding differs"
+                )
+            expected_descriptor: dict[str, Any] = {
+                "schema_version": 1,
+                "case_id": specification.case_id,
+                "kind": specification.kind,
+                "query": specification.query,
+                "domain": specification.domain,
+                "generation": receipt.authority.query_generation.model_dump(mode="json"),
+            }
+            if isinstance(specification, SearchRegressionCaseV1):
+                expected_descriptor.update(
+                    {
+                        "k": specification.k,
+                        "record_types": list(specification.record_types),
+                        "rerank": False,
+                    }
+                )
+            elif isinstance(specification, AskRegressionCaseV1):
+                expected_descriptor.update(
+                    {
+                        "max_rounds": specification.max_rounds,
+                        "budget_usd_micros": specification.budget_usd_micros,
+                    }
+                )
+            if any(case_payload.get(key) != value for key, value in expected_descriptor.items()):
+                raise RegressionBaselineError(
+                    "baseline case execution descriptor differs from suite"
+                )
         return receipt
+
+    def reopen(self, run_id: str) -> VerifiedGenerationZeroBaselineCapability:
+        """Freshly reopen all evidence and mint process-local authority for one run."""
+
+        try:
+            with self._repository._read_lock():  # noqa: SLF001
+                complete = self._read_required(
+                    self._relative(run_id, "COMPLETE.json"),
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="baseline COMPLETE receipt",
+                )
+                return self._capability(self._open_locked(run_id, complete))
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            if isinstance(exc, RegressionBaselineError):
+                raise
+            raise RegressionBaselineError("baseline capability reopen failed closed") from exc
 
     def _capability(
         self, receipt: GenerationZeroBaselineReceiptV1
@@ -738,13 +857,19 @@ class GenerationZeroBaselineRepository:
     def verify_capability(
         self, capability: VerifiedGenerationZeroBaselineCapability
     ) -> GenerationZeroBaselineReceiptV1:
-        receipt = self.open(capability.receipt.authority.run_id)
-        expected = self._capability(receipt)
         if (
-            capability.repository_id != self.repository_id
-            or capability.receipt != receipt
-            or not hmac.compare_digest(capability._seal, expected._seal)
+            type(capability) is not VerifiedGenerationZeroBaselineCapability
+            or type(capability.receipt) is not GenerationZeroBaselineReceiptV1
+            or type(capability.repository_id) is not str
+            or type(capability._seal) is not bytes
+            or capability.repository_id != self.repository_id
         ):
+            raise RegressionBaselineError("baseline capability is invalid")
+        expected_seal = self._capability(capability.receipt)._seal
+        if not hmac.compare_digest(capability._seal, expected_seal):
+            raise RegressionBaselineError("baseline capability is invalid or belongs elsewhere")
+        receipt = self.open(capability.receipt.authority.run_id)
+        if capability.receipt != receipt:
             raise RegressionBaselineError("baseline capability is invalid or belongs elsewhere")
         return receipt
 

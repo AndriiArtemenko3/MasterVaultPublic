@@ -627,6 +627,7 @@ def test_schema_v4_upgrades_to_v5_preserving_seed_authority_and_restoring_fks(
         old.close()
 
     fifth = migrations / "005_workspace_bootstrap_application.sql"
+    monkeypatch.setattr(store_module, "_SCHEMA_VERSION", 5)
     source = (_DEFAULT_MIGRATIONS_DIR / fifth.name).read_text(encoding="utf-8")
     fifth.write_text(source + "\nNOT VALID SQL;\n", encoding="utf-8")
     broken = SqliteChangeControlStore(database, migrations)
@@ -644,7 +645,7 @@ def test_schema_v4_upgrades_to_v5_preserving_seed_authority_and_restoring_fks(
     upgraded = SqliteChangeControlStore(database, migrations)
     upgraded.init_schema()
     assert upgraded._read_meta()["schema_version"] == "5"  # type: ignore[index]
-    assert upgraded._user_tables() == store_module._EXPECTED_TABLES
+    assert upgraded._user_tables() == store_module._V5_EXPECTED_TABLES
     assert {
         table: tuple(upgraded.conn.execute(f"SELECT * FROM {table}")) for table in preserved
     } == preserved
@@ -758,10 +759,7 @@ def test_workspace_bootstrap_inventory_lookup_is_exact_and_secure_read_only(
     )
     try:
         read_only.conn.set_trace_callback(statements.append)
-        assert (
-            read_only.get_workspace_bootstrap_by_inventory_id(inventory.inventory_id)
-            == expected
-        )
+        assert read_only.get_workspace_bootstrap_by_inventory_id(inventory.inventory_id) == expected
         assert (
             read_only.get_workspace_bootstrap_by_inventory_id(f"workspaceinventory:{'0' * 64}")
             is None
@@ -904,11 +902,13 @@ def test_workspace_bootstrap_stages_replay_concurrently_and_initialize_generic_z
         embedding_dimensions=readiness.embedding_dimensions,
         counts=(("documents", len(inventory.vault_members)),),
     )
-    evidence_verifier = workspace_bootstrap_module._mint_verified_workspace_bootstrap_evidence_verifier(
-        FreshWorkspaceEvidenceGuard(),
-        resolved_inventory=inventory,
-        resolved_aggregate=aggregate,
-        legacy_attestation=legacy_attestation,
+    evidence_verifier = (
+        workspace_bootstrap_module._mint_verified_workspace_bootstrap_evidence_verifier(
+            FreshWorkspaceEvidenceGuard(),
+            resolved_inventory=inventory,
+            resolved_aggregate=aggregate,
+            legacy_attestation=legacy_attestation,
+        )
     )
     capability = workspace_bootstrap_module._mint_verified_workspace_bootstrap_capability(
         complete_states[0],
@@ -1080,7 +1080,7 @@ def test_operator_run_navigation_is_post_authority_typed_and_replayable(
         target_id="incoming-source:not-yet-supported",
         target_sha256="a" * 64,
     )
-    with pytest.raises(ManagedReviewAuthorityError, match="no authoritative target resolver"):
+    with pytest.raises(ChangeControlCorruptionError, match="SQLite receipt"):
         store.record_operator_run_link(unsupported)
 
     conflicting = OperatorRunLinkCommand.create(

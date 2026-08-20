@@ -7,6 +7,7 @@ import json
 import math
 import os
 import stat
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -236,9 +237,11 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
     absolute = path.absolute()
     parts = absolute.parts
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    current = os.open(parts[0], directory_flags)
+    current = -1
+    child = -1
     fd = -1
     try:
+        current = os.open(parts[0], directory_flags)
         for component in parts[1:-1]:
             names = os.listdir(current)
             if component not in names:
@@ -250,10 +253,10 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
                 child_info.st_dev,
                 child_info.st_ino,
             ) != (named_info.st_dev, named_info.st_ino):
-                os.close(child)
                 raise RegressionSuiteError("regression suite parent was substituted")
             os.close(current)
             current = child
+            child = -1
         name = parts[-1]
         if name not in os.listdir(current):
             raise RegressionSuiteError("regression suite file changed or has wrong case")
@@ -283,8 +286,14 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
         raise RegressionSuiteError("regression suite cannot be opened safely") from exc
     finally:
         if fd >= 0:
-            os.close(fd)
-        os.close(current)
+            with suppress(OSError):
+                os.close(fd)
+        if child >= 0:
+            with suppress(OSError):
+                os.close(child)
+        if current >= 0:
+            with suppress(OSError):
+                os.close(current)
     signatures = {
         (
             item.st_dev,

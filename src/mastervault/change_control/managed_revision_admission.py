@@ -17,7 +17,7 @@ from mastervault.change_control.inference_repository import (
     RepositoryVerifiedInferenceEvidenceBatch,
 )
 from mastervault.change_control.managed_review import (
-    ManagedAnalysisSetBinding,
+    ManagedAnalysisSetAuthority,
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedImpactOutputRefBinding,
@@ -191,11 +191,11 @@ def _planning_input_artifact(
 
 def _reopen_impact_evidence(
     *,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     evidence_repository: FilesystemInferenceEvidenceRepository,
 ) -> _ReopenedImpactEvidence:
     binding = analysis_set.impact_evidence
-    if binding is None or analysis_set.schema_version != 2:
+    if binding is None or analysis_set.schema_version not in {2, 3}:
         raise ValueError("revision admission requires exact durable impact evidence")
     outcomes, batch = evidence_repository.resolve_verified_batch(
         batch_id=binding.batch_id,
@@ -302,7 +302,7 @@ def _reopen_impact_evidence(
 def _require_exact_reviewed_impact_lineage(
     *,
     binding: ManagedRevisionPlanningAdmissionBinding | None,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     repository_id: str,
     reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
     impact: _ReopenedImpactEvidence,
@@ -315,23 +315,21 @@ def _require_exact_reviewed_impact_lineage(
     reviewed_binding = reviewed.binding
     bootstrap = analysis_set.analysis_bootstrap
     evidence = analysis_set.impact_evidence
-    if evidence is None or analysis_set.schema_version != 2:
+    if evidence is None or analysis_set.schema_version not in {2, 3}:
         raise ValueError("revision admission requires durable Step-10 evidence")
     expected = build_impact_workload(reviewed)
     checks = {
         "reviewed repository": reviewed_binding.evidence_repository_id == repository_id,
         "impact repository": evidence.repository_id == repository_id,
         "analysis bootstrap": (
-            bootstrap
-            == reviewed.temporal_analysis.proposal.binding.analysis_bootstrap
+            bootstrap == reviewed.temporal_analysis.proposal.binding.analysis_bootstrap
         ),
         "analysis aggregate": (
             reviewed_binding.analysis_head.aggregate_id == bootstrap.aggregate_id
         ),
         "analysis revision": reviewed_binding.analysis_head.revision == bootstrap.analysis_revision,
         "analysis SHA": (
-            reviewed_binding.analysis_head.aggregate_sha256
-            == bootstrap.analysis_aggregate_sha256
+            reviewed_binding.analysis_head.aggregate_sha256 == bootstrap.analysis_aggregate_sha256
         ),
         "impact workload ID": expected.index.workload_id == evidence.workload_id,
         "impact workload SHA": expected.index.workload_sha256 == evidence.workload_sha256,
@@ -344,8 +342,7 @@ def _require_exact_reviewed_impact_lineage(
             == analysis_set.classification_result_sha256
         ),
         "attention result": (
-            expected.index.binding.attention_result_sha256
-            == analysis_set.attention_result_sha256
+            expected.index.binding.attention_result_sha256 == analysis_set.attention_result_sha256
         ),
         "mechanically relevant claims": (
             expected.index.binding.mechanically_relevant_claim_revision_ids
@@ -373,7 +370,7 @@ def _reconstruct_exact_planning_workload(
     *,
     run_id: str,
     planning_inputs: tuple[RevisionPlanningInferenceShard, ...],
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     impact: _ReopenedImpactEvidence,
     workload_id: str,
     workload_sha256: str,
@@ -440,7 +437,7 @@ def _require_target_output(
     workload_id: str,
     workload_sha256: str,
     contract_binding_id: str,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     planning_workload: RevisionPlanningWorkload,
     target_input: RevisionPlanningInferenceShard,
     predecessor_claims: tuple[VersionedClaimRevision, ...],

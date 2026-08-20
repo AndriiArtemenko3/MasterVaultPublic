@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from mastervault.change_control.analysis_binding import GenericAnalysisBootstrapBindingV2
 from mastervault.change_control.impact_analysis import ImpactInferenceShard
 from mastervault.change_control.impact_inference import RecordedImpactInferenceRun
 from mastervault.change_control.impact_results import (
@@ -28,7 +29,9 @@ from mastervault.change_control.managed_review import (
     MAX_MANAGED_BUNDLE_CANONICAL_BYTES_V1,
     MAX_MANAGED_HUNKS_PER_BUNDLE_V1,
     MAX_MANAGED_REVISION_PLANS_V1,
+    GenericManagedAnalysisSetBindingV3,
     InferenceExecutionMode,
+    ManagedAnalysisSetAuthority,
     ManagedAnalysisSetBinding,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -106,7 +109,7 @@ RevisionPlanningSubject = ManagedRevisionPlan | NoChangeImpactCard
 @dataclass(frozen=True)
 class RecordedRevisionPlanningInferenceRun:
     workload: RevisionPlanningWorkload
-    analysis_set: ManagedAnalysisSetBinding | None
+    analysis_set: ManagedAnalysisSetAuthority | None
     subjects: tuple[RevisionPlanningSubject, ...]
     outcomes: tuple[RecordedInferenceOutcome, ...]
     evidence_batch: RepositoryVerifiedInferenceEvidenceBatch | None
@@ -131,7 +134,10 @@ class RecordedRevisionPlanningInferenceRun:
             return
         if not self.subjects or len(self.subjects) != len(self.workload.input_shards):
             raise ValueError("revision run subjects must cover every workload shard")
-        if type(self.analysis_set) is not ManagedAnalysisSetBinding:
+        if not isinstance(
+            self.analysis_set,
+            (ManagedAnalysisSetBinding, GenericManagedAnalysisSetBindingV3),
+        ):
             raise ValueError("eligible revision run requires its exact analysis set")
         analysis_set = self.analysis_set
         if not self.outcomes or type(self.evidence_batch) is not (
@@ -408,7 +414,7 @@ def build_revision_planning_workload_from_impact_evidence(
     impact_input_shards: tuple[ImpactInferenceShard, ...],
     impact_output_shards: tuple[ImpactOutputShard, ...],
     snapshots: tuple[RevisionPlanningPredecessorSnapshot, ...],
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
 ) -> tuple[
     RevisionPlanningWorkload,
     dict[str, RevisionPlanningPredecessorSnapshot],
@@ -489,7 +495,7 @@ def _analysis_set(
     *,
     impact_run: RecordedImpactInferenceRun,
     evidence_repository: FilesystemInferenceEvidenceRepository,
-) -> ManagedAnalysisSetBinding:
+) -> ManagedAnalysisSetAuthority:
     impact_evidence = bind_recorded_impact_inference_run(impact_run)
     binding = impact_run.results.workload.index.binding
     temporal_bytes = evidence_repository.resolve_temporal_analysis_manifest(
@@ -499,8 +505,18 @@ def _analysis_set(
     temporal = TemporalAnalysisEvidence.from_canonical_bytes(temporal_bytes)
     # Classification retains the revision-2 temporal-analysis root, while Step 10
     # regenerates candidates and attention from the reviewed revision-4 snapshot.
+    bootstrap = temporal.proposal.binding.analysis_bootstrap
+    if isinstance(bootstrap, GenericAnalysisBootstrapBindingV2):
+        return GenericManagedAnalysisSetBindingV3.create_with_impact_evidence(
+            analysis_bootstrap=bootstrap,
+            candidate_result_sha256=binding.relationship_candidate_result_sha256,
+            classification_result_sha256=temporal.classification_result_index.result_sha256,
+            attention_result_sha256=binding.attention_result_sha256,
+            impact_evidence=impact_evidence,
+            global_relevant_claim_revision_ids=(binding.mechanically_relevant_claim_revision_ids),
+        )
     return ManagedAnalysisSetBinding.create_with_impact_evidence(
-        analysis_bootstrap=temporal.proposal.binding.analysis_bootstrap,
+        analysis_bootstrap=bootstrap,
         candidate_result_sha256=binding.relationship_candidate_result_sha256,
         classification_result_sha256=temporal.classification_result_index.result_sha256,
         attention_result_sha256=binding.attention_result_sha256,

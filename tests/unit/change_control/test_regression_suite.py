@@ -72,6 +72,7 @@ def test_admission_sorts_cases_and_binds_original_and_canonical_bytes() -> None:
         b'{"schema_version":NaN}',
         b"[]",
         b"{",
+        b"{} trailing",
     ],
 )
 def test_parser_rejects_ambiguous_or_non_strict_json(payload: bytes) -> None:
@@ -174,3 +175,53 @@ def test_file_loader_rejects_symlinked_parent(tmp_path: Path) -> None:
 
     with pytest.raises(RegressionSuiteError):
         load_regression_suite(linked_parent / "suite.json")
+
+
+def test_file_loader_bounds_root_open_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "suite.json"
+
+    def fail_open(*args: object, **kwargs: object) -> int:
+        raise OSError("synthetic root failure")
+
+    monkeypatch.setattr(os, "open", fail_open)
+    with pytest.raises(RegressionSuiteError, match="cannot be opened safely") as raised:
+        load_regression_suite(path)
+    assert isinstance(raised.value.__cause__, OSError)
+
+
+def test_file_loader_closes_parent_descriptors_when_child_inspection_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parent = tmp_path / "nested"
+    parent.mkdir()
+    path = parent / "suite.json"
+    path.write_bytes(_bytes())
+    path.chmod(0o600)
+    original_open = os.open
+    original_close = os.close
+    original_fstat = os.fstat
+    opened: list[int] = []
+    closed: list[int] = []
+
+    def tracked_open(*args: object, **kwargs: object) -> int:
+        fd = original_open(*args, **kwargs)  # type: ignore[arg-type]
+        opened.append(fd)
+        return fd
+
+    def tracked_close(fd: int) -> None:
+        closed.append(fd)
+        original_close(fd)
+
+    def fail_child_fstat(fd: int) -> os.stat_result:
+        if len(opened) >= 2 and fd == opened[-1]:
+            raise OSError("synthetic descriptor failure")
+        return original_fstat(fd)
+
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "close", tracked_close)
+    monkeypatch.setattr(os, "fstat", fail_child_fstat)
+    with pytest.raises(RegressionSuiteError, match="cannot be opened safely"):
+        load_regression_suite(path)
+    assert set(opened) <= set(closed)

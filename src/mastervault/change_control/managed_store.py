@@ -21,6 +21,9 @@ from mastervault.change_control.bootstrap import (
     VerifiedAnalysisBootstrapCapability,
     verify_generation_zero_authority,
 )
+from mastervault.change_control.generic_incoming_repository import (
+    GenericEvidenceBundleReceiptV2,
+)
 from mastervault.change_control.managed_generation import (
     ManagedActivationCommand,
     ManagedActivationIntentRecord,
@@ -39,10 +42,15 @@ from mastervault.change_control.managed_review import (
     ContentAddressedInferenceReceipt,
     GenerationZeroManifestBinding,
     GenerationZeroOriginBasis,
+    GenericGoverningSourceAdoptionBindingV2,
+    GenericManagedAnalysisSetBindingV3,
+    GoverningSourceAdoptionAuthority,
     GroundedArtifactCitation,
     InferenceExecutionMode,
+    ManagedAnalysisSetAuthority,
     ManagedAnalysisSetBinding,
     ManagedArtifactRef,
+    ManagedBundleOutcome,
     ManagedGenerationManifestBinding,
     ManagedGenerationManifestBindingV2,
     ManagedGoverningSourceAdoptionBinding,
@@ -66,6 +74,10 @@ from mastervault.change_control.managed_review import (
     WorkspaceGenerationZeroManifestBinding,
     WorkspaceGenerationZeroOriginBasis,
 )
+from mastervault.change_control.managed_revision_planning import (
+    RevisionPlanningEligibilityStatus,
+    RevisionPlanningWorkload,
+)
 from mastervault.change_control.models import (
     TemporalState,
     canonical_json_bytes,
@@ -76,9 +88,17 @@ from mastervault.change_control.operator_run import (
     OperatorRunLinkCommand,
     OperatorRunLinkKind,
     OperatorRunLinkRecord,
+    OperatorRunListItem,
+    OperatorRunPage,
+    OperatorRunPhase,
     OperatorRunRecord,
     OperatorRunView,
+    decode_operator_run_cursor,
+    encode_operator_run_cursor,
 )
+from mastervault.change_control.query_generation import QueryGenerationMetadataV1
+from mastervault.change_control.regression_baseline import GenerationZeroBaselineReceiptV1
+from mastervault.change_control.review import ReviewDisposition
 from mastervault.change_control.store import (
     ChangeControlConflictError,
     ChangeControlCorruptionError,
@@ -92,6 +112,15 @@ from mastervault.change_control.store import (
     _require_contiguous,
     _require_operation_id,
 )
+from mastervault.change_control.synchronous_lifecycle_store_models import (
+    ActivationBaselineBindingV1,
+    GenerationZeroBaselineStoreRecordV1,
+    IncomingAdmissionIntentV1,
+    IncomingAdmissionRecordV1,
+    RegressionSuiteAdmissionIntentV1,
+    RegressionSuiteAdmissionRecordV1,
+)
+from mastervault.change_control.temporal_proposal import TemporalProposalCommit
 from mastervault.change_control.workspace_bootstrap import (
     MAX_WORKSPACE_INVENTORY_PAYLOAD_BYTES_V1,
     LegacyIndexReadinessReceipt,
@@ -128,8 +157,8 @@ class ManagedReviewRepositoryResolver(Protocol):
     ) -> ManagedRevisionPlanningAdmissionBinding: ...
 
     def resolve_governing_source_adoption(
-        self, binding: ManagedGoverningSourceAdoptionBinding
-    ) -> ManagedGoverningSourceAdoptionBinding: ...
+        self, binding: GoverningSourceAdoptionAuthority
+    ) -> GoverningSourceAdoptionAuthority: ...
 
     def open_artifact(self, artifact: ManagedArtifactRef) -> bytes: ...
 
@@ -159,8 +188,32 @@ class ManagedReviewRepositoryResolver(Protocol):
     ) -> SourceNoteProjectionBinding: ...
 
     def resolve_reviewed_generation_source(
-        self, binding: ManagedGoverningSourceAdoptionBinding
+        self, binding: GoverningSourceAdoptionAuthority
     ) -> Any: ...
+
+
+class OperatorRunAuthorityResolver(Protocol):
+    """Fresh repository reopening required by non-SQLite navigation targets."""
+
+    def resolve_incoming_source(
+        self, intent: IncomingAdmissionIntentV1
+    ) -> GenericEvidenceBundleReceiptV2: ...
+
+    def resolve_temporal_proposal(
+        self, *, run_id: str, target_id: str, target_sha256: str
+    ) -> TemporalProposalCommit: ...
+
+    def resolve_operator_impact_evidence(
+        self, *, run_id: str, target_id: str, target_sha256: str
+    ) -> ManagedImpactAnalysisEvidenceBinding: ...
+
+    def resolve_operator_revision_planning(
+        self, *, run_id: str, target_id: str, target_sha256: str
+    ) -> ManagedRevisionPlanningAdmissionBinding | RevisionPlanningWorkload: ...
+
+    def resolve_generation_zero_baseline(
+        self, record: GenerationZeroBaselineStoreRecordV1
+    ) -> GenerationZeroBaselineReceiptV1: ...
 
 
 class ManagedReviewAuthorityError(ChangeControlConflictError):
@@ -251,9 +304,7 @@ class AuthorityVerificationContext:
         workspace = self.verified_workspace_bootstrap is not None
         if legacy == workspace:
             raise TypeError("exactly one legacy or workspace bootstrap context is required")
-        if legacy and (
-            self.verified_bootstrap is None or self.prechange_head is None
-        ):
+        if legacy and (self.verified_bootstrap is None or self.prechange_head is None):
             raise TypeError("legacy authority context requires capability and prechange head")
 
     @classmethod
@@ -281,9 +332,7 @@ def _authority_context(
 ) -> AuthorityVerificationContext:
     if authority_context is not None:
         if verified_bootstrap is not None or prechange_head is not None:
-            raise TypeError(
-                "authority_context cannot be mixed with legacy bootstrap arguments"
-            )
+            raise TypeError("authority_context cannot be mixed with legacy bootstrap arguments")
         return authority_context
     if verified_bootstrap is None or prechange_head is None:
         raise TypeError(
@@ -451,16 +500,12 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             label="workspace bootstrap inventory",
         )
         if not (
-            str(inventory_row["inventory_id"])
-            == inventory.inventory_id
-            == intent.inventory_id
+            str(inventory_row["inventory_id"]) == inventory.inventory_id == intent.inventory_id
             and str(inventory_row["inventory_sha256"])
             == inventory.inventory_sha256
             == intent.inventory_sha256
             and str(inventory_row["bootstrap_id"]) == bootstrap_id
-            and int(inventory_row["payload_schema_version"])
-            == inventory.schema_version
-            == 1
+            and int(inventory_row["payload_schema_version"]) == inventory.schema_version == 1
         ):
             raise ChangeControlCorruptionError(
                 "workspace inventory columns differ from canonical evidence"
@@ -468,8 +513,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         _require_canonical_utc(str(inventory_row["stored_at"]))
 
         inventory_receipt_row = self.conn.execute(
-            "SELECT * FROM change_control_workspace_inventory_receipts "
-            "WHERE bootstrap_id=?",
+            "SELECT * FROM change_control_workspace_inventory_receipts WHERE bootstrap_id=?",
             (bootstrap_id,),
         ).fetchone()
         inventory_receipt: WorkspaceInventoryReceipt | None = None
@@ -483,22 +527,17 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 str(inventory_receipt_row["bootstrap_id"])
                 == inventory_receipt.bootstrap_id
                 == bootstrap_id
-                and str(inventory_receipt_row["receipt_id"])
-                == inventory_receipt.receipt_id
-                and str(inventory_receipt_row["receipt_sha256"])
-                == inventory_receipt.receipt_sha256
-                and str(inventory_receipt_row["operation_id"])
-                == inventory_receipt.operation_id
+                and str(inventory_receipt_row["receipt_id"]) == inventory_receipt.receipt_id
+                and str(inventory_receipt_row["receipt_sha256"]) == inventory_receipt.receipt_sha256
+                and str(inventory_receipt_row["operation_id"]) == inventory_receipt.operation_id
                 and str(inventory_receipt_row["aggregate_operation_id"])
                 == inventory_receipt.aggregate_operation_id
-                and str(inventory_receipt_row["aggregate_id"])
-                == inventory_receipt.aggregate_id
+                and str(inventory_receipt_row["aggregate_id"]) == inventory_receipt.aggregate_id
                 and int(inventory_receipt_row["aggregate_revision"])
                 == inventory_receipt.aggregate_revision
                 and str(inventory_receipt_row["aggregate_sha256"])
                 == inventory_receipt.aggregate_sha256
-                and str(inventory_receipt_row["inventory_id"])
-                == inventory_receipt.inventory_id
+                and str(inventory_receipt_row["inventory_id"]) == inventory_receipt.inventory_id
                 and str(inventory_receipt_row["inventory_sha256"])
                 == inventory_receipt.inventory_sha256
                 and int(inventory_receipt_row["payload_schema_version"])
@@ -512,8 +551,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 )
 
         readiness_row = self.conn.execute(
-            "SELECT * FROM change_control_legacy_index_readiness_receipts "
-            "WHERE bootstrap_id=?",
+            "SELECT * FROM change_control_legacy_index_readiness_receipts WHERE bootstrap_id=?",
             (bootstrap_id,),
         ).fetchone()
         readiness: LegacyIndexReadinessReceipt | None = None
@@ -528,26 +566,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 and str(readiness_row["receipt_id"]) == readiness.receipt_id
                 and str(readiness_row["receipt_sha256"]) == readiness.receipt_sha256
                 and str(readiness_row["operation_id"]) == readiness.operation_id
-                and str(readiness_row["inventory_receipt_id"])
-                == readiness.inventory_receipt_id
+                and str(readiness_row["inventory_receipt_id"]) == readiness.inventory_receipt_id
                 and str(readiness_row["inventory_receipt_sha256"])
                 == readiness.inventory_receipt_sha256
                 and str(readiness_row["index_logical_fingerprint"])
                 == readiness.index_logical_fingerprint
-                and str(readiness_row["index_file_sha256"])
-                == readiness.index_file_sha256
-                and int(readiness_row["index_file_byte_count"])
-                == readiness.index_file_byte_count
-                and int(readiness_row["index_schema_version"])
-                == readiness.index_schema_version
+                and str(readiness_row["index_file_sha256"]) == readiness.index_file_sha256
+                and int(readiness_row["index_file_byte_count"]) == readiness.index_file_byte_count
+                and int(readiness_row["index_schema_version"]) == readiness.index_schema_version
                 and str(readiness_row["embedding_model"]) == readiness.embedding_model
-                and int(readiness_row["embedding_dimensions"])
-                == readiness.embedding_dimensions
-                and int(readiness_row["payload_schema_version"])
-                == readiness.schema_version
-                == 1
-                and _require_canonical_utc(str(readiness_row["ready_at"]))
-                == readiness.ready_at
+                and int(readiness_row["embedding_dimensions"]) == readiness.embedding_dimensions
+                and int(readiness_row["payload_schema_version"]) == readiness.schema_version == 1
+                and _require_canonical_utc(str(readiness_row["ready_at"])) == readiness.ready_at
             ):
                 raise ChangeControlCorruptionError(
                     "legacy index readiness columns differ from canonical evidence"
@@ -594,11 +624,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                         "workspace-bootstrap operation_id is already owned by another write"
                     )
                 existing = self._read_workspace_bootstrap_in_transaction(intent.bootstrap_id)
-                if (
-                    existing is None
-                    or existing.intent != intent
-                    or existing.inventory != inventory
-                ):
+                if existing is None or existing.intent != intent or existing.inventory != inventory:
                     raise ChangeControlIdempotencyError(
                         "workspace-bootstrap operation_id was reused for different inputs"
                     )
@@ -633,8 +659,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 ),
             )
             self.conn.execute(
-                "INSERT INTO change_control_workspace_inventories VALUES "
-                "(?, ?, ?, 1, ?, ?)",
+                "INSERT INTO change_control_workspace_inventories VALUES (?, ?, ?, 1, ?, ?)",
                 (
                     inventory.inventory_id,
                     inventory.inventory_sha256,
@@ -699,16 +724,18 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 (receipt.aggregate_operation_id,),
             ).fetchone()
             snapshot = self._snapshot_in_transaction(receipt.aggregate_id)
-            if aggregate_operation is None or snapshot is None or not (
-                str(aggregate_operation["aggregate_id"]) == receipt.aggregate_id
-                and aggregate_operation["expected_revision"] is None
-                and str(aggregate_operation["aggregate_sha256"])
-                == receipt.aggregate_sha256
-                and int(aggregate_operation["committed_revision"])
-                == receipt.aggregate_revision
-                and int(aggregate_operation["changed"]) == 1
-                and snapshot.revision == receipt.aggregate_revision
-                and snapshot.aggregate_sha256 == receipt.aggregate_sha256
+            if (
+                aggregate_operation is None
+                or snapshot is None
+                or not (
+                    str(aggregate_operation["aggregate_id"]) == receipt.aggregate_id
+                    and aggregate_operation["expected_revision"] is None
+                    and str(aggregate_operation["aggregate_sha256"]) == receipt.aggregate_sha256
+                    and int(aggregate_operation["committed_revision"]) == receipt.aggregate_revision
+                    and int(aggregate_operation["changed"]) == 1
+                    and snapshot.revision == receipt.aggregate_revision
+                    and snapshot.aggregate_sha256 == receipt.aggregate_sha256
+                )
             ):
                 raise ManagedReviewAuthorityError(
                     "workspace inventory does not bind an exact create-only aggregate commit"
@@ -718,8 +745,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 for item in state.inventory.managed_source_notes
             }
             persisted_documents = {
-                item.document_version_id: item
-                for item in snapshot.aggregate.documents.documents
+                item.document_version_id: item for item in snapshot.aggregate.documents.documents
             }
             if persisted_documents != declared_documents:
                 raise ManagedReviewAuthorityError(
@@ -914,8 +940,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             and str(row["aggregate_id"]) == command.aggregate_id
             and str(row["base_authority_id"]) == command.base_authority_id
             and int(row["base_authority_revision"]) == command.base_authority_revision
-            and str(row["base_active_pointer_sha256"])
-            == command.base_active_pointer_sha256
+            and str(row["base_active_pointer_sha256"]) == command.base_active_pointer_sha256
             and int(row["payload_schema_version"])
             == record.schema_version
             == command.schema_version
@@ -926,8 +951,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 "operator run columns differ from canonical navigation evidence"
             )
         link_rows = self.conn.execute(
-            "SELECT * FROM change_control_operator_run_links "
-            "WHERE run_id=? ORDER BY sequence",
+            "SELECT * FROM change_control_operator_run_links WHERE run_id=? ORDER BY sequence",
             (run_id,),
         ).fetchall()
         _require_contiguous(link_rows, "sequence")
@@ -952,8 +976,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 == link.schema_version
                 == item.schema_version
                 == 1
-                and _require_canonical_utc(str(link_row["recorded_at"]))
-                == link.recorded_at
+                and _require_canonical_utc(str(link_row["recorded_at"])) == link.recorded_at
             ):
                 raise ChangeControlCorruptionError(
                     "operator link columns differ from canonical navigation evidence"
@@ -965,6 +988,308 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             raise ChangeControlCorruptionError(
                 "operator run navigation links are inconsistent"
             ) from exc
+
+    def _read_incoming_admission_in_transaction(
+        self, intent_id: str
+    ) -> IncomingAdmissionRecordV1 | None:
+        row = self.conn.execute(
+            "SELECT i.*,r.receipt_id,r.receipt_sha256,r.payload_json AS receipt_json,"
+            "r.admitted_at FROM change_control_incoming_admission_intents i "
+            "LEFT JOIN change_control_incoming_admission_receipts r USING(intent_id) "
+            "WHERE i.intent_id=?",
+            (intent_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["receipt_id"] is None:
+            raise ChangeControlCorruptionError("incoming admission intent lacks its receipt")
+        record = _decode_model(
+            IncomingAdmissionRecordV1, str(row["receipt_json"]), label="incoming admission"
+        )
+        intent = record.intent
+        if not (
+            str(row["intent_id"]) == intent.intent_id == intent_id
+            and str(row["intent_sha256"]) == intent.intent_sha256
+            and str(row["operation_id"]) == intent.operation_id
+            and str(row["run_id"]) == intent.run_id
+            and str(row["bundle_id"]) == intent.bundle_id
+            and str(row["bundle_sha256"]) == intent.bundle_sha256
+            and str(row["admission_sha256"]) == intent.admission_sha256
+            and str(row["source_receipt_sha256"]) == intent.source_receipt_sha256
+            and str(row["projection_sha256"]) == intent.projection_sha256
+            and str(row["inference_sha256"]) == intent.inference_sha256
+            and int(row["payload_schema_version"]) == intent.schema_version == 1
+            and str(row["payload_json"]) == _canonical_model_json(intent)
+            and str(row["receipt_id"]) == record.receipt_id
+            and str(row["receipt_sha256"]) == record.receipt_sha256
+            and str(row["receipt_json"]) == _canonical_model_json(record)
+            and _require_canonical_utc(str(row["admitted_at"])) == record.admitted_at
+        ):
+            raise ChangeControlCorruptionError(
+                "incoming admission columns differ from canonical authority"
+            )
+        return record
+
+    def _read_incoming_receipt_in_transaction(
+        self, receipt_id: str
+    ) -> IncomingAdmissionRecordV1 | None:
+        row = self.conn.execute(
+            "SELECT intent_id FROM change_control_incoming_admission_receipts WHERE receipt_id=?",
+            (receipt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._read_incoming_admission_in_transaction(str(row["intent_id"]))
+
+    def _read_activation_baseline_binding_in_transaction(
+        self, activation_id: str
+    ) -> ActivationBaselineBindingV1 | None:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_activation_baseline_bindings WHERE activation_id=?",
+            (activation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        binding = _decode_model(
+            ActivationBaselineBindingV1,
+            str(row["payload_json"]),
+            label="activation-baseline binding",
+        )
+        if not (
+            str(row["activation_id"]) == binding.activation_id == activation_id
+            and str(row["binding_id"]) == binding.binding_id
+            and str(row["binding_sha256"]) == binding.binding_sha256
+            and str(row["operation_id"]) == binding.operation_id
+            and str(row["activation_sha256"]) == binding.activation_sha256
+            and str(row["run_id"]) == binding.run_id
+            and str(row["baseline_receipt_id"]) == binding.baseline_receipt_id
+            and str(row["baseline_receipt_sha256"]) == binding.baseline_receipt_sha256
+            and int(row["payload_schema_version"]) == binding.schema_version == 1
+            and str(row["payload_json"]) == _canonical_model_json(binding)
+            and _require_canonical_utc(str(row["bound_at"])) == binding.bound_at
+        ):
+            raise ChangeControlCorruptionError(
+                "activation-baseline columns differ from canonical binding"
+            )
+        activation = self.conn.execute(
+            "SELECT activation_sha256,request_id FROM change_control_managed_activation_intents "
+            "WHERE activation_id=?",
+            (activation_id,),
+        ).fetchone()
+        baseline = self._read_baseline_in_transaction(binding.baseline_receipt_id)
+        if (
+            activation is None
+            or baseline is None
+            or not (
+                str(activation["activation_sha256"]) == binding.activation_sha256
+                and baseline.baseline_receipt.receipt_sha256 == binding.baseline_receipt_sha256
+                and baseline.baseline_receipt.authority.run_id == binding.run_id
+            )
+        ):
+            raise ChangeControlCorruptionError(
+                "activation-baseline binding cannot reopen exact authority"
+            )
+        bundle_id_row = self.conn.execute(
+            "SELECT bundle_id FROM change_control_managed_review_request_records WHERE request_id=?",
+            (str(activation["request_id"]),),
+        ).fetchone()
+        if bundle_id_row is None:
+            raise ChangeControlCorruptionError("activation has no managed run authority")
+        bundle = self._read_bundle(str(bundle_id_row["bundle_id"]))
+        if bundle.run_binding.run_id != binding.run_id:
+            raise ChangeControlCorruptionError("activation and baseline belong to different runs")
+        return binding
+
+    def _read_suite_admission_in_transaction(
+        self, intent_id: str
+    ) -> RegressionSuiteAdmissionRecordV1 | None:
+        row = self.conn.execute(
+            "SELECT i.*,r.receipt_id,r.receipt_sha256,r.payload_json AS receipt_json,"
+            "r.admitted_at FROM change_control_regression_suite_admission_intents i "
+            "LEFT JOIN change_control_regression_suite_admission_receipts r USING(intent_id) "
+            "WHERE i.intent_id=?",
+            (intent_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row["receipt_id"] is None:
+            raise ChangeControlCorruptionError("regression-suite intent lacks its receipt")
+        record = _decode_model(
+            RegressionSuiteAdmissionRecordV1,
+            str(row["receipt_json"]),
+            label="regression-suite admission",
+        )
+        intent = record.intent
+        if not (
+            str(row["intent_id"]) == intent.intent_id == intent_id
+            and str(row["intent_sha256"]) == intent.intent_sha256
+            and str(row["operation_id"]) == intent.operation_id
+            and str(row["run_id"]) == intent.run_id
+            and str(row["suite_id"]) == intent.suite_id
+            and int(row["suite_version"]) == intent.suite_version
+            and str(row["original_sha256"]) == intent.original_sha256
+            and int(row["original_byte_count"]) == intent.original_byte_count
+            and str(row["canonical_sha256"]) == intent.canonical_sha256
+            and int(row["payload_schema_version"]) == intent.schema_version == 1
+            and str(row["payload_json"]) == _canonical_model_json(intent)
+            and str(row["receipt_id"]) == record.receipt_id
+            and str(row["receipt_sha256"]) == record.receipt_sha256
+            and str(row["receipt_json"]) == _canonical_model_json(record)
+            and _require_canonical_utc(str(row["admitted_at"])) == record.admitted_at
+        ):
+            raise ChangeControlCorruptionError(
+                "regression-suite columns differ from canonical authority"
+            )
+        return record
+
+    def _read_baseline_in_transaction(
+        self, receipt_id: str
+    ) -> GenerationZeroBaselineStoreRecordV1 | None:
+        row = self.conn.execute(
+            "SELECT * FROM change_control_generation_zero_baseline_receipts WHERE receipt_id=?",
+            (receipt_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        record = _decode_model(
+            GenerationZeroBaselineStoreRecordV1,
+            str(row["payload_json"]),
+            label="generation-zero baseline",
+        )
+        receipt = record.baseline_receipt
+        authority = receipt.authority
+        generation = authority.query_generation
+        if not (
+            str(row["receipt_id"]) == receipt.receipt_id == receipt_id
+            and str(row["receipt_sha256"]) == receipt.receipt_sha256
+            and str(row["record_id"]) == record.record_id
+            and str(row["record_sha256"]) == record.record_sha256
+            and str(row["operation_id"]) == record.operation_id
+            and str(row["baseline_id"]) == receipt.baseline_id
+            and str(row["run_id"]) == authority.run_id
+            and str(row["suite_admission_receipt_id"]) == record.suite_admission_receipt_id
+            and str(row["suite_admission_receipt_sha256"]) == record.suite_admission_receipt_sha256
+            and str(row["incoming_admission_receipt_id"]) == record.incoming_admission_receipt_id
+            and str(row["suite_id"]) == receipt.suite_id
+            and int(row["suite_version"]) == receipt.suite_version
+            and str(row["suite_original_sha256"]) == receipt.suite_original_sha256
+            and str(row["suite_canonical_sha256"]) == receipt.suite_canonical_sha256
+            and str(row["incoming_admission_receipt_sha256"])
+            == authority.incoming_admission_receipt_sha256
+            and str(row["workspace_inventory_receipt_id"])
+            == authority.workspace_inventory_receipt_id
+            and str(row["workspace_inventory_receipt_sha256"])
+            == authority.workspace_inventory_receipt_sha256
+            and str(row["legacy_readiness_receipt_id"]) == authority.legacy_readiness_receipt_id
+            and str(row["legacy_readiness_receipt_sha256"])
+            == authority.legacy_readiness_receipt_sha256
+            and str(row["generation_id"]) == generation.generation_id
+            and int(row["generation_number"]) == generation.generation_number == 0
+            and int(row["authority_revision"]) == generation.active_authority_revision == 0
+            and str(row["manifest_sha256"]) == generation.manifest_sha256
+            and int(row["inventory_count"]) == len(receipt.query_inventory)
+            and int(row["payload_schema_version"]) == record.schema_version == 1
+            and str(row["payload_json"]) == _canonical_model_json(record)
+            and _require_canonical_utc(str(row["captured_at"])) == receipt.captured_at
+            and _require_canonical_utc(str(row["recorded_at"])) == record.recorded_at
+        ):
+            raise ChangeControlCorruptionError(
+                "generation-zero baseline columns differ from canonical authority"
+            )
+        case_rows = self.conn.execute(
+            "SELECT * FROM change_control_generation_zero_baseline_cases "
+            "WHERE receipt_id=? ORDER BY ordinal",
+            (receipt_id,),
+        ).fetchall()
+        _require_contiguous(case_rows)
+        if len(case_rows) != len(receipt.artifacts):
+            raise ChangeControlCorruptionError("baseline case coverage is incomplete or surplus")
+        for ordinal, (case_row, artifact) in enumerate(
+            zip(case_rows, receipt.artifacts, strict=True)
+        ):
+            if not (
+                int(case_row["ordinal"]) == ordinal
+                and str(case_row["case_id"]) == artifact.case_id == receipt.query_inventory[ordinal]
+                and str(case_row["case_kind"]) == artifact.case_kind
+                and str(case_row["artifact_locator"]) == artifact.relative_path
+                and str(case_row["artifact_sha256"]) == artifact.sha256
+                and int(case_row["artifact_byte_count"]) == artifact.byte_count
+            ):
+                raise ChangeControlCorruptionError(
+                    "baseline case rows differ from exact contiguous receipt inventory"
+                )
+        suite_row = self.conn.execute(
+            "SELECT intent_id FROM change_control_regression_suite_admission_receipts "
+            "WHERE receipt_id=?",
+            (record.suite_admission_receipt_id,),
+        ).fetchone()
+        if suite_row is None:
+            raise ChangeControlCorruptionError("baseline suite admission is missing")
+        suite = self._read_suite_admission_in_transaction(str(suite_row["intent_id"]))
+        if (
+            suite is None
+            or suite != record.suite_admission
+            or not (
+                suite.intent.run_id == authority.run_id
+                and suite.intent.suite_id == receipt.suite_id
+                and suite.intent.suite_version == receipt.suite_version
+                and suite.intent.original_sha256 == receipt.suite_original_sha256
+                and suite.intent.canonical_sha256 == receipt.suite_canonical_sha256
+            )
+        ):
+            raise ChangeControlCorruptionError("baseline differs from admitted regression suite")
+        incoming_row = self.conn.execute(
+            "SELECT intent_id FROM change_control_incoming_admission_receipts WHERE receipt_id=?",
+            (record.incoming_admission_receipt_id,),
+        ).fetchone()
+        if incoming_row is None:
+            raise ChangeControlCorruptionError("baseline run lacks incoming admission authority")
+        incoming = self._read_incoming_admission_in_transaction(str(incoming_row["intent_id"]))
+        if (
+            incoming is None
+            or incoming != record.incoming_admission
+            or not (
+                incoming.receipt_id == authority.incoming_admission_receipt_id
+                and incoming.receipt_sha256 == authority.incoming_admission_receipt_sha256
+                and incoming.intent.run_id == authority.run_id
+            )
+        ):
+            raise ChangeControlCorruptionError("baseline differs from incoming admission authority")
+        inventory = self.conn.execute(
+            "SELECT receipt_sha256 FROM change_control_workspace_inventory_receipts "
+            "WHERE receipt_id=?",
+            (authority.workspace_inventory_receipt_id,),
+        ).fetchone()
+        readiness = self.conn.execute(
+            "SELECT receipt_sha256,index_logical_fingerprint,index_file_sha256,"
+            "index_file_byte_count,index_schema_version,embedding_model,embedding_dimensions "
+            "FROM change_control_legacy_index_readiness_receipts WHERE receipt_id=?",
+            (authority.legacy_readiness_receipt_id,),
+        ).fetchone()
+        manifest = self.conn.execute(
+            "SELECT manifest_sha256,generation_number FROM change_control_generation_manifests "
+            "WHERE generation_id=?",
+            (generation.generation_id,),
+        ).fetchone()
+        if not (
+            inventory is not None
+            and str(inventory["receipt_sha256"]) == authority.workspace_inventory_receipt_sha256
+            and readiness is not None
+            and str(readiness["receipt_sha256"]) == authority.legacy_readiness_receipt_sha256
+            and str(readiness["index_logical_fingerprint"]) == generation.index_logical_fingerprint
+            and str(readiness["index_file_sha256"]) == generation.index_file_sha256
+            and int(readiness["index_file_byte_count"]) == generation.index_file_byte_count
+            and int(readiness["index_schema_version"]) == generation.storage_schema_version
+            and str(readiness["embedding_model"]) == generation.embedding_model
+            and int(readiness["embedding_dimensions"]) == generation.embedding_dimensions
+            and manifest is not None
+            and int(manifest["generation_number"]) == 0
+            and str(manifest["manifest_sha256"]) == generation.manifest_sha256
+        ):
+            raise ChangeControlCorruptionError(
+                "baseline generation-zero inventory/readiness authority cannot be reopened"
+            )
+        return record
 
     def _validate_extension_records(self) -> None:
         bootstrap_rows = self.conn.execute(
@@ -982,6 +1307,40 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         for row in run_rows:
             if self._read_operator_run_in_transaction(str(row["run_id"])) is None:
                 raise ChangeControlCorruptionError("operator run disappeared during validation")
+        incoming_rows = self.conn.execute(
+            "SELECT intent_id FROM change_control_incoming_admission_intents ORDER BY intent_id"
+        ).fetchall()
+        for row in incoming_rows:
+            if self._read_incoming_admission_in_transaction(str(row["intent_id"])) is None:
+                raise ChangeControlCorruptionError(
+                    "incoming admission disappeared during validation"
+                )
+        suite_rows = self.conn.execute(
+            "SELECT intent_id FROM change_control_regression_suite_admission_intents "
+            "ORDER BY intent_id"
+        ).fetchall()
+        for row in suite_rows:
+            if self._read_suite_admission_in_transaction(str(row["intent_id"])) is None:
+                raise ChangeControlCorruptionError("suite admission disappeared during validation")
+        baseline_rows = self.conn.execute(
+            "SELECT receipt_id FROM change_control_generation_zero_baseline_receipts "
+            "ORDER BY receipt_id"
+        ).fetchall()
+        for row in baseline_rows:
+            if self._read_baseline_in_transaction(str(row["receipt_id"])) is None:
+                raise ChangeControlCorruptionError("baseline receipt disappeared during validation")
+        binding_rows = self.conn.execute(
+            "SELECT activation_id FROM change_control_activation_baseline_bindings "
+            "ORDER BY activation_id"
+        ).fetchall()
+        for row in binding_rows:
+            if (
+                self._read_activation_baseline_binding_in_transaction(str(row["activation_id"]))
+                is None
+            ):
+                raise ChangeControlCorruptionError(
+                    "activation-baseline binding disappeared during validation"
+                )
 
     def create_operator_run(self, command: OperatorRunCommand) -> OperatorRunView:
         """Create or replay navigation rooted at an exact committed authority."""
@@ -1023,20 +1382,16 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             ).fetchone()
             if authority is None or not (
                 str(authority["authority_id"]) == command.base_authority_id
-                and int(authority["authority_revision"])
-                == command.base_authority_revision
-                == 0
+                and int(authority["authority_revision"]) == command.base_authority_revision == 0
                 and int(authority["active_generation_number"]) == 0
-                and str(authority["active_pointer_sha256"])
-                == command.base_active_pointer_sha256
+                and str(authority["active_pointer_sha256"]) == command.base_active_pointer_sha256
             ):
                 raise ManagedReviewStaleError(
                     "operator run requires the exact committed generation-zero authority"
                 )
             record = OperatorRunRecord(command=command, created_at=_now())
             self.conn.execute(
-                "INSERT INTO change_control_operator_runs VALUES "
-                "(?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                "INSERT INTO change_control_operator_runs VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                 (
                     command.run_id,
                     command.run_sha256,
@@ -1058,10 +1413,476 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._rollback_operation_error(exc)
             raise
 
+    def record_incoming_admission(
+        self,
+        intent: IncomingAdmissionIntentV1,
+        *,
+        resolver: OperatorRunAuthorityResolver,
+    ) -> IncomingAdmissionRecordV1:
+        """Own one exact generic evidence bundle under one run operation."""
+
+        intent = IncomingAdmissionIntentV1.model_validate_json(
+            canonical_json_bytes(intent.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            reopened_bundle = resolver.resolve_incoming_source(intent)
+            if not (
+                reopened_bundle.bundle_id == intent.bundle_id
+                and reopened_bundle.bundle_sha256 == intent.bundle_sha256
+                and reopened_bundle.admission_sha256 == intent.admission_sha256
+                and reopened_bundle.source_receipt_sha256 == intent.source_receipt_sha256
+                and reopened_bundle.projection_sha256 == intent.projection_sha256
+                and reopened_bundle.inference_sha256 == intent.inference_sha256
+            ):
+                raise ManagedReviewAuthorityError(
+                    "incoming admission differs from freshly reopened repository authority"
+                )
+            owner = self._operation_owner(intent.operation_id)
+            if owner is not None:
+                if owner != ("incoming-admission", intent.intent_id):
+                    raise ChangeControlIdempotencyError(
+                        "incoming admission operation_id is already owned by another write"
+                    )
+                existing = self._read_incoming_admission_in_transaction(intent.intent_id)
+                if existing is None or existing.intent != intent:
+                    raise ChangeControlIdempotencyError(
+                        "incoming admission operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            if self._read_operator_run_in_transaction(intent.run_id) is None:
+                raise ChangeControlReviewMissingError("incoming admission run does not exist")
+            if self._read_incoming_admission_in_transaction(intent.intent_id) is not None:
+                raise ChangeControlIdempotencyError(
+                    "incoming admission already exists under another operation_id"
+                )
+            record = IncomingAdmissionRecordV1.create(intent=intent, admitted_at=_now())
+            self.conn.execute(
+                "INSERT INTO change_control_incoming_admission_intents VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    intent.intent_id,
+                    intent.intent_sha256,
+                    intent.operation_id,
+                    intent.run_id,
+                    intent.bundle_id,
+                    intent.bundle_sha256,
+                    intent.admission_sha256,
+                    intent.source_receipt_sha256,
+                    intent.projection_sha256,
+                    intent.inference_sha256,
+                    _canonical_model_json(intent),
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_incoming_admission_receipts VALUES (?, ?, ?, 1, ?, ?)",
+                (
+                    intent.intent_id,
+                    record.receipt_id,
+                    record.receipt_sha256,
+                    _canonical_model_json(record),
+                    record.admitted_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self._commit()
+            return record
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_regression_suite_admission(
+        self, intent: RegressionSuiteAdmissionIntentV1
+    ) -> RegressionSuiteAdmissionRecordV1:
+        """Own a complete canonical suite without retaining its external path."""
+
+        intent = RegressionSuiteAdmissionIntentV1.model_validate_json(
+            canonical_json_bytes(intent.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(intent.operation_id)
+            if owner is not None:
+                if owner != ("regression-suite-admission", intent.intent_id):
+                    raise ChangeControlIdempotencyError(
+                        "suite admission operation_id is already owned by another write"
+                    )
+                existing = self._read_suite_admission_in_transaction(intent.intent_id)
+                if existing is None or existing.intent != intent:
+                    raise ChangeControlIdempotencyError(
+                        "suite admission operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            if self._read_operator_run_in_transaction(intent.run_id) is None:
+                raise ChangeControlReviewMissingError("suite admission run does not exist")
+            if self._read_suite_admission_in_transaction(intent.intent_id) is not None:
+                raise ChangeControlIdempotencyError(
+                    "suite admission already exists under another operation_id"
+                )
+            record = RegressionSuiteAdmissionRecordV1.create(intent=intent, admitted_at=_now())
+            self.conn.execute(
+                "INSERT INTO change_control_regression_suite_admission_intents VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    intent.intent_id,
+                    intent.intent_sha256,
+                    intent.operation_id,
+                    intent.run_id,
+                    intent.suite_id,
+                    intent.suite_version,
+                    intent.original_sha256,
+                    intent.original_byte_count,
+                    intent.canonical_sha256,
+                    _canonical_model_json(intent),
+                ),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_regression_suite_admission_receipts VALUES "
+                "(?, ?, ?, 1, ?, ?)",
+                (
+                    intent.intent_id,
+                    record.receipt_id,
+                    record.receipt_sha256,
+                    _canonical_model_json(record),
+                    record.admitted_at,
+                ),
+            )
+            self._assert_foreign_keys()
+            self._commit()
+            return record
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def record_generation_zero_baseline(
+        self,
+        *,
+        operation_id: str,
+        incoming_admission_receipt_id: str,
+        suite_admission_receipt_id: str,
+        baseline_receipt: GenerationZeroBaselineReceiptV1,
+        resolver: OperatorRunAuthorityResolver,
+    ) -> GenerationZeroBaselineStoreRecordV1:
+        """Seal exact contiguous per-case ownership after repository COMPLETE exists."""
+
+        operation_id = _require_operation_id(operation_id)
+        baseline_receipt = GenerationZeroBaselineReceiptV1.model_validate_json(
+            canonical_json_bytes(baseline_receipt.model_dump(mode="json"))
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(operation_id)
+            if owner is not None:
+                existing = self._read_baseline_in_transaction(baseline_receipt.receipt_id)
+                if owner != ("generation-zero-baseline", baseline_receipt.receipt_id) or not (
+                    existing is not None
+                    and existing.operation_id == operation_id
+                    and existing.incoming_admission_receipt_id == incoming_admission_receipt_id
+                    and existing.suite_admission_receipt_id == suite_admission_receipt_id
+                    and existing.baseline_receipt == baseline_receipt
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "baseline operation_id was reused for different inputs"
+                    )
+                if resolver.resolve_generation_zero_baseline(existing) != existing.baseline_receipt:
+                    raise ManagedReviewAuthorityError(
+                        "baseline repository authority changed on exact replay"
+                    )
+                self._commit()
+                return existing
+            if self._read_baseline_in_transaction(baseline_receipt.receipt_id) is not None:
+                raise ChangeControlIdempotencyError(
+                    "baseline receipt already exists under another operation_id"
+                )
+            incoming_row = self.conn.execute(
+                "SELECT intent_id FROM change_control_incoming_admission_receipts "
+                "WHERE receipt_id=?",
+                (incoming_admission_receipt_id,),
+            ).fetchone()
+            suite_row = self.conn.execute(
+                "SELECT intent_id FROM change_control_regression_suite_admission_receipts "
+                "WHERE receipt_id=?",
+                (suite_admission_receipt_id,),
+            ).fetchone()
+            incoming = (
+                self._read_incoming_admission_in_transaction(str(incoming_row["intent_id"]))
+                if incoming_row is not None
+                else None
+            )
+            suite = (
+                self._read_suite_admission_in_transaction(str(suite_row["intent_id"]))
+                if suite_row is not None
+                else None
+            )
+            if incoming is None or suite is None:
+                raise ManagedReviewAuthorityError(
+                    "baseline requires exact incoming and suite admission receipts"
+                )
+            record = GenerationZeroBaselineStoreRecordV1.create(
+                operation_id=operation_id,
+                incoming_admission_receipt_id=incoming_admission_receipt_id,
+                incoming_admission_receipt_sha256=incoming.receipt_sha256,
+                suite_admission_receipt_id=suite_admission_receipt_id,
+                suite_admission_receipt_sha256=suite.receipt_sha256,
+                incoming_admission=incoming,
+                suite_admission=suite,
+                baseline_receipt=baseline_receipt,
+                recorded_at=_now(),
+            )
+            receipt = record.baseline_receipt
+            authority = receipt.authority
+            generation = authority.query_generation
+            if (
+                authority.incoming_admission_receipt_id != incoming_admission_receipt_id
+                or generation.generation_id is None
+                or generation.manifest_sha256 is None
+            ):
+                raise ManagedReviewAuthorityError(
+                    "baseline receipt differs from exact admission/generation authority"
+                )
+            self._require_baseline_active_generation_zero(
+                run_id=authority.run_id, generation=generation
+            )
+            inventory_row = self.conn.execute(
+                "SELECT receipt_sha256 FROM change_control_workspace_inventory_receipts "
+                "WHERE receipt_id=?",
+                (authority.workspace_inventory_receipt_id,),
+            ).fetchone()
+            readiness_row = self.conn.execute(
+                "SELECT receipt_sha256 FROM change_control_legacy_index_readiness_receipts "
+                "WHERE receipt_id=?",
+                (authority.legacy_readiness_receipt_id,),
+            ).fetchone()
+            if not (
+                inventory_row is not None
+                and str(inventory_row["receipt_sha256"])
+                == authority.workspace_inventory_receipt_sha256
+                and readiness_row is not None
+                and str(readiness_row["receipt_sha256"])
+                == authority.legacy_readiness_receipt_sha256
+            ):
+                raise ManagedReviewAuthorityError(
+                    "baseline differs from exact workspace/index generation-zero authority"
+                )
+            if resolver.resolve_generation_zero_baseline(record) != receipt:
+                raise ManagedReviewAuthorityError(
+                    "baseline differs from freshly reopened repository authority"
+                )
+            for ordinal, artifact in enumerate(receipt.artifacts):
+                self.conn.execute(
+                    "INSERT INTO change_control_generation_zero_baseline_cases VALUES "
+                    "(?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        receipt.receipt_id,
+                        ordinal,
+                        artifact.case_id,
+                        artifact.case_kind,
+                        artifact.relative_path,
+                        artifact.sha256,
+                        artifact.byte_count,
+                    ),
+                )
+            self.conn.execute(
+                "INSERT INTO change_control_generation_zero_baseline_receipts VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (
+                    receipt.receipt_id,
+                    receipt.receipt_sha256,
+                    record.record_id,
+                    record.record_sha256,
+                    record.operation_id,
+                    receipt.baseline_id,
+                    authority.run_id,
+                    record.suite_admission_receipt_id,
+                    record.suite_admission_receipt_sha256,
+                    record.incoming_admission_receipt_id,
+                    receipt.suite_id,
+                    receipt.suite_version,
+                    receipt.suite_original_sha256,
+                    receipt.suite_canonical_sha256,
+                    authority.incoming_admission_receipt_sha256,
+                    authority.workspace_inventory_receipt_id,
+                    authority.workspace_inventory_receipt_sha256,
+                    authority.legacy_readiness_receipt_id,
+                    authority.legacy_readiness_receipt_sha256,
+                    generation.generation_id,
+                    generation.generation_number,
+                    generation.active_authority_revision,
+                    generation.manifest_sha256,
+                    len(receipt.query_inventory),
+                    _canonical_model_json(record),
+                    receipt.captured_at,
+                    record.recorded_at,
+                ),
+            )
+            reopened = self._read_baseline_in_transaction(receipt.receipt_id)
+            if reopened != record:
+                raise ChangeControlCorruptionError("baseline did not reopen exactly")
+            self._assert_foreign_keys()
+            self._commit()
+            return record
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def _require_baseline_active_generation_zero(
+        self, *, run_id: str, generation: QueryGenerationMetadataV1
+    ) -> None:
+        operator_row = self.conn.execute(
+            "SELECT aggregate_id FROM change_control_operator_runs WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        active_row = self.conn.execute(
+            "SELECT authority_revision,active_generation_id,active_generation_number,"
+            "active_manifest_sha256 FROM change_control_active_generation WHERE aggregate_id=?",
+            (str(operator_row["aggregate_id"]),) if operator_row is not None else ("",),
+        ).fetchone()
+        if not (
+            operator_row is not None
+            and active_row is not None
+            and int(active_row["authority_revision"]) == 0
+            and int(active_row["active_generation_number"]) == 0
+            and str(active_row["active_generation_id"]) == generation.generation_id
+            and str(active_row["active_manifest_sha256"]) == generation.manifest_sha256
+            and generation.active_generation_id == generation.generation_id
+        ):
+            raise ManagedReviewAuthorityError(
+                "baseline can only be sealed against exact active generation zero authority"
+            )
+
+    def bind_activation_to_generation_zero_baseline(
+        self,
+        *,
+        operation_id: str,
+        activation_id: str,
+        run_id: str,
+        baseline_receipt_id: str,
+    ) -> ActivationBaselineBindingV1:
+        """Bind a claimed activation to exact baseline authority before its CAS."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            activation = self._read_activation_intent(activation_id)
+            request = self._read_request_record(activation.command.request_id)
+            decision = self._read_decision_record(activation.command.request_id)
+            activation_command = activation.command
+            decision_command = decision.command
+            if not (
+                request.command.bundle.run_binding.run_id == run_id
+                and decision_command.request_record == request
+                and activation_command.request_id == request.command.request_id
+                and activation_command.decision_id == decision_command.decision_id
+                and activation_command.decision_record_sha256 == decision.record_sha256
+                and activation_command.manifest_id
+                == decision_command.generation_manifest.manifest_id
+                and activation_command.manifest_sha256
+                == decision_command.generation_manifest.manifest_sha256
+            ):
+                raise ManagedReviewAuthorityError(
+                    "activation and baseline binding name different managed-run authority"
+                )
+            owner = self._operation_owner(operation_id)
+            if owner is not None:
+                row = self.conn.execute(
+                    "SELECT activation_id FROM change_control_activation_baseline_bindings "
+                    "WHERE operation_id=?",
+                    (operation_id,),
+                ).fetchone()
+                existing = (
+                    self._read_activation_baseline_binding_in_transaction(str(row["activation_id"]))
+                    if row is not None
+                    else None
+                )
+                if (
+                    owner[0] != "activation-baseline"
+                    or existing is None
+                    or not (
+                        existing.operation_id == operation_id
+                        and existing.activation_id == activation_id
+                        and existing.run_id == run_id
+                        and existing.baseline_receipt_id == baseline_receipt_id
+                    )
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "activation-baseline operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            baseline = self._read_baseline_in_transaction(baseline_receipt_id)
+            if baseline is None or baseline.baseline_receipt.authority.run_id != run_id:
+                raise ManagedReviewAuthorityError(
+                    "activation baseline does not belong to the exact operator run"
+                )
+            binding = ActivationBaselineBindingV1.create(
+                operation_id=operation_id,
+                activation_id=activation_id,
+                activation_sha256=activation.command.activation_sha256,
+                run_id=run_id,
+                baseline_receipt_id=baseline_receipt_id,
+                baseline_receipt_sha256=baseline.baseline_receipt.receipt_sha256,
+                bound_at=_now(),
+            )
+            self.conn.execute(
+                "INSERT INTO change_control_activation_baseline_bindings VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    binding.activation_id,
+                    binding.binding_id,
+                    binding.binding_sha256,
+                    binding.operation_id,
+                    binding.activation_sha256,
+                    binding.run_id,
+                    binding.baseline_receipt_id,
+                    binding.baseline_receipt_sha256,
+                    _canonical_model_json(binding),
+                    binding.bound_at,
+                ),
+            )
+            reopened = self._read_activation_baseline_binding_in_transaction(activation_id)
+            if reopened != binding:
+                raise ChangeControlCorruptionError(
+                    "activation-baseline binding did not reopen exactly"
+                )
+            self._assert_foreign_keys()
+            self._commit()
+            return binding
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
     def _verify_operator_link_target(
         self,
         command: OperatorRunLinkCommand,
         run: OperatorRunView,
+        *,
+        resolver: OperatorRunAuthorityResolver | None,
     ) -> None:
         table_binding = {
             OperatorRunLinkKind.BOOTSTRAP_INTENT: (
@@ -1079,6 +1900,36 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 "receipt_id",
                 "receipt_sha256",
             ),
+            OperatorRunLinkKind.REGRESSION_SUITE: (
+                "change_control_regression_suite_admission_receipts",
+                "receipt_id",
+                "receipt_sha256",
+            ),
+            OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST: (
+                "change_control_review_requests",
+                "request_id",
+                "request_payload_sha256",
+            ),
+            OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION: (
+                "change_control_review_decisions",
+                "request_id",
+                "decision_payload_sha256",
+            ),
+            OperatorRunLinkKind.MANAGED_REVIEW_REQUEST: (
+                "change_control_managed_review_request_records",
+                "request_id",
+                "record_sha256",
+            ),
+            OperatorRunLinkKind.MANAGED_REVIEW_DECISION: (
+                "change_control_managed_review_decisions",
+                "decision_id",
+                "record_sha256",
+            ),
+            OperatorRunLinkKind.ACTIVATION_OPERATION: (
+                "change_control_generation_activation_receipts",
+                "receipt_id",
+                "receipt_sha256",
+            ),
         }.get(command.kind)
         if table_binding is not None:
             table, identity_column, sha_column = table_binding
@@ -1090,36 +1941,261 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 raise ChangeControlCorruptionError(
                     "operator link target cannot be reopened exactly"
                 )
+        elif command.kind == OperatorRunLinkKind.INCOMING_SOURCE:
+            record = self._read_incoming_receipt_in_transaction(command.target_id)
+            if record is None or record.receipt_sha256 != command.target_sha256:
+                raise ChangeControlCorruptionError(
+                    "operator incoming target cannot reopen its SQLite receipt"
+                )
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator incoming target requires a repository authority resolver"
+                )
+            reopened_bundle = resolver.resolve_incoming_source(record.intent)
+            intent = record.intent
+            if not (
+                reopened_bundle.bundle_id == intent.bundle_id
+                and reopened_bundle.bundle_sha256 == intent.bundle_sha256
+                and reopened_bundle.admission_sha256 == intent.admission_sha256
+                and reopened_bundle.source_receipt_sha256 == intent.source_receipt_sha256
+                and reopened_bundle.projection_sha256 == intent.projection_sha256
+                and reopened_bundle.inference_sha256 == intent.inference_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator incoming repository authority differs from its SQLite receipt"
+                )
+        elif command.kind == OperatorRunLinkKind.GENERATION_ZERO_BASELINE:
+            baseline = self._read_baseline_in_transaction(command.target_id)
+            if (
+                baseline is None
+                or baseline.baseline_receipt.receipt_sha256 != command.target_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator baseline target cannot reopen its SQLite receipt"
+                )
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator baseline target requires a repository authority resolver"
+                )
+            if resolver.resolve_generation_zero_baseline(baseline) != baseline.baseline_receipt:
+                raise ChangeControlCorruptionError(
+                    "operator baseline repository authority differs from its SQLite receipt"
+                )
+        elif command.kind == OperatorRunLinkKind.IMPACT_EVIDENCE:
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator impact target requires a repository authority resolver"
+                )
+            evidence = resolver.resolve_operator_impact_evidence(
+                run_id=command.run_id,
+                target_id=command.target_id,
+                target_sha256=command.target_sha256,
+            )
+            if not (
+                evidence.evidence_binding_id == command.target_id
+                and evidence.evidence_binding_sha256 == command.target_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator impact repository authority differs from its link"
+                )
+        elif command.kind == OperatorRunLinkKind.REVISION_PLANNING:
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator planning target requires a repository authority resolver"
+                )
+            planning = resolver.resolve_operator_revision_planning(
+                run_id=command.run_id,
+                target_id=command.target_id,
+                target_sha256=command.target_sha256,
+            )
+            if isinstance(planning, ManagedRevisionPlanningAdmissionBinding):
+                exact = (
+                    planning.run_id == command.run_id
+                    and planning.admission_id == command.target_id
+                    and planning.admission_sha256 == command.target_sha256
+                )
+            else:
+                exact = (
+                    planning.workload_id == command.target_id
+                    and planning.workload_sha256 == command.target_sha256
+                )
+            if not exact:
+                raise ChangeControlCorruptionError(
+                    "operator planning repository authority differs from its link"
+                )
+        elif command.kind == OperatorRunLinkKind.TEMPORAL_PROPOSAL:
+            operation_row = self.conn.execute(
+                "SELECT aggregate_id,committed_revision,aggregate_sha256,changed,receipt_sha256 "
+                "FROM change_control_operations WHERE operation_id=?",
+                (command.target_id,),
+            ).fetchone()
+            if operation_row is None or str(operation_row["receipt_sha256"]) != (
+                command.target_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator temporal proposal cannot reopen its SQLite commit"
+                )
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator temporal proposal requires a repository authority resolver"
+                )
+            proposal_commit = resolver.resolve_temporal_proposal(
+                run_id=command.run_id,
+                target_id=command.target_id,
+                target_sha256=command.target_sha256,
+            )
+            if not (
+                proposal_commit.operation_id == command.target_id
+                and proposal_commit.aggregate_id == run.record.command.aggregate_id
+                and proposal_commit.revision == int(operation_row["committed_revision"]) == 3
+                and proposal_commit.aggregate_sha256 == str(operation_row["aggregate_sha256"])
+                and int(operation_row["changed"]) == 1
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator temporal proposal repository authority differs from its commit"
+                )
         elif command.kind == OperatorRunLinkKind.GENERATION_ZERO_AUTHORITY:
             base = run.record.command
-            authority = self.conn.execute(
-                "SELECT authority_id,authority_revision,active_generation_number,"
-                "active_pointer_sha256 FROM change_control_active_generation "
-                "WHERE aggregate_id=?",
+            active_row = self.conn.execute(
+                "SELECT authority_json FROM change_control_active_generation WHERE aggregate_id=?",
                 (base.aggregate_id,),
             ).fetchone()
+            if active_row is None:
+                raise ChangeControlCorruptionError(
+                    "operator authority link has no active aggregate"
+                )
+            active = _decode_model(
+                AuthorityRevisionBinding,
+                str(active_row["authority_json"]),
+                label="operator active authority",
+            )
+            authority: AuthorityRevisionBinding | None = None
+            if active.authority_id == base.base_authority_id:
+                authority = active
+            else:
+                receipt_rows = self.conn.execute(
+                    "SELECT payload_json FROM change_control_generation_activation_receipts "
+                    "ORDER BY activated_at,receipt_id"
+                ).fetchall()
+                historical_matches: list[AuthorityRevisionBinding] = []
+                for receipt_row in receipt_rows:
+                    receipt = _decode_model(
+                        ManagedGenerationActivationReceipt,
+                        str(receipt_row["payload_json"]),
+                        label="historical activation receipt",
+                    )
+                    if receipt.prior_authority.authority_id == base.base_authority_id:
+                        historical_matches.append(receipt.prior_authority)
+                if len(historical_matches) != 1:
+                    raise ChangeControlCorruptionError(
+                        "historical generation-zero authority has no unique activation origin"
+                    )
+                authority = historical_matches[0]
             if not (
                 command.target_id == base.base_authority_id
                 and command.target_sha256 == base.base_active_pointer_sha256
-                and authority is not None
-                and str(authority["authority_id"]) == command.target_id
-                and int(authority["authority_revision"])
-                == base.base_authority_revision
-                == 0
-                and int(authority["active_generation_number"]) == 0
-                and str(authority["active_pointer_sha256"])
-                == command.target_sha256
+                and authority.authority_id == command.target_id
+                and authority.authority_revision == base.base_authority_revision == 0
+                and authority.active_generation.generation_number == 0
+                and authority.active_pointer_sha256 == command.target_sha256
             ):
                 raise ChangeControlCorruptionError(
                     "operator authority link target cannot be reopened exactly"
                 )
+            origin = authority.origin_basis
+            if not isinstance(
+                origin, (GenerationZeroOriginBasis, WorkspaceGenerationZeroOriginBasis)
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator generation-zero link resolves to a non-bootstrap origin"
+                )
+            manifest_row = self.conn.execute(
+                "SELECT manifest_id,aggregate_id,generation_id,generation_number,"
+                "manifest_sha256,manifest_kind,created_inactive,source_request_id,payload_json "
+                "FROM change_control_generation_manifests WHERE generation_id=?",
+                (authority.active_generation.generation_id,),
+            ).fetchone()
+            manifest = origin.generation_zero_manifest
+            if manifest_row is None or not (
+                str(manifest_row["manifest_id"]) == manifest.manifest_id
+                and str(manifest_row["aggregate_id"]) == authority.aggregate_id
+                and str(manifest_row["generation_id"]) == authority.active_generation.generation_id
+                and int(manifest_row["generation_number"]) == 0
+                and str(manifest_row["manifest_sha256"]) == manifest.manifest_sha256
+                and str(manifest_row["manifest_kind"]) == "generation-zero"
+                and int(manifest_row["created_inactive"]) == 0
+                and manifest_row["source_request_id"] is None
+                and str(manifest_row["payload_json"]) == _canonical_model_json(manifest)
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator generation-zero link cannot reopen its immutable manifest"
+                )
+            if isinstance(origin, WorkspaceGenerationZeroOriginBasis):
+                intent = self.conn.execute(
+                    "SELECT intent_sha256 FROM change_control_workspace_bootstrap_intents "
+                    "WHERE bootstrap_id=?",
+                    (origin.bootstrap_id,),
+                ).fetchone()
+                inventory = self.conn.execute(
+                    "SELECT receipt_sha256 FROM change_control_workspace_inventory_receipts "
+                    "WHERE receipt_id=?",
+                    (origin.inventory_receipt_id,),
+                ).fetchone()
+                readiness = self.conn.execute(
+                    "SELECT receipt_sha256 FROM change_control_legacy_index_readiness_receipts "
+                    "WHERE receipt_id=?",
+                    (origin.index_receipt_id,),
+                ).fetchone()
+                if not (
+                    intent is not None
+                    and str(intent["intent_sha256"]) == origin.intent_sha256
+                    and inventory is not None
+                    and str(inventory["receipt_sha256"]) == origin.inventory_receipt_sha256
+                    and readiness is not None
+                    and str(readiness["receipt_sha256"]) == origin.index_receipt_sha256
+                ):
+                    raise ChangeControlCorruptionError(
+                        "operator generation-zero link cannot reopen workspace bootstrap origin"
+                    )
+            else:
+                bootstrap = origin.analysis_bootstrap
+                prechange = self.conn.execute(
+                    "SELECT aggregate_id,expected_revision,aggregate_sha256,committed_revision,changed "
+                    "FROM change_control_operations WHERE operation_id=?",
+                    (bootstrap.prechange_operation_id,),
+                ).fetchone()
+                analysis = self.conn.execute(
+                    "SELECT aggregate_id,expected_revision,aggregate_sha256,committed_revision,changed "
+                    "FROM change_control_operations WHERE operation_id=?",
+                    (bootstrap.analysis_operation_id,),
+                ).fetchone()
+                if not (
+                    prechange is not None
+                    and str(prechange["aggregate_id"]) == bootstrap.aggregate_id
+                    and prechange["expected_revision"] is None
+                    and str(prechange["aggregate_sha256"]) == bootstrap.prechange_aggregate_sha256
+                    and int(prechange["committed_revision"]) == bootstrap.prechange_revision
+                    and int(prechange["changed"]) == 1
+                    and analysis is not None
+                    and str(analysis["aggregate_id"]) == bootstrap.aggregate_id
+                    and int(analysis["expected_revision"]) == bootstrap.prechange_revision
+                    and str(analysis["aggregate_sha256"]) == bootstrap.analysis_aggregate_sha256
+                    and int(analysis["committed_revision"]) == bootstrap.analysis_revision
+                    and int(analysis["changed"]) == 1
+                ):
+                    raise ChangeControlCorruptionError(
+                        "operator generation-zero link cannot reopen seed bootstrap origin"
+                    )
         else:
             raise ManagedReviewAuthorityError(
                 "operator link kind has no authoritative target resolver"
             )
 
     def record_operator_run_link(
-        self, command: OperatorRunLinkCommand
+        self,
+        command: OperatorRunLinkCommand,
+        *,
+        resolver: OperatorRunAuthorityResolver | None = None,
     ) -> OperatorRunView:
         """Append or replay one typed navigation link without granting authority."""
 
@@ -1151,14 +2227,14 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlIdempotencyError(
                         "operator-link operation_id was reused for different inputs"
                     )
-                self._verify_operator_link_target(existing.command, run)
+                self._verify_operator_link_target(existing.command, run, resolver=resolver)
                 self._commit()
                 return run
             if any(item.command.kind == command.kind for item in run.links):
                 raise ChangeControlIdempotencyError(
                     "operator run link kind is already bound by another operation"
                 )
-            self._verify_operator_link_target(command, run)
+            self._verify_operator_link_target(command, run, resolver=resolver)
             record = OperatorRunLinkRecord(
                 command=command,
                 sequence=len(run.links),
@@ -1189,7 +2265,12 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             self._rollback_operation_error(exc)
             raise
 
-    def get_operator_run(self, run_id: str) -> OperatorRunView | None:
+    def get_operator_run(
+        self,
+        run_id: str,
+        *,
+        resolver: OperatorRunAuthorityResolver | None = None,
+    ) -> OperatorRunView | None:
         self._require_ready()
         self._begin("BEGIN")
         try:
@@ -1201,7 +2282,213 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             result = self._read_operator_run_in_transaction(run_id)
             if result is not None:
                 for link in result.links:
-                    self._verify_operator_link_target(link.command, result)
+                    self._verify_operator_link_target(link.command, result, resolver=resolver)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def _derive_operator_run_phase(
+        self,
+        run: OperatorRunView,
+        *,
+        resolver: OperatorRunAuthorityResolver | None,
+    ) -> OperatorRunPhase:
+        """Derive phase from reopened authority; links only locate candidate records."""
+
+        for link in run.links:
+            self._verify_operator_link_target(link.command, run, resolver=resolver)
+
+        managed_matches: list[tuple[str, ManagedRevisionReviewBundle]] = []
+        for row in self.conn.execute(
+            "SELECT request_id,bundle_id FROM change_control_managed_review_request_records "
+            "ORDER BY request_id"
+        ).fetchall():
+            bundle = self._read_bundle(str(row["bundle_id"]))
+            if bundle.run_binding.run_id == run.record.command.run_id:
+                managed_matches.append((str(row["request_id"]), bundle))
+        if len(managed_matches) > 1:
+            raise ChangeControlCorruptionError("operator run owns multiple managed review requests")
+        if managed_matches:
+            request_id, _bundle = managed_matches[0]
+            decision_row = self.conn.execute(
+                "SELECT decision_id FROM change_control_managed_review_decisions WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if decision_row is None:
+                return OperatorRunPhase.AWAITING_MANAGED_REVIEW
+            decision = self._read_decision_record(request_id)
+            activation_row = self.conn.execute(
+                "SELECT activation_id FROM change_control_managed_activation_intents "
+                "WHERE request_id=?",
+                (request_id,),
+            ).fetchone()
+            if activation_row is not None:
+                activation_id = str(activation_row["activation_id"])
+                receipt = self._read_activation_receipt(activation_id)
+                if receipt is not None:
+                    self._require_operator_activation_baseline(
+                        run_id=run.record.command.run_id,
+                        activation_id=receipt.activation_id,
+                    )
+                    return OperatorRunPhase.ACTIVATED
+            if decision.command.bundle_outcome == ManagedBundleOutcome.REJECTED:
+                return OperatorRunPhase.REJECTED_NO_OP
+            if decision.command.activation_plan is None:
+                return OperatorRunPhase.COMPLETED_NO_OP
+            return OperatorRunPhase.READY_TO_ACTIVATE
+
+        links = {item.command.kind: item.command for item in run.links}
+        temporal_decision_link = links.get(OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION)
+        if temporal_decision_link is not None:
+            temporal_decision = self._read_review_decision(temporal_decision_link.target_id)
+            if (
+                temporal_decision is None
+                or temporal_decision.decision_payload_sha256 != temporal_decision_link.target_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator temporal decision cannot be reopened exactly"
+                )
+            if all(
+                item.disposition == ReviewDisposition.REJECTED for item in temporal_decision.items
+            ):
+                return OperatorRunPhase.REJECTED_NO_OP
+            planning_link = links.get(OperatorRunLinkKind.REVISION_PLANNING)
+            if planning_link is not None:
+                if resolver is None:
+                    raise ManagedReviewAuthorityError(
+                        "operator planning target requires a repository authority resolver"
+                    )
+                planning = resolver.resolve_operator_revision_planning(
+                    run_id=run.record.command.run_id,
+                    target_id=planning_link.target_id,
+                    target_sha256=planning_link.target_sha256,
+                )
+                if (
+                    isinstance(planning, RevisionPlanningWorkload)
+                    and planning.eligibility.status == RevisionPlanningEligibilityStatus.NO_WORK
+                ):
+                    return OperatorRunPhase.COMPLETED_NO_OP
+            return OperatorRunPhase.AWAITING_MANAGED_REVIEW
+        if OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST in links:
+            return OperatorRunPhase.AWAITING_TEMPORAL_REVIEW
+        if OperatorRunLinkKind.TEMPORAL_PROPOSAL in links:
+            return OperatorRunPhase.AWAITING_TEMPORAL_REVIEW
+        return OperatorRunPhase.BOOTSTRAPPED
+
+    def _require_operator_activation_baseline(
+        self, *, run_id: str, activation_id: str
+    ) -> ActivationBaselineBindingV1:
+        binding = self._read_activation_baseline_binding_in_transaction(activation_id)
+        if binding is None or binding.run_id != run_id or binding.activation_id != activation_id:
+            raise ChangeControlCorruptionError(
+                "operator activation lacks its exact baseline binding"
+            )
+        return binding
+
+    def list_operator_runs(
+        self,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+        phase: OperatorRunPhase | None = None,
+        resolver: OperatorRunAuthorityResolver | None = None,
+    ) -> OperatorRunPage:
+        """Read-only deterministic keyset listing with optional derived-phase filtering."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("operator run list limit must be an integer from 1 to 100")
+        if phase is not None and not isinstance(phase, OperatorRunPhase):
+            phase = OperatorRunPhase(phase)
+        cursor_values = decode_operator_run_cursor(cursor) if cursor is not None else None
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            params: tuple[Any, ...]
+            where = ""
+            if cursor_values is None:
+                params = ()
+            else:
+                created_at, run_id = cursor_values
+                where = "WHERE (created_at < ? OR (created_at = ? AND run_id < ?)) "
+                params = (created_at, created_at, run_id)
+            rows = self.conn.execute(
+                "SELECT run_id FROM change_control_operator_runs "
+                + where
+                + "ORDER BY created_at DESC,run_id DESC",
+                params,
+            ).fetchall()
+            matched: list[OperatorRunListItem] = []
+            for row in rows:
+                run = self._read_operator_run_in_transaction(str(row["run_id"]))
+                if run is None:
+                    raise ChangeControlCorruptionError("listed operator run disappeared")
+                derived = self._derive_operator_run_phase(run, resolver=resolver)
+                if phase is None or derived == phase:
+                    matched.append(OperatorRunListItem(run=run, phase=derived))
+                    if len(matched) == limit + 1:
+                        break
+            items = tuple(matched[:limit])
+            next_cursor = None
+            if len(matched) > limit and items:
+                last = items[-1].run.record
+                next_cursor = encode_operator_run_cursor(last.created_at, last.command.run_id)
+            result = OperatorRunPage(items=items, next_cursor=next_cursor)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_incoming_admission(self, intent_id: str) -> IncomingAdmissionRecordV1 | None:
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_global_operation_ownership()
+            result = self._read_incoming_admission_in_transaction(intent_id)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_regression_suite_admission(
+        self, intent_id: str
+    ) -> RegressionSuiteAdmissionRecordV1 | None:
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_global_operation_ownership()
+            result = self._read_suite_admission_in_transaction(intent_id)
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def get_generation_zero_baseline(
+        self, receipt_id: str
+    ) -> GenerationZeroBaselineStoreRecordV1 | None:
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_global_operation_ownership()
+            result = self._read_baseline_in_transaction(receipt_id)
             self._commit()
             return result
         except BaseException as exc:
@@ -1224,17 +2511,17 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             )
         contract = next(iter(contracts.values()))
         try:
-            analyses = {
+            analyses: dict[str, ManagedAnalysisSetAuthority] = {
                 item.analysis_set_id: item
                 for item in models
-                if isinstance(item, ManagedAnalysisSetBinding)
+                if isinstance(item, (ManagedAnalysisSetBinding, GenericManagedAnalysisSetBindingV3))
             }
             if len(analyses) != 1:
                 raise ValueError("managed evidence must bind exactly one analysis set")
             analysis = next(iter(analyses.values()))
             impact_evidence = analysis.impact_evidence
-            if analysis.schema_version != 2 or impact_evidence is None:
-                raise ValueError("new managed review authority requires v2 impact evidence")
+            if analysis.schema_version not in (2, 3) or impact_evidence is None:
+                raise ValueError("new managed review authority requires exact impact evidence")
             resolved_impact = resolver.resolve_impact_analysis_evidence(impact_evidence)
             if resolved_impact != impact_evidence:
                 raise ValueError("resolved impact evidence differs from the managed analysis")
@@ -1255,14 +2542,22 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             governing_sources = {
                 item.adoption_id: item
                 for item in models
-                if isinstance(item, ManagedGoverningSourceAdoptionBinding)
+                if isinstance(
+                    item,
+                    (
+                        ManagedGoverningSourceAdoptionBinding,
+                        GenericGoverningSourceAdoptionBindingV2,
+                    ),
+                )
             }
             if governing_sources:
                 if len(governing_sources) != 1:
                     raise ValueError("managed evidence must bind exactly one governing source")
                 governing_source = next(iter(governing_sources.values()))
                 resolved_source = resolver.resolve_governing_source_adoption(governing_source)
-                if resolved_source != governing_source:
+                if type(resolved_source) is not type(governing_source) or (
+                    resolved_source != governing_source
+                ):
                     raise ValueError(
                         "resolved governing-source adoption differs from the run binding"
                     )
@@ -1547,9 +2842,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         """
 
         try:
-            capability_state = verify_workspace_bootstrap_capability(
-                verified_workspace_bootstrap
-            )
+            capability_state = verify_workspace_bootstrap_capability(verified_workspace_bootstrap)
             inventory_receipt, index_receipt = capability_state.require_complete()
             candidate = AuthorityRevisionBinding.create_workspace_generation_zero(
                 intent=capability_state.intent,
@@ -1567,9 +2860,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
 
         def verify_current_evidence() -> None:
             try:
-                current_state = verify_workspace_bootstrap_capability(
-                    verified_workspace_bootstrap
-                )
+                current_state = verify_workspace_bootstrap_capability(verified_workspace_bootstrap)
             except (TypeError, ValueError) as exc:
                 raise ManagedReviewAuthorityError(
                     "workspace generation-zero evidence cannot be freshly verified"
@@ -1778,9 +3069,7 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                     raise ChangeControlCorruptionError(
                         "generation-zero manifest is absent from authority chain"
                     )
-                manifest: (
-                    GenerationZeroManifestBinding | WorkspaceGenerationZeroManifestBinding
-                )
+                manifest: GenerationZeroManifestBinding | WorkspaceGenerationZeroManifestBinding
                 if isinstance(current.origin_basis, GenerationZeroOriginBasis):
                     manifest = _decode_model(
                         GenerationZeroManifestBinding,
@@ -1983,14 +3272,12 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             if (
                 result.command.decision_id != origin.decision_id
                 or result.record_sha256 != origin.decision_record_sha256
-                or result.command.expected_authority.authority_id
-                != origin.expected_authority_id
+                or result.command.expected_authority.authority_id != origin.expected_authority_id
                 or result.command.expected_authority.authority_revision
                 != origin.expected_authority_revision
                 or result.command.expected_authority.active_pointer_sha256
                 != origin.expected_active_pointer_sha256
-                or result.command.expected_authority.active_generation
-                != origin.prior_generation
+                or result.command.expected_authority.active_generation != origin.prior_generation
             ):
                 raise ChangeControlCorruptionError(
                     "active managed decision differs from authority origin"
@@ -3714,6 +5001,17 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 resolver=resolver,
                 authority_context=context,
             )
+            activation_bundle = decision.command.request_record.command.bundle
+            activation_run_id = activation_bundle.run_binding.run_id
+            operator_run = self._read_operator_run_in_transaction(activation_run_id)
+            if operator_run is not None:
+                baseline_binding = self._read_activation_baseline_binding_in_transaction(
+                    command.activation_id
+                )
+                if baseline_binding is None or baseline_binding.run_id != activation_run_id:
+                    raise ManagedGenerationActivationError(
+                        "synchronous activation requires its exact generation-zero baseline"
+                    )
             intent = self._read_activation_intent(command.activation_id)
             if intent.command != command:
                 raise ChangeControlIdempotencyError(
@@ -3873,5 +5171,6 @@ __all__ = [
     "ManagedRevisionEditDeferredError",
     "ManagedRevisionReviewStoreView",
     "ManagedRevisionStoreLifecycle",
+    "OperatorRunAuthorityResolver",
     "SqliteManagedChangeControlStore",
 ]

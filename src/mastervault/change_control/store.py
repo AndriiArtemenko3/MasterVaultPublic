@@ -72,7 +72,7 @@ except ImportError:  # pragma: no cover - exercised by the explicit platform gat
     _fcntl = None  # type: ignore[assignment]
 
 _STORE_IDENTITY = "mastervault.change-control.sqlite"
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _MODEL_SCHEMA_VERSION = 1
 _DEFAULT_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations" / "sqlite"
 _MIGRATION_RE = re.compile(r"^(?P<version>\d{3})_(?P<name>[a-z0-9_]+)\.sql$")
@@ -138,13 +138,24 @@ _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES = {
     "change_control_operator_runs",
     "change_control_operator_run_links",
 }
-_EXPECTED_TABLES = _V4_EXPECTED_TABLES | _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES
+_V5_EXPECTED_TABLES = _V4_EXPECTED_TABLES | _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES
+_SYNCHRONOUS_LIFECYCLE_TABLES = {
+    "change_control_incoming_admission_intents",
+    "change_control_incoming_admission_receipts",
+    "change_control_regression_suite_admission_intents",
+    "change_control_regression_suite_admission_receipts",
+    "change_control_generation_zero_baseline_receipts",
+    "change_control_generation_zero_baseline_cases",
+    "change_control_activation_baseline_bindings",
+}
+_EXPECTED_TABLES = _V5_EXPECTED_TABLES | _SYNCHRONOUS_LIFECYCLE_TABLES
 _EXPECTED_TABLES_BY_VERSION = {
     1: _V1_EXPECTED_TABLES,
     2: _V2_EXPECTED_TABLES,
     3: _V3_EXPECTED_TABLES,
     4: _V4_EXPECTED_TABLES,
-    5: _EXPECTED_TABLES,
+    5: _V5_EXPECTED_TABLES,
+    6: _EXPECTED_TABLES,
 }
 
 
@@ -226,11 +237,7 @@ def _stable_file_identity(
 
 def _require_secure_open_platform() -> None:
     required = ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "getuid", "pread")
-    if (
-        os.name != "posix"
-        or _fcntl is None
-        or any(not hasattr(os, name) for name in required)
-    ):
+    if os.name != "posix" or _fcntl is None or any(not hasattr(os, name) for name in required):
         raise ChangeControlPlatformUnsupportedError(
             "platform cannot pin and coordinate the change-control SQLite authority"
         )
@@ -281,9 +288,7 @@ class _PinnedChangeControlDatabase:
 
     def verify(self, *, unchanged: bool = False, require_nonempty: bool = False) -> os.stat_result:
         if self.file_fd < 0 or self.parent_fd < 0:
-            raise ChangeControlCorruptionError(
-                "change-control database descriptor guard is closed"
-            )
+            raise ChangeControlCorruptionError("change-control database descriptor guard is closed")
         try:
             opened = os.fstat(self.file_fd)
             current = os.stat(
@@ -442,9 +447,7 @@ def _pin_change_control_database(
         flags |= os.O_NOFOLLOW | os.O_NONBLOCK
         if not present:
             if not create or read_only:
-                raise ChangeControlCorruptionError(
-                    "change-control database path does not exist"
-                )
+                raise ChangeControlCorruptionError("change-control database path does not exist")
             try:
                 file_fd = os.open(
                     path.name,
@@ -767,9 +770,7 @@ class SqliteChangeControlStore:
             except BlockingIOError as exc:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise ChangeControlBusyError(
-                        "change-control SQLite authority is busy"
-                    ) from exc
+                    raise ChangeControlBusyError("change-control SQLite authority is busy") from exc
                 time.sleep(min(0.01, remaining))
             except OSError as exc:
                 raise ChangeControlPlatformUnsupportedError(
@@ -1516,6 +1517,30 @@ class SqliteChangeControlStore:
                 "operation_id",
                 "link_id",
             ),
+            (
+                "incoming-admission",
+                "change_control_incoming_admission_intents",
+                "operation_id",
+                "intent_id",
+            ),
+            (
+                "regression-suite-admission",
+                "change_control_regression_suite_admission_intents",
+                "operation_id",
+                "intent_id",
+            ),
+            (
+                "generation-zero-baseline",
+                "change_control_generation_zero_baseline_receipts",
+                "operation_id",
+                "receipt_id",
+            ),
+            (
+                "activation-baseline",
+                "change_control_activation_baseline_bindings",
+                "operation_id",
+                "binding_id",
+            ),
         )
         tables = self._user_tables()
         for owner, table, operation_column, identity_column in queries:
@@ -1570,13 +1595,30 @@ class SqliteChangeControlStore:
                 "FROM change_control_legacy_index_readiness_receipts"
             )
         if "change_control_operator_runs" in tables:
-            selects.append(
-                "SELECT operation_id, 'operator-run' FROM change_control_operator_runs"
-            )
+            selects.append("SELECT operation_id, 'operator-run' FROM change_control_operator_runs")
         if "change_control_operator_run_links" in tables:
             selects.append(
-                "SELECT operation_id, 'operator-run-link' "
-                "FROM change_control_operator_run_links"
+                "SELECT operation_id, 'operator-run-link' FROM change_control_operator_run_links"
+            )
+        if "change_control_incoming_admission_intents" in tables:
+            selects.append(
+                "SELECT operation_id, 'incoming-admission' "
+                "FROM change_control_incoming_admission_intents"
+            )
+        if "change_control_regression_suite_admission_intents" in tables:
+            selects.append(
+                "SELECT operation_id, 'regression-suite-admission' "
+                "FROM change_control_regression_suite_admission_intents"
+            )
+        if "change_control_generation_zero_baseline_receipts" in tables:
+            selects.append(
+                "SELECT operation_id, 'generation-zero-baseline' "
+                "FROM change_control_generation_zero_baseline_receipts"
+            )
+        if "change_control_activation_baseline_bindings" in tables:
+            selects.append(
+                "SELECT operation_id, 'activation-baseline' "
+                "FROM change_control_activation_baseline_bindings"
             )
         rows = self.conn.execute(
             "SELECT operation_id, owner FROM ("

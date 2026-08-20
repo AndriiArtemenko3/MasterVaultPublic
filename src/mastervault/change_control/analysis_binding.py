@@ -5,12 +5,18 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import date
-from typing import Any, Final, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mastervault.change_control.claim_scopes import CLAIM_SCOPE_POLICY_VERSION
-from mastervault.change_control.models import canonical_json_bytes, normalize_logical_key
+from mastervault.change_control.models import (
+    DocumentAuthority,
+    DocumentRole,
+    canonical_json_bytes,
+    normalize_logical_key,
+)
+from mastervault.models import Domain, SourceType
 
 ANALYSIS_AGGREGATE_ID: Final = "larkstead.sl2-returns"
 ALIGNMENT_ATTESTATION_ID: Final = "sl2-returns-v2-alignment-v1"
@@ -148,9 +154,160 @@ class AnalysisBootstrapBinding(BaseModel):
         return self
 
 
+class GenericAnalysisBootstrapBindingV2(BaseModel):
+    """Path-free authority binding for a generic workspace revision-1 to revision-2 CAS."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal[2] = 2
+    binding_kind: Literal["generic-analysis-bootstrap-v2"] = "generic-analysis-bootstrap-v2"
+    binding_id: str = Field(pattern=r"^generic-analysis-bootstrap-v2:[0-9a-f]{64}$")
+    binding_sha256: str = Field(pattern=_SHA256_PATTERN)
+    scope_policy_version: Literal["claim-scopes-v1"] = CLAIM_SCOPE_POLICY_VERSION
+    aggregate_id: str
+    workspace_bootstrap_id: str = Field(pattern=r"^workspacebootstrap:[0-9a-f]{64}$")
+    workspace_intent_sha256: str = Field(pattern=_SHA256_PATTERN)
+    workspace_inventory_id: str = Field(pattern=r"^workspaceinventory:[0-9a-f]{64}$")
+    workspace_inventory_sha256: str = Field(pattern=_SHA256_PATTERN)
+    workspace_inventory_receipt_id: str = Field(pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$")
+    workspace_inventory_receipt_sha256: str = Field(pattern=_SHA256_PATTERN)
+    workspace_readiness_receipt_id: str = Field(pattern=r"^legacyindexreceipt:[0-9a-f]{64}$")
+    workspace_readiness_receipt_sha256: str = Field(pattern=_SHA256_PATTERN)
+    prechange_revision: Literal[1] = 1
+    prechange_aggregate_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_event_id: str
+    incoming_event_identity: str = Field(pattern=_CONTENT_ID_PATTERN)
+    incoming_bundle_id: str = Field(pattern=r"^generic-bundle-v2:[0-9a-f]{64}$")
+    incoming_bundle_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_admission_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_metadata_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_source_receipt_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_projection_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_inference_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_claim_evidence_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_document_id: str
+    incoming_document_version_id: str = Field(pattern=_CONTENT_ID_PATTERN)
+    incoming_document_family: str
+    incoming_version_label: str
+    incoming_title_sha256: str = Field(pattern=_SHA256_PATTERN)
+    incoming_operator_intent_sha256: str = Field(pattern=_SHA256_PATTERN)
+    domain: Domain
+    source_type: SourceType
+    declared_effective_from: date
+    declared_effective_to: date | None = None
+    role: DocumentRole
+    authority: DocumentAuthority
+    analysis_as_of: date
+    analysis_revision: Literal[2] = 2
+    analysis_aggregate_sha256: str = Field(pattern=_SHA256_PATTERN)
+    changed_claim_revision_ids: tuple[str, ...] = Field(min_length=1, max_length=10)
+    analysis_operation_seed_sha256: str = Field(pattern=_SHA256_PATTERN)
+    analysis_operation_id: str
+    canonical_input_sha256: str = Field(pattern=_SHA256_PATTERN)
+
+    @field_validator(
+        "aggregate_id",
+        "incoming_event_id",
+        "incoming_document_id",
+        "incoming_document_family",
+        "incoming_version_label",
+    )
+    @classmethod
+    def _generic_logical_keys(cls, value: str) -> str:
+        normalized = normalize_logical_key(value)
+        if value != normalized:
+            raise ValueError(f"generic bootstrap key must already be normalized as {normalized!r}")
+        return value
+
+    @field_validator("analysis_operation_id")
+    @classmethod
+    def _generic_operation_id(cls, value: str) -> str:
+        if _OPERATION_ID_RE.fullmatch(value) is None:
+            raise ValueError("generic bootstrap operation ID uses an unsafe shape")
+        return value
+
+    @field_validator("changed_claim_revision_ids")
+    @classmethod
+    def _generic_changed_claims(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if values != tuple(sorted(set(values))) or any(
+            re.fullmatch(r"claimrev:[0-9a-f]{64}", value) is None for value in values
+        ):
+            raise ValueError("generic changed claims must be canonical unique claim revisions")
+        return values
+
+    def _canonical_input_payload(self) -> dict[str, Any]:
+        return self.model_dump(
+            mode="json",
+            exclude={
+                "analysis_aggregate_sha256",
+                "analysis_revision",
+                "binding_id",
+                "binding_sha256",
+                "canonical_input_sha256",
+                "changed_claim_revision_ids",
+                "prechange_revision",
+            },
+        )
+
+    def _operation_identity_payload(self) -> dict[str, Any]:
+        return {
+            "namespace": "mastervault.generic-analysis-operation.v2",
+            "analysis_operation_seed_sha256": self.analysis_operation_seed_sha256,
+            "aggregate_id": self.aggregate_id,
+            "workspace_bootstrap_id": self.workspace_bootstrap_id,
+            "workspace_intent_sha256": self.workspace_intent_sha256,
+            "workspace_inventory_id": self.workspace_inventory_id,
+            "workspace_inventory_sha256": self.workspace_inventory_sha256,
+            "workspace_inventory_receipt_id": self.workspace_inventory_receipt_id,
+            "workspace_inventory_receipt_sha256": self.workspace_inventory_receipt_sha256,
+            "workspace_readiness_receipt_id": self.workspace_readiness_receipt_id,
+            "workspace_readiness_receipt_sha256": self.workspace_readiness_receipt_sha256,
+            "prechange_aggregate_sha256": self.prechange_aggregate_sha256,
+            "incoming_bundle_id": self.incoming_bundle_id,
+            "incoming_bundle_sha256": self.incoming_bundle_sha256,
+            "incoming_admission_sha256": self.incoming_admission_sha256,
+            "incoming_metadata_sha256": self.incoming_metadata_sha256,
+            "incoming_source_receipt_sha256": self.incoming_source_receipt_sha256,
+            "incoming_projection_sha256": self.incoming_projection_sha256,
+            "incoming_inference_sha256": self.incoming_inference_sha256,
+            "incoming_claim_evidence_sha256": self.incoming_claim_evidence_sha256,
+        }
+
+    @model_validator(mode="after")
+    def _generic_identity(self) -> Self:
+        if self.declared_effective_to is not None and (
+            self.declared_effective_to <= self.declared_effective_from
+        ):
+            raise ValueError("generic effective interval is not increasing")
+        if self.analysis_as_of != self.declared_effective_from:
+            raise ValueError("generic analysis as-of must equal declared effective-from")
+        if self.incoming_bundle_id != f"generic-bundle-v2:{self.incoming_bundle_sha256}":
+            raise ValueError("generic bundle ID differs from its SHA")
+        expected_operation_id = f"generic-analysis-v2:{_sha256(self._operation_identity_payload())}"
+        if self.analysis_operation_id != expected_operation_id:
+            raise ValueError("generic analysis operation ID differs from exact input identity")
+        if self.canonical_input_sha256 != _sha256(self._canonical_input_payload()):
+            raise ValueError("generic bootstrap canonical input SHA differs from exact inputs")
+        digest = _sha256(self.model_dump(mode="json", exclude={"binding_id", "binding_sha256"}))
+        if (
+            self.binding_sha256 != digest
+            or self.binding_id != f"generic-analysis-bootstrap-v2:{digest}"
+        ):
+            raise ValueError("generic bootstrap binding identity differs from exact content")
+        return self
+
+
+AnalysisBootstrapAuthority = Annotated[
+    AnalysisBootstrapBinding | GenericAnalysisBootstrapBindingV2,
+    Field(discriminator="schema_version"),
+]
+
+
 __all__ = [
     "ANALYSIS_AGGREGATE_ID",
     "AnalysisBootstrapBinding",
     "AnalysisBootstrapError",
     "AnalysisBootstrapIntegrityError",
+    "AnalysisBootstrapAuthority",
+    "GenericAnalysisBootstrapBindingV2",
 ]

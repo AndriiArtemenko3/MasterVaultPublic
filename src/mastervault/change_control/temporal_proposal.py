@@ -13,10 +13,10 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
-from mastervault.change_control.bootstrap import (
-    VerifiedAnalysisBootstrapCapability,
-    verify_analysis_bootstrap_snapshot,
+from mastervault.change_control.analysis_binding import AnalysisBootstrapAuthority
+from mastervault.change_control.analysis_capability import (
+    VerifiedAnalysisAuthorityCapability,
+    verify_analysis_authority_snapshot,
 )
 from mastervault.change_control.classification import (
     ClaimPairClassification,
@@ -294,7 +294,7 @@ class TemporalProposalBinding(_StrictFrozenModel):
     algorithm_version: Literal["temporal-proposal-v1"] = "temporal-proposal-v1"
     binding_id: str = Field(pattern=_PROPOSAL_BINDING_ID)
     binding_sha256: str = Field(pattern=SHA256_PATTERN)
-    analysis_bootstrap: AnalysisBootstrapBinding
+    analysis_bootstrap: AnalysisBootstrapAuthority
     analysis_head: AggregateHeadBinding
     candidate_result_sha256: str = Field(pattern=SHA256_PATTERN)
     classification_result_id: str = Field(pattern=r"^classresult:[0-9a-f]{64}$")
@@ -524,7 +524,7 @@ def _validated_execution_refs(
 
 def build_temporal_proposal(
     *,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    verified_bootstrap: VerifiedAnalysisAuthorityCapability,
     snapshot: ChangeControlSnapshot,
     candidates: RelationshipCandidateSet,
     classification_results: ClassificationResultSet,
@@ -541,7 +541,7 @@ def build_temporal_proposal(
 ) -> TemporalProposal:
     """Build the exact inert revision-3 payload from verified revision-2 evidence."""
 
-    bootstrap = verify_analysis_bootstrap_snapshot(verified_bootstrap, snapshot)
+    bootstrap = verify_analysis_authority_snapshot(verified_bootstrap, snapshot)
     validated_classifications = validate_classification_results(
         snapshot, candidates=candidates, results=classification_results
     )

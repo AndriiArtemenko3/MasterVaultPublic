@@ -19,9 +19,9 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mastervault.change_control.bootstrap import (
-    VerifiedAnalysisBootstrapCapability,
-    verify_analysis_bootstrap_snapshot,
+from mastervault.change_control.analysis_capability import (
+    VerifiedAnalysisAuthorityCapability,
+    verify_analysis_authority_snapshot,
 )
 from mastervault.change_control.classification import (
     ClassificationResultIndex,
@@ -339,7 +339,7 @@ class TemporalAnalysisEvidence(_StrictFrozenModel):
 
 def build_temporal_analysis_evidence(
     *,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    verified_bootstrap: VerifiedAnalysisAuthorityCapability,
     snapshot: ChangeControlSnapshot,
     candidates: RelationshipCandidateSet,
     classification_results: ClassificationResultSet,
@@ -351,7 +351,7 @@ def build_temporal_analysis_evidence(
 ) -> TemporalAnalysisEvidence:
     """Build one bounded exact reproduction envelope from already produced evidence."""
 
-    verify_analysis_bootstrap_snapshot(verified_bootstrap, snapshot)
+    verify_analysis_authority_snapshot(verified_bootstrap, snapshot)
     classifications = validate_classification_results(
         snapshot,
         candidates=candidates,
@@ -450,7 +450,7 @@ def _dependency_outputs(
 def verify_temporal_analysis_evidence(
     evidence: TemporalAnalysisEvidence,
     *,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    verified_bootstrap: VerifiedAnalysisAuthorityCapability,
     inventory_capability: VerifiedSourceNoteInventoryCapability,
     classification_outcomes: tuple[RecordedInferenceOutcome, ...],
     dependency_outcomes: tuple[RecordedInferenceOutcome, ...],
@@ -465,7 +465,7 @@ def verify_temporal_analysis_evidence(
         revision=reopened.analysis_head.revision,
         aggregate_sha256=reopened.analysis_head.aggregate_sha256,
     )
-    verify_analysis_bootstrap_snapshot(verified_bootstrap, snapshot)
+    verify_analysis_authority_snapshot(verified_bootstrap, snapshot)
     fresh_inventory = SourceNoteInventory.model_validate(
         inventory_capability.verify(snapshot=snapshot).model_dump(mode="json")
     )

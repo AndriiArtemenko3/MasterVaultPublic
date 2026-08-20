@@ -23,6 +23,7 @@ from mastervault.change_control.inference_repository import (
 from mastervault.change_control.managed_review import (
     MAX_MANAGED_ARTIFACT_BYTES_V1,
     ClaimReconciliationAction,
+    GoverningSourceAdoptionAuthority,
     GroundedArtifactCitation,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -409,7 +410,7 @@ class RepositoryBackedManagedReviewResolver:
         )
 
     def resolve_governing_source_adoption(
-        self, binding: ManagedGoverningSourceAdoptionBinding
+        self, binding: GoverningSourceAdoptionAuthority
     ) -> ManagedGoverningSourceAdoptionBinding:
         if type(binding) is not ManagedGoverningSourceAdoptionBinding:
             raise TypeError("governing-source resolver requires the exact binding type")
@@ -425,10 +426,12 @@ class RepositoryBackedManagedReviewResolver:
         )
 
     def resolve_reviewed_generation_source(
-        self, binding: ManagedGoverningSourceAdoptionBinding
+        self, binding: GoverningSourceAdoptionAuthority
     ) -> ResolvedReviewedGenerationSource:
         """Reopen the exact complete rev4 inventory behind one adoption."""
 
+        if type(binding) is not ManagedGoverningSourceAdoptionBinding:
+            raise TypeError("sealed generation-source resolver requires the exact V1 binding")
         reopened = self.resolve_governing_source_adoption(binding)
         configured = self._governing_sources.get(binding.adoption_id)
         if configured is None or reopened != configured.adoption:
