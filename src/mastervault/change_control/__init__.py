@@ -442,6 +442,21 @@ if TYPE_CHECKING:
     from mastervault.change_control.managed_workflow import (
         managed_review_workflow_id as managed_review_workflow_id,
     )
+    from mastervault.change_control.query_generation import (
+        QueryGenerationKind as QueryGenerationKind,
+    )
+    from mastervault.change_control.query_generation import (
+        QueryGenerationMetadataV1 as QueryGenerationMetadataV1,
+    )
+    from mastervault.change_control.query_generation import (
+        QueryGenerationSelectionV1 as QueryGenerationSelectionV1,
+    )
+    from mastervault.change_control.query_generation import (
+        QueryGenerationSelector as QueryGenerationSelector,
+    )
+    from mastervault.change_control.query_generation import (
+        ResolvedQueryGeneration as ResolvedQueryGeneration,
+    )
     from mastervault.change_control.recorded_inference import (
         MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1,
         MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1,
@@ -634,6 +649,16 @@ _LAZY_EXPORTS = {
             "ChangeControlApplicationReviewRequiredError",
             "ChangeControlApplicationUnsupportedOperationError",
             "ChangeControlApplicationUsageError",
+        )
+    },
+    **{
+        name: ("mastervault.change_control.query_generation", name)
+        for name in (
+            "QueryGenerationKind",
+            "QueryGenerationMetadataV1",
+            "QueryGenerationSelectionV1",
+            "QueryGenerationSelector",
+            "ResolvedQueryGeneration",
         )
     },
     **{
@@ -1020,6 +1045,11 @@ __all__ = [
     "ChangeControlApplicationReviewRequiredError",
     "ChangeControlApplicationUnsupportedOperationError",
     "ChangeControlApplicationUsageError",
+    "QueryGenerationKind",
+    "QueryGenerationMetadataV1",
+    "QueryGenerationSelectionV1",
+    "QueryGenerationSelector",
+    "ResolvedQueryGeneration",
     "ANALYSIS_AGGREGATE_ID",
     "CLAIM_SCOPE_POLICY_VERSION",
     "MAX_CLASSIFICATION_LEDGER_ENTRY_BYTES_V1",

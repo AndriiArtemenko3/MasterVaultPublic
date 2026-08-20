@@ -30,7 +30,11 @@ from typing import TypeVar
 from pydantic import BaseModel, Field
 
 from mastervault.config import Settings
-from mastervault.evidence import evidence_by_claim, validate_structural_hits
+from mastervault.evidence import (
+    EvidenceWorkspaceMap,
+    evidence_by_claim,
+    validate_structural_hits,
+)
 from mastervault.models import ChannelRank, Confidence, Domain, Hit, RecordType
 from mastervault.providers import Candidate, EmbeddingProvider, Reranker
 from mastervault.retrieval.channels import (
@@ -95,7 +99,11 @@ def _doc_hit(doc_id: str, backend: StorageBackend) -> Hit | None:
 
 
 def _hydrate(
-    fused_ids: list[str], backend: StorageBackend, workspace: Path | str
+    fused_ids: list[str],
+    backend: StorageBackend,
+    workspace: Path | str,
+    *,
+    evidence_workspaces: EvidenceWorkspaceMap | None = None,
 ) -> dict[str, Hit]:
     """Hydrate fused ids into Hit models. Ids that no longer resolve are dropped."""
     claim_ids = [i.removeprefix("claim:") for i in fused_ids if i.startswith("claim:")]
@@ -107,7 +115,12 @@ def _hydrate(
 
     hits: dict[str, Hit] = {}
     hydrated_claims = backend.get_claims(claim_ids)
-    evidence = evidence_by_claim(hydrated_claims, backend, workspace)
+    evidence = evidence_by_claim(
+        hydrated_claims,
+        backend,
+        workspace,
+        evidence_workspaces=evidence_workspaces,
+    )
     for claim in hydrated_claims:
         hits[f"claim:{claim.claim_id}"] = Hit(
             record_id=f"claim:{claim.claim_id}",
@@ -130,7 +143,12 @@ def _hydrate(
         )
     structural_get = getattr(backend, "get_structural_records", None)
     structural_rows = list(structural_get(structural_ids)) if callable(structural_get) else []
-    validate_structural_hits(structural_rows, backend, workspace)
+    validate_structural_hits(
+        structural_rows,
+        backend,
+        workspace,
+        evidence_workspaces=evidence_workspaces,
+    )
     for row in structural_rows:
         hits[row.record_id] = Hit(
             record_id=row.record_id,
@@ -173,6 +191,7 @@ def hybrid_search(
     rerank: bool = False,
     channels: Iterable[str] | None = None,
     use_alias: bool = True,
+    evidence_workspaces: EvidenceWorkspaceMap | None = None,
 ) -> SearchResult:
     """`channels` and `use_alias` are ablation knobs for the retrieval eval
     harness (`mastervault.evals`): `channels` restricts which fused lists get
@@ -180,6 +199,10 @@ def hybrid_search(
     disables the alias front-door (no
     `wiki_card`, no alias-seeded graph entry). Both default to the full
     pipeline, so existing callers are unaffected.
+
+    ``evidence_workspaces`` is an authoritative document-rel-path mapping when
+    provided. Missing source paths fail closed instead of falling back to the
+    legacy ``settings.paths.workspace`` root.
     """
     timings: dict[str, float] = {}
     active = set(CHANNELS) if channels is None else set(channels)
@@ -256,7 +279,12 @@ def hybrid_search(
         name: {record_id: rank for rank, record_id in enumerate(ids, start=1)}
         for name, ids in channel_lists.items()
     }
-    hydrated = _hydrate(fused_ids, backend, settings.paths.workspace)
+    hydrated = _hydrate(
+        fused_ids,
+        backend,
+        settings.paths.workspace,
+        evidence_workspaces=evidence_workspaces,
+    )
     hits: list[Hit] = []
     for record_id in fused_ids:
         hit = hydrated.get(record_id)

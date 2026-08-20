@@ -28,8 +28,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   SourceNotes, claim reconciliation, paths, and hashes locally, commits all
   target outcomes as one existing evidence batch, and writes only create-only,
   manifest-gated inert staging. That evidence now feeds the SQLite-authoritative
-  managed-review and first-successor activation additions below; public CLI
-  integration and LangGraph expansion remain deferred.
+  managed-review and first-successor activation additions below; public
+  change-control CLI integration and LangGraph expansion remain deferred.
 - SQLite-authoritative managed-review admission and decisions over the complete
   revision-planning and staging evidence set. Every authority boundary freshly
   reopens and reproduces the exact evidence, while managed `EDIT` execution
@@ -67,8 +67,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   usage, review-required, conflict-or-stale-authority, integrity, and
   unsupported error categories. Linked artifacts still require verification
   at their owning authority boundary. Later operations must extend this same
-  façade. This does not add public CLI/operator commands or ordinary
-  `search`/`ask` generation selection.
+  façade. That bootstrap slice did not itself add public change-control
+  commands or generation-aware ordinary queries; the read-only follow-on below
+  now supplies the latter.
+- Versioned, read-only query-generation resolution for ordinary `search`,
+  `claims`, `wiki`, and `ask`. Their shared `--generation` selector supports
+  `auto`, exact generation zero (`legacy`), required active authority
+  (`active`), and a bounded exact `mgeneration:<sha256>` read. Generic
+  generation zero reopens the exact attested legacy SQLite index; generation
+  one reuses the immutable managed serving boundary and freshly reconstructs
+  its resolver from durable evidence. Human output names the serving
+  generation, while JSON search/ask output includes stable path-free schema-v1
+  authority/index/embedding metadata. Configured missing, corrupt, stale, or
+  mismatched authority fails closed without legacy fallback. No managed state
+  or locators preserves the existing unmanaged v0.2 SQLite/PostgreSQL `auto`
+  path. Managed selection remains SQLite-only, and managed `ask` creates no
+  run directory, event log, round artifacts, summary, authority, or navigation
+  writes; unmanaged ask keeps its existing run persistence. This slice spans
+  two coupled trust seams that must be reviewed together: resolved-query
+  lifetime/authority coordination, and the complete-corpus index substrate
+  required for a workspace-origin successor to preserve every unselected
+  source, wiki, decision, and strategy note while replacing managed paths.
 - Descriptor-pinned bootstrap and authority-database handoffs. Workspace
   evidence must be owner-controlled, single-link and non-writable by group or
   others; the exact workspace and legacy-index descriptors remain live through
@@ -128,12 +147,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and the 352 processed / 20 historical-no-output split.
 
 The declared package version remains `0.2.0`. Everything in this Unreleased
-section is v0.3 work in progress: public application/operator commands,
-ordinary `search`/`ask` generation selection, targeted post-change regressions,
-final JSON/Markdown audit reports, managed `EDIT` execution, PostgreSQL
-managed-generation parity, the keyless change-control demo, and the v0.3
-release remain deferred. This entry does not claim a v0.3 release, tag, package
-publication, or deployment.
+section is v0.3 work in progress: public change-control/operator commands,
+targeted post-change regressions, final JSON/Markdown audit reports, managed
+`EDIT` execution, PostgreSQL managed-generation parity, the keyless
+change-control demo, and the v0.3 release remain deferred. This entry does not
+claim a v0.3 release, tag, package publication, or deployment.
 
 ## [0.2.0] - 2026-07-22
 

@@ -180,6 +180,29 @@ source identity when available) to that item in `sources`. A source without
 grounded evidence keeps the legacy two-field `{record_id, rel_path}` projection
 exactly.
 
+### Generation-aware query boundary
+
+The ordinary `search`, `claims`, `wiki`, and `ask` commands resolve a backend
+through `ChangeControlApplication.resolve_query_generation()` rather than
+opening it directly. With no managed state or locators, default `auto` retains
+the v0.2 `get_backend(settings)` behavior. Once SQLite authority exists, the
+resolver freshly opens generation-zero bootstrap/inventory/index evidence or
+the active generation-one decision/publication/index evidence, holds their
+descriptor and authority guards for the backend lifetime, and verifies them
+again before output. Missing or mismatched active evidence never falls back to
+the legacy index.
+
+`--generation` accepts `auto`, `legacy`, `active`, or an exact lower-case
+`mgeneration:<sha256>` in the bounded generation-zero/generation-one chain.
+The result's schema-v1 generation metadata binds authority revision, manifest,
+logical and physical index identities, schema, and embedding identity without
+exposing absolute runtime paths. Managed resolution is SQLite-only; unmanaged
+PostgreSQL remains compatible. Managed `ask` passes `persist_run=False` and an
+explicit evidence-workspace map into the same round loop, so it writes no
+MasterVault run artifacts while preserving citation hydration across mixed
+canonical and immutable generation repositories. See
+[QUERY_GENERATIONS.md](QUERY_GENERATIONS.md) for public configuration.
+
 ## Review-queue lifecycle
 
 `ReviewQueue` (`src/mastervault/review/queue.py`) is file-backed: one

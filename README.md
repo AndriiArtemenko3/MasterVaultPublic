@@ -48,12 +48,15 @@ approval step.
 The internal SQLite-only change-control path can now classify impact, plan and
 review revisions, publish approved downstream replacements into an immutable
 first successor generation, build its isolated serving index, atomically
-activate it, and reopen that exact index fail-closed. It deliberately supports
-only one managed successor from generation zero. Public application/operator
-commands, ordinary `search`/`ask` generation selection, targeted post-change
-regressions, final JSON/Markdown audit reports, managed `EDIT` execution,
-PostgreSQL managed-generation parity, the keyless change-control demo, and the
-v0.3 release remain under development.
+activate it, and reopen that exact index fail-closed. Ordinary `search`,
+`claims`, `wiki`, and `ask` reads now resolve either a generic-workspace
+authority's attested generation-zero index or an authority's immutable active
+generation-one index through the public `--generation` selector. Sealed-seed
+authority exposes generation one only. The change-control write path deliberately
+supports only one managed successor from generation zero. Public change-control/operator
+commands, targeted post-change regressions, final JSON/Markdown audit reports,
+managed `EDIT` execution, PostgreSQL managed-generation parity, the keyless
+change-control demo, and the v0.3 release remain under development.
 
 The v0.3 document spine replaces lossy PDF flattening with auditable evidence
 for clean, digitally generated PDFs. MasterVault snapshots the exact source
@@ -147,11 +150,52 @@ successor Markdown SourceNote, claims, paths, and hashes, then records one
 all-target inference batch and a create-only, manifest-gated inert staging set.
 That admitted staging can now proceed through SQLite-authoritative managed
 review and, for approved outcomes, immutable publication, isolated exact
-indexing, and atomic activation of the first successor generation. These remain
-internal library boundaries: no public application/CLI, ordinary `search`/`ask`
-integration, targeted post-activation regression/reporting, managed `EDIT`
-execution, second managed successor, or PostgreSQL managed activation exists
-yet. The existing LangGraph orchestration remains deliberately unchanged.
+indexing, and atomic activation of the first successor generation. Ordinary
+query commands now consume that authority through a read-only resolver; the
+change-control bootstrap/review/activation workflow itself remains an internal
+library boundary. Targeted post-activation regression/reporting, managed
+`EDIT` execution, a second managed successor, and PostgreSQL managed activation
+do not exist yet. The existing LangGraph orchestration remains deliberately
+unchanged.
+
+### Generation-aware reads
+
+`search`, `claims`, `wiki`, and `ask` accept `--generation auto|legacy|active`
+or an exact `mgeneration:<64-lowercase-hex-sha256>` identity. `auto` is the
+default. When no managed authority or managed-query configuration exists, it
+preserves the v0.2 backend path exactly, including unmanaged PostgreSQL. Once a
+managed authority store exists, `auto` and `active` serve its active authority,
+while generic-workspace authority also exposes its attested generation-zero
+index through `legacy` or that exact generation ID. Sealed-seed authority exposes
+only its active generation-one read. An explicit selector
+without initialized authority is a usage error; configured, missing, corrupt,
+or mismatched managed evidence is an integrity failure, never a silent fallback
+to the unmanaged or legacy index.
+
+```bash
+uv run mvault search "refund window" --generation active --json
+uv run mvault ask "How long is the return window?" --generation legacy --json
+uv run mvault search "refund window" \
+  --generation "mgeneration:<64-lowercase-hex-sha256>"
+```
+
+Human output names the knowledge generation that served. The JSON `search` and
+`ask` envelopes include a versioned `generation` object with the selector,
+generation kind/ID, active authority revision, manifest and logical-index
+fingerprints, exact index SHA/size, storage schema, and embedding identity.
+That metadata is intentionally path-free: runtime workspace, source, evidence,
+canonical, and generation-repository locations are never returned as authority
+identities.
+
+Managed generation resolution is SQLite-only. It opens the authority and
+selected index read-only/query-only, keeps their evidence guards alive for the
+query, and rechecks active authority before returning output. Managed `ask`
+also runs without creating a `runs/` directory, event log, round artifact, or
+summary; unmanaged v0.2 `ask` retains its existing persisted run behavior.
+Configuration is deliberately opt-in because supplying any managed locator is
+a fail-closed assertion that managed authority should exist. See
+[Generation-aware query configuration](docs/QUERY_GENERATIONS.md) for the
+selector contract and complete runtime-locator examples.
 
 ## Quickstart
 
@@ -448,10 +492,10 @@ Three caveats, stated plainly rather than buried in a footnote:
 | `uv run mvault status` | Backend stats and active configuration |
 | `uv run mvault reset` | Wipe the index and rebuild it with a full sync |
 | `uv run mvault drop` | Delete the index entirely |
-| `uv run mvault search <query>` | Hybrid search across claims, chunks, and wiki entries |
-| `uv run mvault claims <query>` | Lexical search over the claims layer only |
-| `uv run mvault wiki [show <slug>]` | List wiki entries, or render one |
-| `uv run mvault ask <question>` | Agentic multi-round retrieval, judged, grounded, cited |
+| `uv run mvault search <query> [--generation <selector>]` | Hybrid search across claims, chunks, and wiki entries from the selected generation |
+| `uv run mvault claims <query> [--generation <selector>]` | Lexical search over the selected generation's claims layer |
+| `uv run mvault wiki [show <slug>] [--generation <selector>]` | List or render wiki entries from the selected generation |
+| `uv run mvault ask <question> [--generation <selector>]` | Agentic multi-round retrieval, judged, grounded, cited against one selected generation |
 | `uv run mvault ingest <path> --domain <d>` | Raw files → source notes → indexed → concept-routed |
 | `uv run mvault ingest <path> --domain <d> --pdf-parser docling` | Opt into the verified offline layout/table parser for PDFs |
 | `uv run mvault document doctor --parser <pypdf\|docling>` | Read-only parser/package/artifact readiness check |
@@ -548,6 +592,7 @@ Start here, then follow the code map into any subsystem. Every source package
 also carries its own `README.md`.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the three-layer data model, retrieval math, review-queue lifecycle, storage schema, provider seams
+- [docs/QUERY_GENERATIONS.md](docs/QUERY_GENERATIONS.md) — generation selectors, result metadata, fail-closed behavior, and runtime-locator examples
 - [docs/DATASET.md](docs/DATASET.md) — how Larkstead was built, the storylines, the QC gates
 - [CONTRIBUTING.md](CONTRIBUTING.md) — dev setup, how to add a raw doc, golden-query rules
 - [CHANGELOG.md](CHANGELOG.md) — release notes
@@ -556,6 +601,7 @@ also carries its own `README.md`.
 **Code map** (each links to a folder README):
 
 - [src/mastervault](src/mastervault) — package overview and subsystem map
+  - [change_control](src/mastervault/change_control) — SQLite authority, immutable managed generations, and generation-aware read resolution
   - [pipelines](src/mastervault/pipelines) — the `ingest`, `ask`, and `lint` orchestrators
   - [ingest](src/mastervault/ingest) · [retrieval](src/mastervault/retrieval) · [review](src/mastervault/review) — the three subsystems that make it more than vector search
   - [storage](src/mastervault/storage) · [sync](src/mastervault/sync) · [providers](src/mastervault/providers) — backends and swappable model seams

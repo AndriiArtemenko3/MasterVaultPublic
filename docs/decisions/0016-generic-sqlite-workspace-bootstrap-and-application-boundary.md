@@ -3,6 +3,11 @@
 - Status: accepted for the v0.3 Milestone 4 SQLite application slice
 - Date: 2026-08-12
 
+Follow-on status: the generation-aware read work adds ordinary
+`search`/`claims`/`wiki`/`ask` resolution through this façade. The non-goal
+below records the boundary of the original ADR 0016 bootstrap slice, not the
+current public read surface.
+
 ## Context
 
 ADR 0015 provides a restart-safe first managed successor once an exact
@@ -219,11 +224,12 @@ unsupported-operation category before authority is created.
 
 ## Explicit non-goals
 
-This slice does not add public change-control or operator CLI commands, connect
-ordinary `search` or `ask` to generation-aware serving, execute or score
-post-activation regression queries, emit final JSON/Markdown audit reports,
-expand LangGraph, execute managed `EDIT` decisions, add PostgreSQL managed
-bootstrap or generation parity, support multiple operator change events,
-implement retention/cleanup, add OCR/UI/background workers, change the public
-README or package version, add the keyless public demo, release, tag, publish,
-or deploy v0.3.
+The ADR 0016 bootstrap slice did not add public change-control or operator CLI
+commands or connect ordinary queries to generation-aware serving; the latter
+arrived in the read-only follow-on described above. It still does not execute
+or score post-activation regression queries, emit final JSON/Markdown audit
+reports, expand LangGraph, execute managed `EDIT` decisions, add PostgreSQL
+managed bootstrap or generation parity, support multiple operator change
+events, implement retention/cleanup, add OCR/UI/background workers, change the
+package version, add the keyless public demo, release, tag, publish, or deploy
+v0.3.

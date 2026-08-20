@@ -55,6 +55,31 @@ def test_evidence_verifier_is_guard_minted_live_and_nonserializable() -> None:
         verifier.verify()
 
 
+def test_evidence_verifier_rejects_in_place_verify_shadowing() -> None:
+    guard = _EvidenceGuard()
+    verifier = workspace_bootstrap_module._mint_verified_workspace_bootstrap_evidence_verifier(
+        guard,
+        resolved_inventory=object(),
+        resolved_aggregate=object(),
+        legacy_attestation=object(),
+    )
+
+    object.__setattr__(guard, "verify", lambda: None)
+
+    with pytest.raises(TypeError, match="guard graph was substituted"):
+        verifier.verify()
+
+    object.__setattr__(
+        verifier,
+        "_guard_binding",
+        workspace_bootstrap_module.canonical_json_bytes(
+            workspace_bootstrap_module._live_guard_binding(guard)
+        ),
+    )
+    with pytest.raises(TypeError, match="guard graph was substituted"):
+        verifier.verify()
+
+
 def test_public_evidence_verifier_rejects_arbitrary_guard_owners() -> None:
     with pytest.raises(TypeError, match="exact workspace and legacy-index guards"):
         workspace_bootstrap_module.create_workspace_bootstrap_evidence_verifier(

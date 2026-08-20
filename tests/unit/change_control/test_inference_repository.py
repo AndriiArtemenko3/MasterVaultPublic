@@ -59,6 +59,23 @@ def _artifact_path(
     return repository.root / outcome.artifacts[0].artifact.path
 
 
+def _repository_snapshot(
+    root: Path,
+) -> dict[str, tuple[int, int, int, int, int, bytes | None]]:
+    snapshot: dict[str, tuple[int, int, int, int, int, bytes | None]] = {}
+    for path in sorted(root.rglob("*")):
+        info = path.stat()
+        snapshot[str(path.relative_to(root))] = (
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+            path.read_bytes() if path.is_file() else None,
+        )
+    return snapshot
+
+
 def _replay(
     *,
     repository: FilesystemInferenceEvidenceRepository,
@@ -552,6 +569,138 @@ def test_fresh_repository_handle_reopens_and_remints_exact_batch_authority(
     assert outcomes == (live,)
     assert capability.verify(repository=fresh, outcomes=outcomes) == outcomes
     assert capability.repository_id == evidence_repository.repository_id
+
+
+def test_read_only_repository_reopens_without_any_write_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    live: RecordedInferenceOutcome,
+) -> None:
+    persisted = evidence_repository.persist_outcome(live)
+    temporal_content = canonical_json_bytes({"schema_version": 1, "kind": "read-only-proof"})
+    temporal_sha256 = hashlib.sha256(temporal_content).hexdigest()
+    temporal_id = f"temporal-analysis:{temporal_sha256}"
+    evidence_repository.persist_temporal_analysis_manifest(
+        manifest_id=temporal_id,
+        manifest_sha256=temporal_sha256,
+        content=temporal_content,
+    )
+    before = _repository_snapshot(evidence_repository.root)
+    repository = FilesystemInferenceEvidenceRepository(
+        evidence_repository.root,
+        create=False,
+        read_only=True,
+    )
+    real_open = os.open
+
+    def read_only_open(
+        path: str | bytes | Path,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        write_flags = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+        if flags & write_flags:
+            pytest.fail("read-only repository attempted a write-capable open")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    def unexpected_fsync(_fd: int) -> None:
+        pytest.fail("read-only repository attempted durability synchronization")
+
+    monkeypatch.setattr(inference_repository_module.os, "open", read_only_open)
+    monkeypatch.setattr(inference_repository_module.os, "fsync", unexpected_fsync)
+
+    outcomes, capability = repository.resolve_verified_batch(
+        batch_id=persisted.batch_id,
+        batch_sha256=persisted.batch_sha256,
+    )
+
+    assert repository.read_only is True
+    assert outcomes == (live,)
+    assert capability.verify(repository=repository, outcomes=outcomes) == outcomes
+    assert (
+        repository.resolve_replay_evidence(
+            receipt_artifact=live.execution.receipt_artifact,
+        )
+        == live
+    )
+    assert repository.open_artifact(live.artifacts[0].artifact) == (
+        live.artifacts[0].content_utf8.encode("utf-8")
+    )
+    assert repository.resolve_temporal_analysis_manifest(
+        manifest_id=temporal_id,
+        manifest_sha256=temporal_sha256,
+    ) == temporal_content
+    with pytest.raises(InferenceEvidenceRepositoryError, match="read-only"):
+        repository.persist_outcome(live)
+    with pytest.raises(InferenceEvidenceRepositoryError, match="read-only"):
+        repository.persist_batch((live,))
+    with pytest.raises(InferenceEvidenceRepositoryError, match="read-only"):
+        repository.persist_temporal_analysis_manifest(
+            manifest_id=temporal_id,
+            manifest_sha256=temporal_sha256,
+            content=temporal_content,
+        )
+    assert _repository_snapshot(evidence_repository.root) == before
+
+
+def test_noncreating_and_read_only_construction_leave_missing_root_absent(
+    tmp_path: Path,
+) -> None:
+    noncreating_root = tmp_path / "noncreating"
+    with pytest.raises(InferenceEvidenceRepositoryError):
+        FilesystemInferenceEvidenceRepository(noncreating_root, create=False)
+    assert not noncreating_root.exists()
+
+    read_only_root = tmp_path / "read-only"
+    with pytest.raises(InferenceEvidenceRepositoryError):
+        FilesystemInferenceEvidenceRepository(read_only_root, read_only=True)
+    assert not read_only_root.exists()
+
+
+def test_read_only_resolution_requires_an_existing_repository_lock(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "lockless"
+    FilesystemInferenceEvidenceRepository(root)
+    before = _repository_snapshot(root)
+    repository = FilesystemInferenceEvidenceRepository(root, read_only=True)
+    digest = "0" * 64
+
+    with pytest.raises(InferenceEvidenceRepositoryError, match="lock"):
+        repository.resolve_batch(
+            batch_id=f"inference-batch:{digest}",
+            batch_sha256=digest,
+        )
+
+    assert _repository_snapshot(root) == before
+
+
+def test_read_only_replay_resolution_preserves_pending_residue(
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    live: RecordedInferenceOutcome,
+) -> None:
+    evidence_repository.persist_outcome(live)
+    receipt_dir = (
+        evidence_repository.root
+        / "inference/evidence/receipts"
+        / live.execution.receipt_artifact.sha256
+    )
+    pending = receipt_dir / f"pending-{'f' * 32}"
+    pending.write_bytes(b"interrupted-read-only-write")
+    repository = FilesystemInferenceEvidenceRepository(
+        evidence_repository.root,
+        create=False,
+        read_only=True,
+    )
+
+    with pytest.raises(InferenceEvidenceResolutionError, match="failed closed verification"):
+        repository.resolve_replay_evidence(
+            receipt_artifact=live.execution.receipt_artifact,
+        )
+
+    assert pending.read_bytes() == b"interrupted-read-only-write"
 
 
 def test_fresh_batch_remint_synchronizes_commit_marker_and_parent(

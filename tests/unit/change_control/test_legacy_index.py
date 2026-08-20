@@ -6,10 +6,12 @@ import ast
 import hashlib
 import os
 import shutil
+import sqlite3
 from pathlib import Path
 
 import pytest
 
+from mastervault.change_control import legacy_index as legacy_index_module
 from mastervault.change_control.legacy_index import (
     LegacyIndexAttestation,
     LegacyIndexIntegrityError,
@@ -72,6 +74,18 @@ def _attest(
     )
 
 
+def _guard(path: Path):
+    content = path.read_bytes()
+    return open_legacy_sqlite_index_attestation_guard(
+        index_path=path,
+        notes=_notes(),
+        embedding_model_version=MODEL,
+        embedding_dimensions=DIMENSIONS,
+        expected_index_file_sha256=hashlib.sha256(content).hexdigest(),
+        expected_index_file_byte_count=len(content),
+    )
+
+
 def test_ordinary_sqlite_index_attests_twice_without_mutation(tmp_path: Path) -> None:
     path = _build_index(tmp_path)
     path.chmod(0o644)
@@ -98,6 +112,152 @@ def test_ordinary_sqlite_index_attests_twice_without_mutation(tmp_path: Path) ->
         path.read_bytes(),
         tuple(sorted(item.name for item in path.parent.iterdir())),
     ) == before
+
+
+def test_live_guard_opens_exact_descriptor_for_query_without_transferring_ownership(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _build_index(tmp_path)
+    before = (
+        path.stat().st_ino,
+        path.stat().st_mode,
+        path.read_bytes(),
+        tuple(sorted(item.name for item in path.parent.iterdir())),
+    )
+    guard = _guard(path)
+    backend: SqliteBackend | None = None
+    opened: list[tuple[Path, bool, str | None]] = []
+    original_init = legacy_index_module.SqliteBackend.__init__
+
+    def capture_open(
+        self: SqliteBackend,
+        db_path: Path | str,
+        migrations_dir: Path | None = None,
+        *,
+        read_only: bool = False,
+        _read_only_uri: str | None = None,
+    ) -> None:
+        opened.append((Path(db_path), read_only, _read_only_uri))
+        original_init(
+            self,
+            db_path,
+            migrations_dir,
+            read_only=read_only,
+            _read_only_uri=_read_only_uri,
+        )
+
+    monkeypatch.setattr(legacy_index_module.SqliteBackend, "__init__", capture_open)
+    try:
+        backend = guard.open_read_only_index()
+
+        assert len(opened) == 1
+        descriptor_path, read_only, read_only_uri = opened[0]
+        assert descriptor_path != path
+        assert descriptor_path.parts[:3] in {
+            ("/", "dev", "fd"),
+            ("/", "proc", "self"),
+        }
+        assert read_only is True
+        assert read_only_uri == descriptor_path.as_uri()
+        assert int(backend.conn.execute("PRAGMA query_only").fetchone()[0]) == 1
+        assert str(backend.conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() != "wal"
+        assert int(backend.conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]) == len(
+            _notes()
+        )
+        with pytest.raises(sqlite3.OperationalError):
+            backend.conn.execute("DELETE FROM documents")
+
+        guard.verify_open_read_only_index(backend)
+        backend.close()
+        backend = None
+        guard.verify()
+    finally:
+        if backend is not None:
+            backend.close()
+        guard.close()
+
+    assert (
+        path.stat().st_ino,
+        path.stat().st_mode,
+        path.read_bytes(),
+        tuple(sorted(item.name for item in path.parent.iterdir())),
+    ) == before
+
+
+def test_live_guard_rejects_modify_then_restore_before_query_release(
+    tmp_path: Path,
+) -> None:
+    path = _build_index(tmp_path)
+    exact = path.read_bytes()
+    guard = _guard(path)
+    backend = guard.open_read_only_index()
+    try:
+        path.chmod(0o600)
+        with path.open("r+b") as stream:
+            stream.seek(100)
+            original = stream.read(1)
+            stream.seek(100)
+            stream.write(bytes([original[0] ^ 1]))
+            stream.flush()
+            os.fsync(stream.fileno())
+            stream.seek(100)
+            stream.write(original)
+            stream.flush()
+            os.fsync(stream.fileno())
+        assert path.read_bytes() == exact
+
+        with pytest.raises(LegacyIndexIntegrityError, match="pinned inode"):
+            guard.verify_open_read_only_index(backend)
+    finally:
+        backend.close()
+        guard.close()
+
+
+def test_live_guard_query_open_rejects_post_attestation_byte_drift(tmp_path: Path) -> None:
+    path = _build_index(tmp_path)
+    guard = _guard(path)
+    try:
+        with path.open("ab") as stream:
+            stream.write(b"tamper")
+
+        with pytest.raises(
+            LegacyIndexIntegrityError,
+            match="pinned inode|changed before query-only opening",
+        ):
+            guard.open_read_only_index()
+        assert not any(
+            path.with_name(path.name + suffix).exists() for suffix in ("-wal", "-shm", "-journal")
+        )
+    finally:
+        guard.close()
+
+
+def test_live_guard_query_open_closes_backend_when_locator_verification_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _build_index(tmp_path)
+    guard = _guard(path)
+    closed: list[SqliteBackend] = []
+    original_close = legacy_index_module.SqliteBackend.close
+
+    def track_close(backend: SqliteBackend) -> None:
+        closed.append(backend)
+        original_close(backend)
+
+    def reject_locator(_reported: Path, _pinned: object) -> None:
+        raise LegacyIndexIntegrityError("simulated SQLite locator mismatch")
+
+    monkeypatch.setattr(legacy_index_module.SqliteBackend, "close", track_close)
+    monkeypatch.setattr(legacy_index_module, "_verify_reported_locator", reject_locator)
+    try:
+        with pytest.raises(LegacyIndexIntegrityError, match="simulated SQLite locator mismatch"):
+            guard.open_read_only_index()
+        assert len(closed) == 1
+        guard.verify()
+    finally:
+        guard.close()
 
 
 def test_logical_fingerprint_excludes_only_volatile_timestamps(tmp_path: Path) -> None:

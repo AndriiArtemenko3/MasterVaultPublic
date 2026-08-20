@@ -77,6 +77,7 @@ from mastervault.change_control.managed_serving import (
 )
 from mastervault.change_control.managed_store import (
     AuthorityVerificationContext,
+    ManagedGenerationActivationError,
     ManagedReviewAuthorityError,
     ManagedReviewStaleError,
     ManagedReviewWriteVersionError,
@@ -735,11 +736,86 @@ def _workspace_bootstrap_fixture():
     return inventory, intent, aggregate
 
 
+def test_workspace_bootstrap_inventory_lookup_is_exact_and_secure_read_only(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "change_control" / "state.sqlite3"
+    store = SqliteManagedChangeControlStore(database, secure_open=True)
+    store.init_schema()
+    inventory, intent, _aggregate = _workspace_bootstrap_fixture()
+    expected = store.claim_workspace_bootstrap(intent=intent, inventory=inventory)
+    store.close()
+
+    before_bytes = database.read_bytes()
+    before_names = tuple(
+        sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*"))
+    )
+    statements: list[str] = []
+    read_only = SqliteManagedChangeControlStore(
+        database,
+        secure_open=True,
+        read_only=True,
+    )
+    try:
+        read_only.conn.set_trace_callback(statements.append)
+        assert (
+            read_only.get_workspace_bootstrap_by_inventory_id(inventory.inventory_id)
+            == expected
+        )
+        assert (
+            read_only.get_workspace_bootstrap_by_inventory_id(f"workspaceinventory:{'0' * 64}")
+            is None
+        )
+        assert int(read_only.conn.execute("PRAGMA query_only").fetchone()[0]) == 1
+    finally:
+        read_only.conn.set_trace_callback(None)
+        read_only.close()
+
+    mutating_prefixes = (
+        "ALTER ",
+        "CREATE ",
+        "DELETE ",
+        "DROP ",
+        "INSERT ",
+        "REPLACE ",
+        "UPDATE ",
+        "VACUUM ",
+    )
+    assert not any(
+        statement.lstrip().upper().startswith(mutating_prefixes) for statement in statements
+    )
+    assert database.read_bytes() == before_bytes
+    assert (
+        tuple(sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*")))
+        == before_names
+    )
+
+
+def test_workspace_bootstrap_inventory_lookup_rejects_corrupt_ownership(
+    tmp_path: Path,
+) -> None:
+    store = SqliteManagedChangeControlStore(tmp_path / "state.sqlite3")
+    store.init_schema()
+    inventory, intent, _aggregate = _workspace_bootstrap_fixture()
+    store.claim_workspace_bootstrap(intent=intent, inventory=inventory)
+    with store.conn:
+        store.conn.execute(
+            "UPDATE change_control_workspace_bootstrap_intents SET inventory_id=? "
+            "WHERE bootstrap_id=?",
+            (f"workspaceinventory:{'f' * 64}", intent.bootstrap_id),
+        )
+
+    with pytest.raises(ChangeControlCorruptionError, match="workspace bootstrap intent"):
+        store.get_workspace_bootstrap_by_inventory_id(inventory.inventory_id)
+    assert not store.conn.in_transaction
+    store.close()
+
+
 def test_workspace_bootstrap_stages_replay_concurrently_and_initialize_generic_zero(
     tmp_path: Path,
 ) -> None:
     database = tmp_path / "state.sqlite3"
-    store = SqliteManagedChangeControlStore(database)
+    store = SqliteManagedChangeControlStore(database, secure_open=True)
     store.init_schema()
     inventory, intent, aggregate = _workspace_bootstrap_fixture()
     claimed = store.claim_workspace_bootstrap(intent=intent, inventory=inventory)
@@ -838,7 +914,7 @@ def test_workspace_bootstrap_stages_replay_concurrently_and_initialize_generic_z
         complete_states[0],
         evidence_verifier=evidence_verifier,
     )
-    store = SqliteManagedChangeControlStore(database)
+    store = SqliteManagedChangeControlStore(database, secure_open=True)
     authority = store.initialize_workspace_generation_zero(verified_workspace_bootstrap=capability)
     context = AuthorityVerificationContext.workspace(capability)
     assert (
@@ -861,6 +937,8 @@ def test_workspace_bootstrap_stages_replay_concurrently_and_initialize_generic_z
         pass
 
     class WorkspaceContextProbeStore:
+        securely_coordinated = True
+
         def get_managed_review(self, request_id, *, resolver, authority_context):
             del request_id, resolver
             assert authority_context == context
@@ -3390,3 +3468,17 @@ def test_valid_edit_decision_is_rejected_before_resolver_transaction_or_replay(
         == 1
     )
     scenario.store.close()
+
+
+def test_managed_authority_cas_requires_secure_coordination(tmp_path: Path) -> None:
+    store = SqliteManagedChangeControlStore(tmp_path / "uncoordinated.sqlite3")
+    store.init_schema()
+    try:
+        with pytest.raises(ManagedGenerationActivationError, match="secure coordinated"):
+            store.activate_managed_generation(
+                ManagedActivationCommand.model_construct(),
+                capability=object(),  # type: ignore[arg-type]
+                resolver=object(),  # type: ignore[arg-type]
+            )
+    finally:
+        store.close()

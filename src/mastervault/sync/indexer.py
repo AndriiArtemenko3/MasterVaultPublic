@@ -144,6 +144,11 @@ class ExactSourceNoteSyncReport(SyncReport):
     record_ids: tuple[str, ...] = ()
 
 
+# The report shape is not SourceNote-specific; keep the historical name as an
+# alias for callers from the original managed-only generation slice.
+ExactVaultSyncReport = ExactSourceNoteSyncReport
+
+
 def _prepare(
     note: NoteRef,
     loaded: LoadedNote,
@@ -419,20 +424,20 @@ def prepare_exact_source_notes(
     return _prepare_exact_vault_notes(notes, source_notes_only=True)
 
 
-def sync_exact_source_notes(
-    notes: tuple[ExactSourceNoteInput, ...],
+def sync_exact_vault_notes(
+    notes: tuple[ExactVaultNoteInput, ...],
     backend: StorageBackend,
     embedder: EmbeddingProvider,
     *,
     force_embeddings: bool = False,
-) -> ExactSourceNoteSyncReport:
-    """Build one complete isolated index from an explicit closed inventory."""
+) -> ExactVaultSyncReport:
+    """Build one complete isolated index from an explicit closed all-note inventory."""
 
-    prepared = prepare_exact_source_notes(notes)
+    prepared = prepare_exact_vault_notes(notes)
     expected_paths = {item.rel_path for item in notes}
     prepared_paths = {item.doc.rel_path for item in prepared}
     if prepared_paths != expected_paths:
-        raise ValueError("prepared SourceNote set differs from exact generation inventory")
+        raise ValueError("prepared vault set differs from exact generation inventory")
     conn = getattr(backend, "conn", None)
     if conn is None or not callable(getattr(conn, "execute", None)):
         raise ValueError("managed generation indexing requires inspectable SQLite storage")
@@ -485,7 +490,7 @@ def sync_exact_source_notes(
                 for unit, vector in zip(to_embed, vectors, strict=True)
             ]
         )
-    return ExactSourceNoteSyncReport(
+    return ExactVaultSyncReport(
         docs_upserted=len(prepared),
         docs_deleted=0,
         records_embedded=len(to_embed),
@@ -494,6 +499,26 @@ def sync_exact_source_notes(
         prepared_paths=prepared_paths,
         doc_ids=tuple(sorted(item.doc.doc_id for item in prepared)),
         record_ids=record_ids,
+    )
+
+
+def sync_exact_source_notes(
+    notes: tuple[ExactSourceNoteInput, ...],
+    backend: StorageBackend,
+    embedder: EmbeddingProvider,
+    *,
+    force_embeddings: bool = False,
+) -> ExactSourceNoteSyncReport:
+    """Build one complete isolated index from an explicit SourceNote inventory."""
+
+    # Validate the narrower historical contract before delegating to the
+    # all-note exact synchronizer used by complete workspace generations.
+    prepare_exact_source_notes(notes)
+    return sync_exact_vault_notes(
+        notes,
+        backend,
+        embedder,
+        force_embeddings=force_embeddings,
     )
 
 

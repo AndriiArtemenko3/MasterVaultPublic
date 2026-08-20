@@ -144,7 +144,9 @@ def build_real_managed_v2_scenario(tmp_path: Path) -> RealManagedV2Scenario:
     )
     authority_path = case.store.db_path
     case.store.close()
-    store = SqliteManagedChangeControlStore(authority_path)
+    authority_path.chmod(0o600)
+    authority_path.parent.chmod(0o700)
+    store = SqliteManagedChangeControlStore(authority_path, secure_open=True)
     verified_bootstrap = case.build_inputs["verified_bootstrap"]
     assert isinstance(verified_bootstrap, VerifiedAnalysisBootstrapCapability)
     store.initialize_generation_zero(
@@ -170,7 +172,8 @@ def build_real_managed_v2_variant(
 ) -> RealManagedV2Scenario:
     """Build a second valid reviewed generation over the seed's exact base authority."""
 
-    tmp_path.mkdir(parents=True)
+    tmp_path.mkdir(mode=0o700, parents=True)
+    tmp_path.chmod(0o700)
     recorded = _recorded_scenario(
         authority=seed.reviewed_snapshot,
         workload=build_impact_workload(seed.reviewed_snapshot),
@@ -215,7 +218,7 @@ def build_real_managed_v2_variant(
     authority_path = tmp_path / "variant-authority.sqlite3"
     shutil.copy2(seed.authority_path, authority_path)
     return RealManagedV2Scenario(
-        store=SqliteManagedChangeControlStore(authority_path),
+        store=SqliteManagedChangeControlStore(authority_path, secure_open=True),
         authority_path=authority_path,
         reviewed_snapshot=seed.reviewed_snapshot,
         run_binding=run_binding,
@@ -235,9 +238,10 @@ def clone_real_managed_v2_scenario(
 
     destination = tmp_path / "change-control.sqlite3"
     destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.parent.chmod(0o700)
     shutil.copy2(seed.authority_path, destination)
     return RealManagedV2Scenario(
-        store=SqliteManagedChangeControlStore(destination),
+        store=SqliteManagedChangeControlStore(destination, secure_open=True),
         authority_path=destination,
         reviewed_snapshot=seed.reviewed_snapshot,
         run_binding=seed.run_binding,

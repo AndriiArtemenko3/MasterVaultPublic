@@ -7,15 +7,16 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 | File | Responsibility |
 |------|----------------|
 | `__init__.py` | Package marker; pins `__version__ = "0.2.0"` and states the file-canonical / derived-index contract. |
-| `config.py` | `Settings` (pydantic-settings) plus `load_settings()`. Merges `mastervault.toml`, `MV_*` env vars, and `.env`; secrets come from the environment only. Includes the default `pypdf`/optional Docling document configuration. |
+| `config.py` | `Settings` (pydantic-settings) plus `load_settings()`. Merges `mastervault.toml`, `MV_*` env vars, and `.env`; secrets come from the environment only. Includes document settings and the opt-in, runtime-only `query_generation` evidence locators. |
 | `models.py` | Shared notes, claims, retrieval/review types, and evidence union. Legacy page evidence and schema-v2 structural block/cell evidence coexist without changing old JSON. |
-| [cli/](./cli) | Typer command surface including `ingest --pdf-parser` and the read-only `document doctor` parser diagnostic. |
+| [change_control/](./change_control) | SQLite-authoritative temporal review, immutable managed generations, generic workspace bootstrap, and the read-only generation resolver used by ordinary queries. |
+| [cli/](./cli) | Typer command surface including shared query `--generation` selection, `ingest --pdf-parser`, and the read-only `document doctor` parser diagnostic. |
 | [contracts/](./contracts) | Versioned-prompt + typed-output contracts with autofix/hard-fail guards, one per LLM task (claim extraction, contradiction judge, corpus check, sufficiency judge, grounded synthesis, wiki draft). |
 | [core/](./core) | Orchestration substrate: exit-code errors, append-only `EventLog`, `BudgetLedger`, and `RunContext`. |
 | [document_intelligence/](./document_intelligence) | Immutable PDF identity; compatible schema-v1 `pypdf`; optional offline Docling normalization to schema-v2 layout/tables; deterministic rendering and fail-closed block/cell grounding. |
 | [evals/](./evals) | Retrieval eval harness: golden-set grading, per-`RetrievalConfig` ablation runs, recall@k/nDCG/MRR metrics, and a mechanical citation-validity checker for `ask` answers. |
 | [ingest/](./ingest) | Ingestion stages: raw-file conversion, claim extraction, concept matching, corpus-check adjudication, wiki drafting, wikilink insertion, and the claim schema gate (`validate`). |
-| [pipelines/](./pipelines) | The three end-to-end runs (`run_ingest`, `run_ask`, `run_lint`) that compose contracts, storage, retrieval, and the review queue under a `RunContext`. |
+| [pipelines/](./pipelines) | The three end-to-end runs (`run_ingest`, `run_ask`, `run_lint`) that compose contracts, storage, retrieval, and the review queue. Managed query-only ask can run without persistent `RunContext` artifacts. |
 | [prompts/](./prompts) | Versioned prompt files, one directory per contract id (`<contract_id>/v<N>.md`): YAML header plus Jinja2 body, loaded through `registry.load`. |
 | [providers/](./providers) | External-model seam: embedding, LLM, and reranker Protocols with local/mock/API backends, plus the token price table. Keeps the stack runnable offline. |
 | [retrieval/](./retrieval) | Hybrid search: lexical, vector, and alias-graph channels fused by RRF, hydrated, MMR-diversified, and optionally reranked. `hybrid_search` is the front door. |
@@ -26,7 +27,7 @@ This is the Python package behind the `mvault` CLI. Markdown files with YAML fro
 
 ## How it fits
 
-[vaultfs](./vaultfs) reads the canonical Markdown; [document_intelligence](./document_intelligence) preserves immutable PDF evidence before [ingest](./ingest) turns raw files into notes with claims; [sync](./sync) projects those notes into a [storage](./storage) index that [retrieval](./retrieval) queries. The [pipelines](./pipelines) tie those stages together for `ingest`/`ask`/`lint`, calling [contracts](./contracts) (rendered from [prompts](./prompts), executed via [providers](./providers)) and routing proposed changes through [review](./review), all under a [core](./core) `RunContext`. The [cli](./cli) is the operator entry point and [evals](./evals) grades retrieval quality offline. Nearly every module imports `models.py` for its types and `config.py` for `Settings`.
+[vaultfs](./vaultfs) reads the canonical Markdown; [document_intelligence](./document_intelligence) preserves immutable PDF evidence before [ingest](./ingest) turns raw files into notes with claims; [sync](./sync) projects those notes into a [storage](./storage) index that [retrieval](./retrieval) queries. [change_control](./change_control) can bind that legacy index as generation zero and resolve the immutable active successor for ordinary reads. The [pipelines](./pipelines) tie the stages together for `ingest`/`ask`/`lint`, calling [contracts](./contracts) (rendered from [prompts](./prompts), executed via [providers](./providers)) and routing proposed changes through [review](./review). The [cli](./cli) is the operator entry point and [evals](./evals) grades retrieval quality offline. Nearly every module imports `models.py` for its types and `config.py` for `Settings`.
 
 ## Key concepts / entry points
 

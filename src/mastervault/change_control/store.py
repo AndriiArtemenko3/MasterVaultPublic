@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import stat
+import time
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
@@ -64,6 +65,11 @@ from mastervault.change_control.review import (
     subject_from_aggregate,
 )
 from mastervault.document_intelligence.models import EvidenceRef, StructuralEvidenceRef
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - exercised by the explicit platform gate
+    _fcntl = None  # type: ignore[assignment]
 
 _STORE_IDENTITY = "mastervault.change-control.sqlite"
 _SCHEMA_VERSION = 5
@@ -220,9 +226,13 @@ def _stable_file_identity(
 
 def _require_secure_open_platform() -> None:
     required = ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "getuid", "pread")
-    if os.name != "posix" or any(not hasattr(os, name) for name in required):
+    if (
+        os.name != "posix"
+        or _fcntl is None
+        or any(not hasattr(os, name) for name in required)
+    ):
         raise ChangeControlPlatformUnsupportedError(
-            "platform cannot pin the change-control SQLite database without following links"
+            "platform cannot pin and coordinate the change-control SQLite authority"
         )
     if os.open not in os.supports_dir_fd or os.stat not in os.supports_dir_fd:
         raise ChangeControlPlatformUnsupportedError(
@@ -659,16 +669,30 @@ class SqliteChangeControlStore:
             raise ValueError("read_only requires secure_open")
         self.db_path = Path(db_path)
         self.migrations_dir = migrations_dir or _DEFAULT_MIGRATIONS_DIR
+        self._timeout_seconds = timeout_seconds
         self._read_only = read_only
         self._pinned_database: _PinnedChangeControlDatabase | None = None
+        self._coordination_parent_fd = -1
+        self._coordination_mode: str | None = None
         conn: sqlite3.Connection | None = None
         try:
             if secure_open:
+                self._coordination_parent_fd = _open_secure_parent(
+                    self.db_path,
+                    create=not read_only,
+                )
+                self._acquire_coordination(exclusive=not read_only)
                 self._pinned_database = _pin_change_control_database(
                     self.db_path,
                     create=not read_only,
                     read_only=read_only,
                 )
+                if _inode(os.fstat(self._coordination_parent_fd)) != _inode(
+                    os.fstat(self._pinned_database.parent_fd)
+                ):
+                    raise ChangeControlCorruptionError(
+                        "change-control coordination directory was substituted while opening"
+                    )
                 if read_only:
                     alias = _descriptor_alias(self._pinned_database)
                     conn = sqlite3.connect(
@@ -703,13 +727,88 @@ class SqliteChangeControlStore:
                     reject_sidecars=True,
                     allow_empty=False,
                 )
+            if secure_open and not read_only:
+                self._release_coordination()
         except BaseException:
             if conn is not None:
                 conn.close()
             if self._pinned_database is not None:
                 self._pinned_database.close()
                 self._pinned_database = None
+            self._close_coordination_guard()
             raise
+
+    def _acquire_coordination(self, *, exclusive: bool) -> None:
+        """Bound a secure SQLite snapshot to a separate parent-directory lock."""
+
+        if self._coordination_parent_fd < 0:
+            return
+        requested = "exclusive" if exclusive else "shared"
+        if self._coordination_mode is not None:
+            if self._coordination_mode != requested:
+                raise ChangeControlStoreError(
+                    "change-control coordination lock cannot change modes while held"
+                )
+            return
+        if _fcntl is None:  # pragma: no cover - constructor platform gate owns this branch
+            raise ChangeControlPlatformUnsupportedError(
+                "platform cannot coordinate the change-control SQLite authority"
+            )
+        operation = _fcntl.LOCK_EX if exclusive else _fcntl.LOCK_SH
+        deadline = time.monotonic() + self._timeout_seconds
+        while True:
+            try:
+                _fcntl.flock(
+                    self._coordination_parent_fd,
+                    operation | _fcntl.LOCK_NB,
+                )
+                self._coordination_mode = requested
+                return
+            except BlockingIOError as exc:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ChangeControlBusyError(
+                        "change-control SQLite authority is busy"
+                    ) from exc
+                time.sleep(min(0.01, remaining))
+            except OSError as exc:
+                raise ChangeControlPlatformUnsupportedError(
+                    "platform cannot lock the change-control coordination directory"
+                ) from exc
+
+    def _release_coordination(self) -> None:
+        if self._coordination_parent_fd < 0 or self._coordination_mode is None:
+            return
+        if _fcntl is None:  # pragma: no cover - constructor platform gate owns this branch
+            raise ChangeControlPlatformUnsupportedError(
+                "platform cannot coordinate the change-control SQLite authority"
+            )
+        try:
+            _fcntl.flock(self._coordination_parent_fd, _fcntl.LOCK_UN)
+        except OSError as exc:
+            raise ChangeControlCorruptionError(
+                "change-control coordination lock could not be released"
+            ) from exc
+        finally:
+            self._coordination_mode = None
+
+    def _release_transaction_coordination(self) -> None:
+        if not self._read_only:
+            self._release_coordination()
+
+    def _close_coordination_guard(self) -> None:
+        try:
+            self._release_coordination()
+        finally:
+            if self._coordination_parent_fd >= 0:
+                os.close(self._coordination_parent_fd)
+                self._coordination_parent_fd = -1
+
+    @property
+    def securely_coordinated(self) -> bool:
+        """Whether this store participates in the pinned authority lock protocol."""
+
+        return self._pinned_database is not None and self._coordination_parent_fd >= 0
 
     def _set_secure_rollback_journal_mode(self) -> None:
         try:
@@ -892,18 +991,23 @@ class SqliteChangeControlStore:
         return version
 
     def _begin(self, statement: str) -> None:
-        if self._pinned_database is not None:
-            self._pinned_database.verify(
-                unchanged=self._read_only,
-                require_nonempty=self._read_only,
-            )
+        if not self._read_only:
+            self._acquire_coordination(exclusive=True)
         try:
+            if self._pinned_database is not None:
+                self._pinned_database.verify(
+                    unchanged=self._read_only,
+                    require_nonempty=self._read_only,
+                )
             self.conn.execute(statement)
             self._verify_secure_sqlite_authority(
                 reject_sidecars=False,
                 allow_empty=not self._read_only,
             )
         except sqlite3.Error as exc:
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
+            self._release_transaction_coordination()
             if _is_busy_error(exc):
                 raise ChangeControlBusyError("change-control SQLite database is busy") from exc
             raise ChangeControlCorruptionError(
@@ -912,24 +1016,34 @@ class SqliteChangeControlStore:
         except BaseException:
             if self.conn.in_transaction:
                 self.conn.execute("ROLLBACK")
+            self._release_transaction_coordination()
             raise
 
     def _commit(self) -> None:
         """Commit only while a secure-open store still owns its exact inode."""
 
-        self._verify_secure_sqlite_authority(
-            reject_sidecars=False,
-            allow_empty=not self._read_only,
-        )
-        self.conn.execute("COMMIT")
-        self._verify_secure_sqlite_authority(
-            reject_sidecars=True,
-            allow_empty=False,
-        )
+        committed = False
+        try:
+            self._verify_secure_sqlite_authority(
+                reject_sidecars=False,
+                allow_empty=not self._read_only,
+            )
+            self.conn.execute("COMMIT")
+            committed = True
+            self._verify_secure_sqlite_authority(
+                reject_sidecars=True,
+                allow_empty=False,
+            )
+        finally:
+            if committed or not self.conn.in_transaction:
+                self._release_transaction_coordination()
 
     def _rollback_operation_error(self, exc: BaseException) -> None:
-        if self.conn.in_transaction:
-            self.conn.execute("ROLLBACK")
+        try:
+            if self.conn.in_transaction:
+                self.conn.execute("ROLLBACK")
+        finally:
+            self._release_transaction_coordination()
         if _is_busy_error(exc):
             raise ChangeControlBusyError("change-control SQLite database is busy") from exc
         if isinstance(exc, sqlite3.OperationalError):
@@ -1025,6 +1139,7 @@ class SqliteChangeControlStore:
         except BaseException as exc:
             if self.conn.in_transaction:
                 self.conn.execute("ROLLBACK")
+            self._release_transaction_coordination()
             if _is_busy_error(exc):
                 raise ChangeControlBusyError("change-control SQLite database is busy") from exc
             raise
@@ -1096,6 +1211,40 @@ class SqliteChangeControlStore:
                 raise ChangeControlCorruptionError("aggregate children exist without a head")
             return None
         return self._hydrate_snapshot(head, rows)
+
+    def get_operation_commit(self, operation_id: str) -> ChangeControlCommit | None:
+        """Return one exact validated historical operation receipt, if present."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            receipt = self.conn.execute(
+                "SELECT * FROM change_control_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            result = (
+                None
+                if receipt is None
+                else ChangeControlCommit(
+                    aggregate_id=str(receipt["aggregate_id"]),
+                    revision=int(receipt["committed_revision"]),
+                    aggregate_sha256=str(receipt["aggregate_sha256"]),
+                    changed=bool(receipt["changed"]),
+                    committed_at=str(receipt["committed_at"]),
+                    replayed=True,
+                )
+            )
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
 
     def _capture_rows(self, aggregate_id: str) -> dict[str, list[sqlite3.Row]]:
         tables = {
@@ -2657,6 +2806,7 @@ class SqliteChangeControlStore:
             if self._pinned_database is not None:
                 self._pinned_database.close()
                 self._pinned_database = None
+            self._close_coordination_guard()
         if verification_error is not None:
             raise verification_error
 

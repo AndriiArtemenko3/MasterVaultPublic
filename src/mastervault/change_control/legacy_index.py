@@ -108,6 +108,7 @@ class _PinnedLegacyIndex:
     parent_fd: int
     file_fd: int
     name: str
+    signature: tuple[int, int, int, int, int, int, int, int]
 
     def close(self) -> None:
         file_fd, parent_fd = self.file_fd, self.parent_fd
@@ -156,6 +157,8 @@ class _PinnedLegacyIndex:
             or opened.st_size > MAX_INDEX_FILE_BYTES_V1
             or current.st_size > MAX_INDEX_FILE_BYTES_V1
             or _inode(opened) != _inode(current)
+            or _stable(opened) != self.signature
+            or _stable(current) != self.signature
         ):
             raise LegacyIndexIntegrityError(
                 "legacy SQLite index is not one private regular pinned inode"
@@ -264,6 +267,7 @@ def _pin_index(path: Path) -> _PinnedLegacyIndex:
             parent_fd=parent_fd,
             file_fd=file_fd,
             name=path.name,
+            signature=_stable(opened),
         )
         parent_fd = -1
         file_fd = -1
@@ -322,6 +326,59 @@ def _verify_reported_locator(reported: Path, pinned: _PinnedLegacyIndex) -> None
         raise LegacyIndexIntegrityError(
             "SQLite-reported legacy index locator is not the pinned inode"
         )
+
+
+def _open_pinned_read_only_backend(
+    *,
+    pinned: _PinnedLegacyIndex,
+    expected_file_sha256: str,
+    expected_file_byte_count: int,
+) -> SqliteBackend:
+    """Open SQLite through ``pinned`` while leaving descriptor ownership there."""
+
+    backend: SqliteBackend | None = None
+    try:
+        pinned.reject_sidecars()
+        initial_sha, initial_size = pinned.sha256()
+        if (initial_sha, initial_size) != (
+            expected_file_sha256,
+            expected_file_byte_count,
+        ):
+            raise LegacyIndexIntegrityError("legacy SQLite index changed before query-only opening")
+        alias = _descriptor_alias(pinned)
+        backend = SqliteBackend(
+            alias,
+            read_only=True,
+            _read_only_uri=alias.as_uri(),
+        )
+        databases = backend.conn.execute("PRAGMA database_list").fetchall()
+        main = [row for row in databases if str(row[1]) == "main"]
+        if len(main) != 1:
+            raise LegacyIndexIntegrityError("SQLite did not open exactly one main database")
+        _verify_reported_locator(Path(str(main[0][2])), pinned)
+        if int(backend.conn.execute("PRAGMA query_only").fetchone()[0]) != 1:
+            raise LegacyIndexIntegrityError("legacy SQLite connection is not query-only")
+        if str(backend.conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal":
+            raise LegacyIndexIntegrityError("legacy SQLite index retains WAL-mode ambiguity")
+        serialized = backend.conn.serialize(name="main")
+        if len(serialized) != initial_size or hashlib.sha256(serialized).hexdigest() != initial_sha:
+            raise LegacyIndexIntegrityError(
+                "SQLite connection content differs from the pinned legacy index"
+            )
+        pinned.reject_sidecars()
+        if pinned.sha256() != (initial_sha, initial_size):
+            raise LegacyIndexIntegrityError("legacy SQLite index changed during query-only opening")
+        return backend
+    except LegacyIndexIntegrityError:
+        if backend is not None:
+            backend.close()
+        raise
+    except (OSError, sqlite3.Error, StorageError, TypeError, ValueError) as exc:
+        if backend is not None:
+            backend.close()
+        raise LegacyIndexIntegrityError(
+            "legacy SQLite query backend could not be opened exactly"
+        ) from exc
 
 
 def _schema_rows(conn: sqlite3.Connection) -> list[list[Any]]:
@@ -723,29 +780,11 @@ def _attest_pinned(
             raise LegacyIndexIntegrityError(
                 "legacy SQLite index differs from its declared exact file identity"
             )
-        alias = _descriptor_alias(pinned)
-        backend = SqliteBackend(
-            alias,
-            read_only=True,
-            _read_only_uri=alias.as_uri(),
+        backend = _open_pinned_read_only_backend(
+            pinned=pinned,
+            expected_file_sha256=initial_sha,
+            expected_file_byte_count=initial_size,
         )
-        databases = backend.conn.execute("PRAGMA database_list").fetchall()
-        main = [row for row in databases if str(row[1]) == "main"]
-        if len(main) != 1:
-            raise LegacyIndexIntegrityError("SQLite did not open exactly one main database")
-        _verify_reported_locator(Path(str(main[0][2])), pinned)
-        if int(backend.conn.execute("PRAGMA query_only").fetchone()[0]) != 1:
-            raise LegacyIndexIntegrityError("legacy SQLite connection is not query-only")
-        if str(backend.conn.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal":
-            raise LegacyIndexIntegrityError("legacy SQLite index retains WAL-mode ambiguity")
-        serialized = backend.conn.serialize(name="main")
-        if (
-            len(serialized) != initial_size
-            or hashlib.sha256(serialized).hexdigest() != initial_sha
-        ):
-            raise LegacyIndexIntegrityError(
-                "SQLite connection content differs from the pinned legacy index"
-            )
         projection, logical, counts = _verify_semantics(
             backend.conn,
             prepared=prepared,
@@ -813,6 +852,46 @@ class LegacyIndexAttestationGuard:
             raise LegacyIndexIntegrityError(
                 "legacy SQLite index changed after its complete attestation"
             )
+
+    def verify_open_read_only_index(self, backend: SqliteBackend) -> None:
+        """Verify the live SQLite connection against the still-pinned inode."""
+
+        self.verify()
+        try:
+            if int(backend.conn.execute("PRAGMA query_only").fetchone()[0]) != 1:
+                raise LegacyIndexIntegrityError(
+                    "legacy SQLite connection is not query-only"
+                )
+            serialized = backend.conn.serialize(name="main")
+        except LegacyIndexIntegrityError:
+            raise
+        except (sqlite3.Error, StorageError, TypeError, ValueError) as exc:
+            raise LegacyIndexIntegrityError(
+                "legacy SQLite query backend cannot be reverified"
+            ) from exc
+        if (
+            len(serialized) != self.attestation.index_file_byte_count
+            or hashlib.sha256(serialized).hexdigest()
+            != self.attestation.index_file_sha256
+        ):
+            raise LegacyIndexIntegrityError(
+                "legacy SQLite connection differs from the exact attested index"
+            )
+        self.verify()
+
+    def open_read_only_index(self) -> SqliteBackend:
+        """Open the attested inode for queries without taking guard ownership.
+
+        The returned backend owns only its SQLite connection.  The caller must
+        keep this guard live for the complete query scope, close the backend,
+        and then close the guard.
+        """
+
+        return _open_pinned_read_only_backend(
+            pinned=self._pinned,
+            expected_file_sha256=self.attestation.index_file_sha256,
+            expected_file_byte_count=self.attestation.index_file_byte_count,
+        )
 
     def close(self) -> None:
         self._pinned.close()

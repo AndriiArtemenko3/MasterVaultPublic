@@ -9,11 +9,16 @@ import os
 import secrets
 import sqlite3
 import stat
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, SupportsIndex
 
+from mastervault.change_control.generation_corpus import (
+    complete_generation_index_notes,
+    verify_generation_base_inventory,
+)
 from mastervault.change_control.inference_repository import (
     MAX_PENDING_FILES_PER_DIRECTORY_V1,
     FilesystemInferenceEvidenceRepository,
@@ -42,13 +47,16 @@ from mastervault.change_control.repository_files import (
     require_exact_repository_path,
     verified_repository_root,
 )
+from mastervault.change_control.workspace_bootstrap import (
+    VerifiedWorkspaceBootstrapCapability,
+)
 from mastervault.providers import EmbeddingProvider
 from mastervault.storage.base import SCHEMA_VERSION, StorageError
 from mastervault.storage.sqlite import SqliteBackend
 from mastervault.sync.indexer import (
-    ExactSourceNoteInput,
-    prepare_exact_source_notes,
-    sync_exact_source_notes,
+    ExactVaultNoteInput,
+    prepare_exact_vault_notes,
+    sync_exact_vault_notes,
 )
 
 
@@ -69,6 +77,51 @@ class ResolvedGenerationSourceNote:
     entry: GenerationSourceNoteEntry
     content: bytes
     workspace: Path
+
+
+def _canonical_resolved_generation_notes(
+    notes: tuple[ResolvedGenerationSourceNote, ...],
+) -> tuple[ResolvedGenerationSourceNote, ...]:
+    """Copy untrusted API inputs into exact immutable repository-owned values."""
+
+    if type(notes) is not tuple:
+        raise ManagedGenerationRepositoryError(
+            "resolved generation notes must be one exact tuple"
+        )
+    result: list[ResolvedGenerationSourceNote] = []
+    for item in notes:
+        if type(item) is not ResolvedGenerationSourceNote:
+            raise ManagedGenerationRepositoryError(
+                "resolved generation contains a substituted SourceNote carrier"
+            )
+        if (
+            type(item.entry) is not GenerationSourceNoteEntry
+            or type(item.content) is not bytes
+            or not isinstance(item.workspace, Path)
+        ):
+            raise ManagedGenerationRepositoryError(
+                "resolved generation SourceNote values are invalid"
+            )
+        try:
+            entry = GenerationSourceNoteEntry.model_validate_json(
+                canonical_json_bytes(item.entry.model_dump(mode="json"))
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ManagedGenerationRepositoryError(
+                "resolved generation SourceNote entry is not canonical"
+            ) from exc
+        if entry != item.entry:
+            raise ManagedGenerationRepositoryError(
+                "resolved generation SourceNote entry changed during canonicalization"
+            )
+        result.append(
+            ResolvedGenerationSourceNote(
+                entry=entry,
+                content=bytes(item.content),
+                workspace=Path(str(item.workspace)),
+            )
+        )
+    return tuple(result)
 
 
 @dataclass(frozen=True)
@@ -109,6 +162,8 @@ class _PinnedIndexFile:
     relative: str
     path: Path
     sealed: bool
+    signature: tuple[int, int, int, int, int, int, int]
+    parent_signature: tuple[int, int, int, int, int, int, int] | None
 
     def close(self) -> None:
         file_fd, parent_fd = self.file_fd, self.parent_fd
@@ -129,6 +184,8 @@ class _PinnedIndexFile:
             relative=self.relative,
             path=self.path,
             sealed=self.sealed,
+            signature=self.signature,
+            parent_signature=self.parent_signature,
         )
 
     def verify_entry(self, *, allow_empty: bool) -> os.stat_result:
@@ -136,6 +193,7 @@ class _PinnedIndexFile:
             raise ManagedGenerationIndexError("managed index guard is already closed")
         try:
             opened = os.fstat(self.file_fd)
+            pinned_parent = os.fstat(self.parent_fd)
             current = os.stat(self.name, dir_fd=self.parent_fd, follow_symlinks=False)
         except OSError as exc:
             raise ManagedGenerationIndexError(
@@ -151,6 +209,12 @@ class _PinnedIndexFile:
             or stat.S_IMODE(opened.st_mode) != (0o400 if self.sealed else 0o600)
             or stat.S_IMODE(current.st_mode) != (0o400 if self.sealed else 0o600)
             or _inode_signature(opened) != _inode_signature(current)
+            or _stable_file_signature(opened) != self.signature
+            or _stable_file_signature(current) != self.signature
+            or (
+                self.parent_signature is not None
+                and _stable_file_signature(pinned_parent) != self.parent_signature
+            )
             or (not allow_empty and (opened.st_size <= 0 or current.st_size <= 0))
             or opened.st_size > MAX_INDEX_FILE_BYTES_V1
             or current.st_size > MAX_INDEX_FILE_BYTES_V1
@@ -230,6 +294,7 @@ class _PinnedIndexFile:
             raise ManagedGenerationIndexError(
                 "unsealed managed SQLite index could not be reset"
             ) from exc
+        self.signature = _stable_file_signature(os.fstat(self.file_fd))
         after = self.verify_entry(allow_empty=True)
         if _inode_signature(before) != _inode_signature(after) or after.st_size != 0:
             raise ManagedGenerationIndexError(
@@ -258,6 +323,7 @@ class _PinnedIndexFile:
             raise ManagedGenerationIndexError(
                 "managed SQLite image could not be written durably"
             ) from exc
+        self.signature = _stable_file_signature(os.fstat(self.file_fd))
         after = self.verify_entry(allow_empty=False)
         if after.st_size != len(image) or self.exact_bytes() != image:
             raise ManagedGenerationIndexError(
@@ -270,6 +336,7 @@ class _GuardedSqliteBackend(SqliteBackend):
 
     def __init__(self, *, alias: Path, guard: _PinnedIndexFile) -> None:
         self._managed_index_guard: _PinnedIndexFile | None = guard
+        self._managed_close_verifier: Callable[[], None] | None = None
         try:
             super().__init__(
                 alias,
@@ -284,49 +351,150 @@ class _GuardedSqliteBackend(SqliteBackend):
 
     def close(self) -> None:
         guard = self._managed_index_guard
-        self._managed_index_guard = None
+        if guard is None:
+            return
+        verifier = self._managed_close_verifier
+        self._managed_close_verifier = None
+        failure: BaseException | None = None
         try:
-            super().close()
+            if verifier is not None:
+                try:
+                    verifier()
+                except BaseException as exc:
+                    failure = exc
+            try:
+                super().close()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
         finally:
-            if guard is not None:
+            self._managed_index_guard = None
+            try:
                 guard.close()
+            except BaseException as exc:
+                if failure is None:
+                    failure = exc
+        if failure is not None:
+            raise failure
+
+    def bind_close_verifier(self, verifier: Callable[[], None]) -> None:
+        """Require one live-integrity verification before releasing the guard."""
+
+        if self._managed_index_guard is None:
+            raise ManagedGenerationIndexError("managed index guard is already closed")
+        if self._managed_close_verifier is not None:
+            raise ManagedGenerationIndexError(
+                "managed index close verifier is already bound"
+            )
+        self._managed_close_verifier = verifier
+
+    def verify_pinned_identity(
+        self,
+        *,
+        expected_sha256: str,
+        expected_byte_count: int,
+    ) -> None:
+        """Verify the exact still-open inode and SQLite connection together."""
+
+        guard = self._managed_index_guard
+        if guard is None:
+            raise ManagedGenerationIndexError("managed index guard is already closed")
+        try:
+            if int(self.conn.execute("PRAGMA query_only").fetchone()[0]) != 1:
+                raise ManagedGenerationIndexError("active managed index is not query-only")
+            before = guard.sha256()
+            serialized = self.conn.serialize(name="main")
+            exact = guard.exact_bytes()
+            after = guard.sha256()
+        except ManagedGenerationRepositoryError:
+            raise
+        except (sqlite3.Error, StorageError, TypeError, ValueError) as exc:
+            raise ManagedGenerationIndexError(
+                "active managed SQLite connection cannot be reverified"
+            ) from exc
+        expected = (expected_sha256, expected_byte_count)
+        if before != expected or after != expected or serialized != exact:
+            raise ManagedGenerationIndexError(
+                "active managed SQLite connection differs from its pinned exact index"
+            )
 
 
 def _effect_capability_payload(
     *,
+    repository: ManagedGenerationRepository,
     repository_id: str,
     repository_root: str,
     command: ManagedActivationCommand,
     publication_events: tuple[ManagedPublicationEvent, ...],
     index_receipt: ManagedIndexReadinessReceipt | None,
+    notes: tuple[ResolvedGenerationSourceNote, ...],
+    base_notes: tuple[ExactVaultNoteInput, ...] | None,
+    verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None,
 ) -> bytes:
+    workspace_binding = None
+    if verified_workspace_bootstrap is not None:
+        verifier = verified_workspace_bootstrap._evidence_verifier
+        workspace_binding = {
+            "capability_object_id": id(verified_workspace_bootstrap),
+            "capability_seal": verified_workspace_bootstrap._seal,
+            "evidence_guard_binding_sha256": hashlib.sha256(
+                verifier._guard_binding
+            ).hexdigest(),
+            "evidence_verifier_object_id": id(verifier),
+            "state": verified_workspace_bootstrap.state.model_dump(mode="json"),
+        }
     return canonical_json_bytes(
         {
             "namespace": "mastervault.managed-generation-effects-capability.v1",
+            "repository_object_id": id(repository),
             "repository_id": repository_id,
             "repository_root": repository_root,
-            "activation_id": command.activation_id,
-            "activation_sha256": command.activation_sha256,
+            "command": command.model_dump(mode="json"),
             "publication_events": [
-                {
-                    "event_id": event.event_id,
-                    "event_sha256": event.event_sha256,
-                }
+                event.model_dump(mode="json")
                 for event in publication_events
             ],
             "index_receipt": (
                 None
                 if index_receipt is None
-                else {
-                    "receipt_id": index_receipt.receipt_id,
-                    "receipt_sha256": index_receipt.receipt_sha256,
-                }
+                else index_receipt.model_dump(mode="json")
             ),
+            "notes": [
+                {
+                    "content_byte_count": len(note.content),
+                    "content_sha256": hashlib.sha256(note.content).hexdigest(),
+                    "entry": note.entry.model_dump(mode="json"),
+                    "workspace": str(note.workspace),
+                }
+                for note in notes
+            ],
+            "base_notes": (
+                None
+                if base_notes is None
+                else [
+                    {
+                        "content_byte_count": len(note.content),
+                        "content_sha256": hashlib.sha256(note.content).hexdigest(),
+                        "rel_path": note.rel_path,
+                        "supporting_files": [
+                            {
+                                "content_byte_count": len(member.content),
+                                "content_sha256": hashlib.sha256(member.content).hexdigest(),
+                                "rel_path": member.rel_path,
+                            }
+                            for member in note.supporting_files
+                        ],
+                        "workspace": str(note.workspace),
+                    }
+                    for note in base_notes
+                ]
+            ),
+            "verified_workspace_bootstrap": workspace_binding,
         }
     )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class RepositoryVerifiedManagedGenerationEffects:
     """Process-local proof that exact generation effects were reopened.
 
@@ -345,6 +513,8 @@ class RepositoryVerifiedManagedGenerationEffects:
     index_receipt_sha256: str | None
     _repository: ManagedGenerationRepository
     _notes: tuple[ResolvedGenerationSourceNote, ...]
+    _base_notes: tuple[ExactVaultNoteInput, ...] | None
+    _verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None
     _token: object
     _seal: str
 
@@ -383,48 +553,95 @@ class RepositoryVerifiedManagedGenerationEffects:
             raise ManagedGenerationRepositoryError(
                 "managed generation effect repository was substituted"
             )
-        payload = _effect_capability_payload(
-            repository_id=self.repository_id,
-            repository_root=self.repository_root,
-            command=command,
-            publication_events=publication_events,
-            index_receipt=index_receipt,
-        )
-        expected_seal = hmac.new(
-            _EFFECT_CAPABILITY_SECRET,
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
-        expected_receipt_id = None if index_receipt is None else index_receipt.receipt_id
-        expected_receipt_sha = None if index_receipt is None else index_receipt.receipt_sha256
-        if (
-            self.repository_id != self._repository.repository_id
-            or self.repository_root != str(self._repository.root)
-            or self.activation_id != command.activation_id
-            or self.activation_sha256 != command.activation_sha256
-            or command.generation_repository_id != self.repository_id
-            or self.publication_event_ids != tuple(event.event_id for event in publication_events)
-            or self.publication_event_sha256s
-            != tuple(event.event_sha256 for event in publication_events)
-            or self.index_receipt_id != expected_receipt_id
-            or self.index_receipt_sha256 != expected_receipt_sha
-            or not hmac.compare_digest(self._seal, expected_seal)
-        ):
-            raise ManagedGenerationRepositoryError(
-                "managed generation effect capability differs from exact evidence"
+        canonical_notes = _canonical_resolved_generation_notes(self._notes)
+        try:
+            verified_base_notes = verify_generation_base_inventory(
+                expected_authority=command.expected_authority,
+                verified_workspace_bootstrap=self._verified_workspace_bootstrap,
+                base_notes=self._base_notes,
             )
+        except ValueError as exc:
+            raise ManagedGenerationRepositoryError(str(exc)) from exc
+        if verified_base_notes != self._base_notes:
+            raise ManagedGenerationRepositoryError(
+                "managed generation base inventory changed after capability minting"
+            )
+        if canonical_notes != self._notes:
+            raise ManagedGenerationRepositoryError(
+                "managed generation notes changed after capability minting"
+            )
+
+        def verify_seal() -> None:
+            payload = _effect_capability_payload(
+                repository=self._repository,
+                repository_id=self.repository_id,
+                repository_root=self.repository_root,
+                command=command,
+                publication_events=publication_events,
+                index_receipt=index_receipt,
+                notes=canonical_notes,
+                base_notes=verified_base_notes,
+                verified_workspace_bootstrap=self._verified_workspace_bootstrap,
+            )
+            expected_seal = hmac.new(
+                _EFFECT_CAPABILITY_SECRET,
+                payload,
+                hashlib.sha256,
+            ).hexdigest()
+            expected_receipt_id = None if index_receipt is None else index_receipt.receipt_id
+            expected_receipt_sha = (
+                None if index_receipt is None else index_receipt.receipt_sha256
+            )
+            if (
+                self.repository_id != self._repository.repository_id
+                or self.repository_root != str(self._repository.root)
+                or self.activation_id != command.activation_id
+                or self.activation_sha256 != command.activation_sha256
+                or command.generation_repository_id != self.repository_id
+                or self.publication_event_ids
+                != tuple(event.event_id for event in publication_events)
+                or self.publication_event_sha256s
+                != tuple(event.event_sha256 for event in publication_events)
+                or self.index_receipt_id != expected_receipt_id
+                or self.index_receipt_sha256 != expected_receipt_sha
+                or not hmac.compare_digest(self._seal, expected_seal)
+            ):
+                raise ManagedGenerationRepositoryError(
+                    "managed generation effect capability differs from exact evidence"
+                )
+
+        verify_seal()
         for event in publication_events:
             if event.activation_id != command.activation_id:
                 raise ManagedGenerationRepositoryError(
                     "managed publication capability crosses activation identities"
                 )
-            self._repository.open_publication(event)
+            ManagedGenerationRepository.open_publication(self._repository, event)
         if index_receipt is not None:
-            self._repository.verify_index(
+            ManagedGenerationRepository.verify_index(
+                self._repository,
                 receipt=index_receipt,
                 command=command,
                 notes=self._notes,
+                base_notes=self._base_notes,
+                verified_workspace_bootstrap=self._verified_workspace_bootstrap,
             )
+        try:
+            final_base_notes = verify_generation_base_inventory(
+                expected_authority=command.expected_authority,
+                verified_workspace_bootstrap=self._verified_workspace_bootstrap,
+                base_notes=self._base_notes,
+            )
+        except ValueError as exc:
+            raise ManagedGenerationRepositoryError(str(exc)) from exc
+        if (
+            final_base_notes != verified_base_notes
+            or _canonical_resolved_generation_notes(self._notes) != canonical_notes
+        ):
+            raise ManagedGenerationRepositoryError(
+                "managed generation inputs changed during effect verification"
+            )
+        verify_seal()
 
 
 class ManagedGenerationRepository:
@@ -436,7 +653,12 @@ class ManagedGenerationRepository:
         *,
         forbidden_roots: tuple[Path, ...] = (),
         create: bool = True,
+        read_only: bool = False,
     ) -> None:
+        if type(create) is not bool or type(read_only) is not bool:
+            raise TypeError("create and read_only must be exact booleans")
+        if read_only and create:
+            raise ValueError("a read-only generation repository cannot create its root")
         requested = Path(root)
         try:
             forbidden = tuple(item.resolve(strict=True) for item in forbidden_roots)
@@ -514,7 +736,8 @@ class ManagedGenerationRepository:
                 raise RepositoryFileIntegrityError(
                     "generation repository root is not a private owned directory"
                 )
-            os.fsync(root_fd)
+            if not read_only:
+                os.fsync(root_fd)
             if created_root:
                 # Make the newly-created root entry durable, not merely its children.
                 os.fsync(parent_fd)
@@ -543,7 +766,12 @@ class ManagedGenerationRepository:
             )
         self._root = resolved
         self._signature = (info.st_dev, info.st_ino)
-        self._backend = FilesystemInferenceEvidenceRepository(resolved)
+        self._read_only = read_only
+        self._backend = FilesystemInferenceEvidenceRepository(
+            resolved,
+            create=create,
+            read_only=read_only,
+        )
 
     @property
     def root(self) -> Path:
@@ -552,6 +780,16 @@ class ManagedGenerationRepository:
     @property
     def repository_id(self) -> str:
         return self._backend.repository_id
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise ManagedGenerationRepositoryError(
+                "read-only managed generation repository rejects mutation"
+            )
 
     def _verified_root(self) -> Path:
         try:
@@ -588,6 +826,10 @@ class ManagedGenerationRepository:
 
     @staticmethod
     def _require_generation_zero_command(command: ManagedActivationCommand) -> None:
+        if type(command) is not ManagedActivationCommand:
+            raise ManagedGenerationRepositoryError(
+                "managed generation command type was substituted"
+            )
         expected = command.expected_authority
         if not (
             isinstance(
@@ -875,6 +1117,7 @@ class ManagedGenerationRepository:
         content: bytes,
         published_at: str,
     ) -> ManagedPublicationEvent:
+        self._require_writable()
         self._require_generation_zero_command(command)
         if len(content) != publication.destination.expected_byte_count or (
             hashlib.sha256(content).hexdigest() != publication.destination.expected_sha256
@@ -932,14 +1175,25 @@ class ManagedGenerationRepository:
         publication_events: tuple[ManagedPublicationEvent, ...],
         index_receipt: ManagedIndexReadinessReceipt | None,
         notes: tuple[ResolvedGenerationSourceNote, ...] = (),
+        base_notes: tuple[ExactVaultNoteInput, ...] | None = None,
+        verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None = None,
     ) -> RepositoryVerifiedManagedGenerationEffects:
         """Reopen exact effects and mint process-local store authority."""
 
         self._require_generation_zero_command(command)
+        notes = _canonical_resolved_generation_notes(notes)
         if command.generation_repository_id != self.repository_id:
             raise ManagedGenerationRepositoryError(
                 "activation command belongs to another generation repository"
             )
+        try:
+            verified_base_notes = verify_generation_base_inventory(
+                expected_authority=command.expected_authority,
+                verified_workspace_bootstrap=verified_workspace_bootstrap,
+                base_notes=base_notes,
+            )
+        except ValueError as exc:
+            raise ManagedGenerationRepositoryError(str(exc)) from exc
         for event in publication_events:
             if event.activation_id != command.activation_id:
                 raise ManagedGenerationRepositoryError(
@@ -951,13 +1205,19 @@ class ManagedGenerationRepository:
                 receipt=index_receipt,
                 command=command,
                 notes=notes,
+                base_notes=verified_base_notes,
+                verified_workspace_bootstrap=verified_workspace_bootstrap,
             )
         payload = _effect_capability_payload(
+            repository=self,
             repository_id=self.repository_id,
             repository_root=str(self.root),
             command=command,
             publication_events=publication_events,
             index_receipt=index_receipt,
+            notes=notes,
+            base_notes=verified_base_notes,
+            verified_workspace_bootstrap=verified_workspace_bootstrap,
         )
         capability = RepositoryVerifiedManagedGenerationEffects(
             repository_id=self.repository_id,
@@ -970,6 +1230,8 @@ class ManagedGenerationRepository:
             index_receipt_sha256=(None if index_receipt is None else index_receipt.receipt_sha256),
             _repository=self,
             _notes=notes,
+            _base_notes=verified_base_notes,
+            _verified_workspace_bootstrap=verified_workspace_bootstrap,
             _token=_EFFECT_CAPABILITY_TOKEN,
             _seal=hmac.new(
                 _EFFECT_CAPABILITY_SECRET,
@@ -977,7 +1239,8 @@ class ManagedGenerationRepository:
                 hashlib.sha256,
             ).hexdigest(),
         )
-        capability.verify(
+        RepositoryVerifiedManagedGenerationEffects.verify(
+            capability,
             command=command,
             publication_events=publication_events,
             index_receipt=index_receipt,
@@ -985,6 +1248,7 @@ class ManagedGenerationRepository:
         return capability
 
     def _ensure_index_file(self, relative: str) -> tuple[Path, bool]:
+        self._require_writable()
         relative = canonical_repo_relative(relative)
         self._verified_root()
         parent_fd, name = self._backend._open_parent(relative, create=True)
@@ -1108,10 +1372,17 @@ class ManagedGenerationRepository:
                 relative=relative,
                 path=self._root / relative,
                 sealed=not writable,
+                signature=_stable_file_signature(os.fstat(file_fd)),
+                parent_signature=(
+                    None
+                    if writable
+                    else _stable_file_signature(os.fstat(parent_fd))
+                ),
             )
             parent_fd = -1
             file_fd = -1
             pinned.verify_entry(allow_empty=True)
+            self._reject_index_sidecars(pinned)
             return pinned
         except ManagedGenerationRepositoryError:
             raise
@@ -1753,8 +2024,12 @@ class ManagedGenerationRepository:
         notes: tuple[ResolvedGenerationSourceNote, ...],
         embedder: EmbeddingProvider,
         ready_at: str,
+        base_notes: tuple[ExactVaultNoteInput, ...] | None = None,
+        verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None = None,
     ) -> BuiltManagedIndex:
+        self._require_writable()
         self._require_generation_zero_command(command)
+        notes = _canonical_resolved_generation_notes(notes)
         if embedder.name != command.embedding_provider or (
             embedder.model_version != command.embedding_model_version
             or embedder.dimensions != command.embedding_dimensions
@@ -1773,6 +2048,14 @@ class ManagedGenerationRepository:
                 raise ManagedGenerationIndexError(
                     "resolved SourceNote bytes differ from generation projection"
                 )
+        try:
+            verified_base_notes = verify_generation_base_inventory(
+                expected_authority=command.expected_authority,
+                verified_workspace_bootstrap=verified_workspace_bootstrap,
+                base_notes=base_notes,
+            )
+        except ValueError as exc:
+            raise ManagedGenerationIndexError(str(exc)) from exc
         serving_entries = tuple(item for item in notes if item.entry.included_in_serving_index)
         if not serving_entries:
             raise ManagedGenerationIndexError("managed generation has no CURRENT serving notes")
@@ -1782,16 +2065,16 @@ class ManagedGenerationRepository:
             raise ManagedGenerationIndexError(
                 "resolved serving notes differ from the exact projection"
             )
-        exact_notes = tuple(
-            ExactSourceNoteInput(
-                rel_path=item.entry.logical_path,
-                content=item.content,
-                workspace=item.workspace,
+        try:
+            exact_notes = complete_generation_index_notes(
+                command=command,
+                managed_notes=notes,
+                base_notes=verified_base_notes,
             )
-            for item in serving_entries
-        )
-        prepared = prepare_exact_source_notes(exact_notes)
-        expected_paths = tuple(sorted(item.entry.logical_path for item in serving_entries))
+            prepared = prepare_exact_vault_notes(exact_notes)
+        except (TypeError, ValueError) as exc:
+            raise ManagedGenerationIndexError(str(exc)) from exc
+        expected_paths = tuple(sorted(item.rel_path for item in exact_notes))
         expected_doc_ids = tuple(sorted(item.doc.doc_id for item in prepared))
         expected_record_ids = tuple(
             sorted(unit.record_id for item in prepared for unit in item.units)
@@ -1817,6 +2100,8 @@ class ManagedGenerationRepository:
                     receipt=ready,
                     command=command,
                     notes=notes,
+                    base_notes=verified_base_notes,
+                    verified_workspace_bootstrap=verified_workspace_bootstrap,
                 )
                 return BuiltManagedIndex(receipt=ready, index_path=path)
             path, _created = self._ensure_index_file(relative)
@@ -1832,7 +2117,7 @@ class ManagedGenerationRepository:
                 build_backend = SqliteBackend(":memory:")
                 build_backend.init_schema(embedder.dimensions, embedder.model_version)
                 expected_schema = self._sqlite_schema_rows(build_backend)
-                report = sync_exact_source_notes(
+                report = sync_exact_vault_notes(
                     exact_notes,
                     build_backend,
                     embedder,
@@ -1975,7 +2260,13 @@ class ManagedGenerationRepository:
                     )
             finally:
                 pinned.close()
-            self.verify_index(receipt=receipt, command=command, notes=notes)
+            self.verify_index(
+                receipt=receipt,
+                command=command,
+                notes=notes,
+                base_notes=verified_base_notes,
+                verified_workspace_bootstrap=verified_workspace_bootstrap,
+            )
         return BuiltManagedIndex(receipt=receipt, index_path=path)
 
     def verify_index(
@@ -1984,8 +2275,11 @@ class ManagedGenerationRepository:
         receipt: ManagedIndexReadinessReceipt,
         command: ManagedActivationCommand,
         notes: tuple[ResolvedGenerationSourceNote, ...],
+        base_notes: tuple[ExactVaultNoteInput, ...] | None = None,
+        verified_workspace_bootstrap: VerifiedWorkspaceBootstrapCapability | None = None,
     ) -> Path:
         self._require_generation_zero_command(command)
+        notes = _canonical_resolved_generation_notes(notes)
         if (
             receipt.activation_id != command.activation_id
             or receipt.generation_id != command.projection.generation_id
@@ -2016,17 +2310,23 @@ class ManagedGenerationRepository:
                 raise ManagedGenerationIndexError(
                     "resolved SourceNote bytes differ from generation projection"
                 )
-        serving = tuple(item for item in notes if item.entry.included_in_serving_index)
-        prepared = prepare_exact_source_notes(
-            tuple(
-                ExactSourceNoteInput(
-                    rel_path=item.entry.logical_path,
-                    content=item.content,
-                    workspace=item.workspace,
-                )
-                for item in serving
+        try:
+            verified_base_notes = verify_generation_base_inventory(
+                expected_authority=command.expected_authority,
+                verified_workspace_bootstrap=verified_workspace_bootstrap,
+                base_notes=base_notes,
             )
-        )
+        except ValueError as exc:
+            raise ManagedGenerationIndexError(str(exc)) from exc
+        try:
+            exact_notes = complete_generation_index_notes(
+                command=command,
+                managed_notes=notes,
+                base_notes=verified_base_notes,
+            )
+            prepared = prepare_exact_vault_notes(exact_notes)
+        except (TypeError, ValueError) as exc:
+            raise ManagedGenerationIndexError(str(exc)) from exc
         expected_rows = self._expected_semantic_rows(
             prepared,
             embedding_model_version=receipt.embedding_model_version,
@@ -2054,7 +2354,7 @@ class ManagedGenerationRepository:
                 self._semantic_index_fingerprint(
                     backend,
                     expected_rows=expected_rows,
-                    expected_paths=tuple(sorted(item.entry.logical_path for item in serving)),
+                    expected_paths=tuple(sorted(item.rel_path for item in exact_notes)),
                     expected_doc_ids=tuple(sorted(item.doc.doc_id for item in prepared)),
                     expected_record_ids=tuple(
                         sorted(unit.record_id for item in prepared for unit in item.units)
@@ -2074,7 +2374,7 @@ class ManagedGenerationRepository:
             fingerprint, counts = self._semantic_index_fingerprint(
                 backend,
                 expected_rows=expected_rows,
-                expected_paths=tuple(sorted(item.entry.logical_path for item in serving)),
+                expected_paths=tuple(sorted(item.rel_path for item in exact_notes)),
                 expected_doc_ids=tuple(sorted(item.doc.doc_id for item in prepared)),
                 expected_record_ids=tuple(
                     sorted(unit.record_id for item in prepared for unit in item.units)
@@ -2142,6 +2442,76 @@ class ManagedGenerationRepository:
             backend.close()
             raise ManagedGenerationIndexError("active managed index is not query-only")
         return backend
+
+    def verify_open_read_only_index(
+        self,
+        *,
+        backend: SqliteBackend,
+        receipt: ManagedIndexReadinessReceipt,
+    ) -> None:
+        """Attest the exact backend-owned inode before its guard is released."""
+
+        self._verified_root()
+        if type(backend) is not _GuardedSqliteBackend:
+            raise ManagedGenerationIndexError(
+                "active managed backend does not own the required index guard"
+            )
+        guard = backend._managed_index_guard
+        assert guard is not None
+        self._verify_pinned_index_parent_path(guard)
+        self._reject_index_sidecars(guard)
+        backend.verify_pinned_identity(
+            expected_sha256=receipt.index_file_sha256,
+            expected_byte_count=receipt.index_file_byte_count,
+        )
+        self._verify_pinned_index_parent_path(guard)
+        self._verified_root()
+
+    def bind_open_read_only_index_close_verifier(
+        self,
+        *,
+        backend: SqliteBackend,
+        verifier: Callable[[], None],
+    ) -> None:
+        """Bind final fail-closed verification to a guarded backend's lifetime."""
+
+        if type(backend) is not _GuardedSqliteBackend:
+            raise ManagedGenerationIndexError(
+                "active managed backend does not own the required index guard"
+            )
+        backend.bind_close_verifier(verifier)
+
+    def _verify_pinned_index_parent_path(self, pinned: _PinnedIndexFile) -> None:
+        """Retraverse the canonical repository path to the held index parent."""
+
+        current_parent_fd = -1
+        try:
+            current_parent_fd, current_name = self._backend._open_parent(
+                pinned.relative,
+                create=False,
+            )
+            current_parent = os.fstat(current_parent_fd)
+            held_parent = os.fstat(pinned.parent_fd)
+        except (InferenceEvidenceRepositoryError, OSError) as exc:
+            raise ManagedGenerationIndexError(
+                "managed SQLite canonical parent path changed while serving"
+            ) from exc
+        finally:
+            if current_parent_fd >= 0:
+                os.close(current_parent_fd)
+        if (
+            current_name != pinned.name
+            or not stat.S_ISDIR(current_parent.st_mode)
+            or not stat.S_ISDIR(held_parent.st_mode)
+            or _inode_signature(current_parent) != _inode_signature(held_parent)
+            or (
+                pinned.parent_signature is not None
+                and _stable_file_signature(held_parent) != pinned.parent_signature
+            )
+        ):
+            raise ManagedGenerationIndexError(
+                "managed SQLite canonical parent path was substituted while serving"
+            )
 
 
 __all__ = [

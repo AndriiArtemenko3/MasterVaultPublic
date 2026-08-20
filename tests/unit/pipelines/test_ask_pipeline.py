@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import mastervault.pipelines.ask as ask_module
 from mastervault.config import RetrievalCfg
 from mastervault.contracts.judge import SufficiencyVerdictOut
 from mastervault.contracts.synthesis import GroundedAnswerOut
@@ -85,6 +86,77 @@ def test_insufficient_then_sufficient_merges_evidence_across_rounds(settings, ba
     record_ids = {e["record_id"] for e in outcome.evidence}
     assert "claim:source-a-01" in record_ids
     assert "claim:source-b-01" in record_ids
+
+
+def test_query_only_ask_keeps_results_without_creating_run_artifacts(
+    settings,
+    backend,
+    embedder,
+    llm,
+):
+    _seed_two_claims(settings.paths.vault_dir, backend, embedder)
+    runs_before = tuple(settings.paths.runs_dir.rglob("*"))
+
+    outcome = run_ask(
+        "What is the widget policy?",
+        settings,
+        backend,
+        embedder,
+        llm,
+        persist_run=False,
+    )
+
+    assert not outcome.zero_evidence
+    assert outcome.run_id.startswith("ask-query-only-")
+    assert outcome.run_dir == Path()
+    assert tuple(settings.paths.runs_dir.rglob("*")) == runs_before
+
+
+def test_evidence_workspace_mapping_is_threaded_through_every_search_round(
+    settings,
+    backend,
+    embedder,
+    llm,
+    monkeypatch,
+):
+    _seed_two_claims(settings.paths.vault_dir, backend, embedder)
+    evidence_workspaces = {
+        "operations/sources/source-a.md": settings.paths.workspace,
+        "operations/sources/source-b.md": settings.paths.workspace,
+    }
+    observed = []
+    real_hybrid_search = ask_module.hybrid_search
+
+    def observing_hybrid_search(*args, **kwargs):
+        observed.append(kwargs.get("evidence_workspaces"))
+        return real_hybrid_search(*args, **kwargs)
+
+    monkeypatch.setattr(ask_module, "hybrid_search", observing_hybrid_search)
+    llm.push(
+        "sufficiency_judge",
+        SufficiencyVerdictOut(
+            sufficient=False,
+            missing_aspects=["gadget exchange terms"],
+            followup_queries=["gadget exchange window details"],
+            rationale="Search the second policy.",
+        ),
+    )
+    llm.push(
+        "sufficiency_judge",
+        SufficiencyVerdictOut(sufficient=True, rationale="Both policies are covered."),
+    )
+
+    outcome = run_ask(
+        "What is the widget policy?",
+        settings,
+        backend,
+        embedder,
+        llm,
+        evidence_workspaces=evidence_workspaces,
+    )
+
+    assert outcome.rounds == 2
+    assert observed == [evidence_workspaces, evidence_workspaces]
 
 
 def test_novelty_floor_forces_stop_despite_insufficient_verdict(settings, backend, embedder, llm):
