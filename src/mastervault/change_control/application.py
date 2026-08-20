@@ -17,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
+from typing import NoReturn, Protocol, cast
 
 from mastervault.change_control.application_errors import (
     ChangeControlApplicationConflictError,
@@ -35,7 +35,16 @@ from mastervault.change_control.legacy_index import (
     open_legacy_sqlite_index_attestation_guard,
 )
 from mastervault.change_control.managed_review import AuthorityRevisionBinding
-from mastervault.change_control.managed_store import SqliteManagedChangeControlStore
+from mastervault.change_control.managed_serving import (
+    ManagedServingConflictError,
+    ManagedServingError,
+    ManagedServingResolution,
+    open_active_managed_sqlite_generation,
+)
+from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
+    SqliteManagedChangeControlStore,
+)
 from mastervault.change_control.models import aggregate_sha256, canonical_json_bytes
 from mastervault.change_control.operator_run import (
     OperatorRunCommand,
@@ -43,7 +52,14 @@ from mastervault.change_control.operator_run import (
     OperatorRunLinkKind,
     OperatorRunView,
 )
-from mastervault.change_control.store import ChangeControlBusyError
+from mastervault.change_control.query_generation import (
+    QueryGenerationKind,
+    QueryGenerationMetadataV1,
+    QueryGenerationSelectionV1,
+    QueryGenerationSelector,
+    ResolvedQueryGeneration,
+)
+from mastervault.change_control.store import ChangeControlBusyError, ChangeControlSnapshot
 from mastervault.change_control.workspace_bootstrap import (
     LegacyIndexReadinessReceipt,
     WorkspaceBootstrapAggregateSnapshot,
@@ -63,10 +79,17 @@ from mastervault.change_control.workspace_bootstrap_repository import (
     resolve_workspace_bootstrap,
 )
 from mastervault.config import Settings
+from mastervault.evidence import EvidenceLocation
 from mastervault.providers import get_embedding_provider
+from mastervault.storage import get_backend
 from mastervault.storage.base import SCHEMA_VERSION
+from mastervault.sync.indexer import ExactVaultNoteInput
 
 FailureHook = Callable[[str], None]
+
+
+class _Closable(Protocol):
+    def close(self) -> None: ...
 
 _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
 _RUN_ID_RE = re.compile(r"^operatorrun:[0-9a-f]{64}$")
@@ -115,6 +138,24 @@ def _bootstrap_lock(path: Path) -> threading.Lock:
 def _notify(hook: FailureHook | None, stage: str) -> None:
     if hook is not None:
         hook(stage)
+
+
+def _close_failed_query_resources(
+    failure: BaseException,
+    *resources: _Closable | None,
+) -> NoReturn:
+    """Attempt every construction cleanup while retaining the original failure."""
+
+    for resource in resources:
+        if resource is None:
+            continue
+        try:
+            resource.close()
+        except BaseException:
+            # Construction has already failed.  A cleanup failure must not skip
+            # the remaining guards or replace the original public error.
+            continue
+    raise failure
 
 
 def _now() -> str:
@@ -332,6 +373,156 @@ def _validate_run_id(run_id: str) -> None:
         raise ChangeControlApplicationUsageError("run_id is not canonical")
 
 
+def _query_state_exists(settings: Settings) -> bool:
+    """Inspect only the configured authority locator; never create its parent."""
+
+    state_path = _lexical_absolute(
+        settings.paths.change_control_db_path,
+        label="change-control state path",
+    )
+    try:
+        state_path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise ChangeControlApplicationIntegrityError(
+            "configured change-control state path cannot be inspected"
+        ) from exc
+    return True
+
+
+def _managed_query_is_configured(settings: Settings) -> bool:
+    cfg = settings.query_generation
+    return any(
+        (
+            cfg.bootstrap_manifest is not None,
+            bool(cfg.source_roots),
+            cfg.seed_repository_root is not None,
+            cfg.evidence_repository_root is not None,
+            cfg.canonical_repository_root is not None,
+            cfg.temporal_analysis_manifest_sha256 is not None,
+        )
+    )
+
+
+def _configured_source_roots(settings: Settings) -> tuple[BootstrapSourceRoot, ...]:
+    try:
+        return tuple(
+            BootstrapSourceRoot(root_id=root_id, path=path)
+            for root_id, path in sorted(settings.query_generation.source_roots.items())
+        )
+    except (TypeError, ValueError) as exc:
+        raise ChangeControlApplicationUsageError(
+            "query-generation source roots are invalid"
+        ) from exc
+
+
+def _existing_query_protected_paths(paths: _ApplicationPaths) -> tuple[Path, ...]:
+    candidates = (paths.vault, paths.legacy_index, paths.checkpoint_db)
+    return tuple(path for path in candidates if _existing_identity(path) is not None)
+
+
+def _select_generation_authority(
+    *,
+    selection: QueryGenerationSelectionV1,
+    active: AuthorityRevisionBinding,
+    generation_zero: AuthorityRevisionBinding,
+) -> AuthorityRevisionBinding:
+    if selection.selector in {
+        QueryGenerationSelector.AUTO,
+        QueryGenerationSelector.ACTIVE,
+    }:
+        return active
+    if selection.selector == QueryGenerationSelector.LEGACY:
+        return generation_zero
+    assert selection.generation_id is not None
+    if active.active_generation.generation_id == selection.generation_id:
+        return active
+    if generation_zero.active_generation.generation_id == selection.generation_id:
+        return generation_zero
+    raise ChangeControlApplicationUsageError(
+        "requested generation is not available in the v0.3 authority chain"
+    )
+
+
+def _query_metadata(
+    *,
+    selection: QueryGenerationSelectionV1,
+    selected: AuthorityRevisionBinding,
+    active: AuthorityRevisionBinding,
+    logical_fingerprint: str,
+    file_sha256: str,
+    file_byte_count: int,
+    schema_version: int,
+    embedding_model: str,
+    embedding_dimensions: int,
+) -> QueryGenerationMetadataV1:
+    number = selected.active_generation.generation_number
+    if number not in {0, 1}:
+        raise ChangeControlApplicationUnsupportedOperationError(
+            "the v0.3 query resolver supports generation zero and its first successor"
+        )
+    return QueryGenerationMetadataV1(
+        selection=selection,
+        backend="sqlite",
+        generation_kind=(
+            QueryGenerationKind.GENERATION_ZERO
+            if number == 0
+            else QueryGenerationKind.MANAGED
+        ),
+        generation_id=selected.active_generation.generation_id,
+        generation_number=number,
+        active_generation_id=active.active_generation.generation_id,
+        active_authority_revision=active.authority_revision,
+        is_active=selected == active,
+        manifest_sha256=selected.active_generation.manifest_sha256,
+        index_logical_fingerprint=logical_fingerprint,
+        index_file_sha256=file_sha256,
+        index_file_byte_count=file_byte_count,
+        storage_schema_version=schema_version,
+        embedding_model=embedding_model,
+        embedding_dimensions=embedding_dimensions,
+    )
+
+
+def _guard_query_verification(callback: Callable[[], None]) -> Callable[[], None]:
+    """Keep internal guard failures behind the stable application taxonomy."""
+
+    def verified() -> None:
+        try:
+            callback()
+        except ChangeControlApplicationError:
+            raise
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    return verified
+
+
+def _fresh_active_query_authority(
+    *,
+    state_path: Path,
+    aggregate_id: str,
+    context: AuthorityVerificationContext,
+) -> AuthorityRevisionBinding:
+    """Reopen authority so a bounded query does not re-read an immutable snapshot."""
+
+    fresh = SqliteManagedChangeControlStore(
+        state_path,
+        secure_open=True,
+        read_only=True,
+    )
+    try:
+        return fresh.get_active_generation(
+            aggregate_id,
+            authority_context=context,
+        )
+    finally:
+        fresh.close()
+
+
 class ChangeControlApplication:
     """Supported synchronous façade over the generic SQLite authority slice."""
 
@@ -385,6 +576,534 @@ class ChangeControlApplication:
             expected_index_file_sha256=expected.index_file_sha256,
             expected_index_file_byte_count=expected.index_file_byte_count,
         )
+
+    def resolve_query_generation(
+        self,
+        selection: (
+            str | QueryGenerationSelector | QueryGenerationSelectionV1
+        ) = QueryGenerationSelector.AUTO,
+    ) -> ResolvedQueryGeneration:
+        """Resolve the one verified index that must serve an ordinary query.
+
+        An unbootstrapped v0.2 workspace keeps the historical backend behavior.
+        Once an authority database exists, every selector is resolved through
+        fresh repository evidence and a secure read-only authority store.
+        """
+
+        try:
+            if isinstance(selection, QueryGenerationSelectionV1):
+                if type(selection) is not QueryGenerationSelectionV1:
+                    raise TypeError("query generation selection type was substituted")
+                requested = QueryGenerationSelectionV1.model_validate_json(
+                    canonical_json_bytes(selection.model_dump(mode="json"))
+                )
+                if requested != selection:
+                    raise ValueError("query generation selection is not canonical")
+            else:
+                requested = QueryGenerationSelectionV1.parse(selection)
+        except (TypeError, ValueError) as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+
+        try:
+            if not _query_state_exists(self._settings):
+                if _managed_query_is_configured(self._settings):
+                    self._preflight_backend()
+                    _preflight_paths(self._settings)
+                    raise ChangeControlApplicationIntegrityError(
+                        "configured managed authority store does not exist"
+                    )
+                if requested.selector != QueryGenerationSelector.AUTO:
+                    raise ChangeControlApplicationUsageError(
+                        "explicit generation selection requires an initialized authority store"
+                    )
+                backend = get_backend(self._settings)
+                return ResolvedQueryGeneration(
+                    backend=backend,
+                    metadata=QueryGenerationMetadataV1(
+                        selection=requested,
+                        backend=backend.name,
+                        generation_kind=QueryGenerationKind.UNMANAGED,
+                        is_active=False,
+                    ),
+                )
+
+            # Managed resolution is SQLite-only and this check deliberately
+            # precedes repository/provider opening or any other effects.
+            self._preflight_backend()
+            paths = _preflight_paths(self._settings)
+            if self._settings.query_generation.bootstrap_manifest is not None:
+                return self._resolve_workspace_query_generation(
+                    paths=paths,
+                    selection=requested,
+                )
+            if self._settings.query_generation.seed_repository_root is not None:
+                return self._resolve_seed_query_generation(
+                    paths=paths,
+                    selection=requested,
+                )
+            raise ChangeControlApplicationUsageError(
+                "managed queries require query_generation.bootstrap_manifest or "
+                "query_generation.seed_repository_root"
+            )
+        except ChangeControlApplicationError:
+            raise
+        except (
+            WorkspaceBootstrapPlatformUnsupportedError,
+            LegacyIndexPlatformUnsupportedError,
+        ) as exc:
+            raise ChangeControlApplicationUnsupportedOperationError(str(exc)) from exc
+        except ChangeControlBusyError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ManagedServingConflictError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ManagedServingError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def _resolve_workspace_query_generation(
+        self,
+        *,
+        paths: _ApplicationPaths,
+        selection: QueryGenerationSelectionV1,
+    ) -> ResolvedQueryGeneration:
+        configured_manifest = self._settings.query_generation.bootstrap_manifest
+        assert configured_manifest is not None
+        manifest_path = _manifest_path(paths, configured_manifest)
+        source_roots = _configured_source_roots(self._settings)
+        embedder = get_embedding_provider(self._settings)
+
+        workspace_guard = None
+        index_guard = None
+        store = None
+        backend = None
+        try:
+            workspace_guard = open_workspace_bootstrap_evidence_guard(
+                workspace_root=paths.workspace,
+                manifest_path=manifest_path,
+                source_roots=source_roots,
+                index_schema_version=SCHEMA_VERSION,
+                embedding_model=embedder.model_version,
+                embedding_dimensions=embedder.dimensions,
+            )
+            resolved = workspace_guard.resolved
+            expected_index = resolved.inventory.legacy_index
+            index_guard = open_legacy_sqlite_index_attestation_guard(
+                index_path=resolved.legacy_index_path,
+                notes=resolved.exact_vault_notes,
+                embedding_model_version=expected_index.embedding_model,
+                embedding_dimensions=expected_index.embedding_dimensions,
+                expected_index_file_sha256=expected_index.index_file_sha256,
+                expected_index_file_byte_count=expected_index.index_file_byte_count,
+            )
+            store = SqliteManagedChangeControlStore(
+                paths.state_db,
+                secure_open=True,
+                read_only=True,
+            )
+            state = store.get_workspace_bootstrap_by_inventory_id(
+                resolved.inventory.inventory_id
+            )
+            if state is None:
+                raise ChangeControlApplicationIntegrityError(
+                    "fresh workspace inventory has no durable bootstrap owner"
+                )
+            inventory_receipt, readiness = state.require_complete()
+            aggregate_commit = store.get_operation_commit(
+                inventory_receipt.aggregate_operation_id
+            )
+            if aggregate_commit is None or not (
+                aggregate_commit.aggregate_id == resolved.aggregate.aggregate_id
+                and aggregate_commit.revision == inventory_receipt.aggregate_revision == 1
+                and aggregate_commit.aggregate_sha256
+                == inventory_receipt.aggregate_sha256
+                == aggregate_sha256(resolved.aggregate)
+                and aggregate_commit.changed
+            ):
+                raise ChangeControlApplicationIntegrityError(
+                    "workspace bootstrap aggregate receipt cannot be reopened exactly"
+                )
+            persisted_snapshot = ChangeControlSnapshot(
+                aggregate=resolved.aggregate,
+                revision=aggregate_commit.revision,
+                aggregate_sha256=aggregate_commit.aggregate_sha256,
+            )
+            capability = verify_workspace_bootstrap_evidence(
+                state=state,
+                resolved_inventory=resolved.inventory,
+                resolved_aggregate=resolved.aggregate,
+                persisted_snapshot=persisted_snapshot,
+                legacy_attestation=index_guard.attestation,
+                evidence_verifier=create_workspace_bootstrap_evidence_verifier(
+                    workspace_guard,
+                    index_guard,
+                ),
+            )
+            context = AuthorityVerificationContext.workspace(capability)
+            active = store.get_active_generation(
+                state.intent.aggregate_id,
+                authority_context=context,
+            )
+            if active.active_generation.generation_number == 0:
+                generation_zero = active
+                active_decision = None
+            elif active.active_generation.generation_number == 1:
+                active_decision = store.get_active_managed_decision_record(
+                    state.intent.aggregate_id,
+                    authority_context=context,
+                )
+                if active_decision is None:
+                    raise ChangeControlApplicationIntegrityError(
+                        "active managed generation lacks its exact decision record"
+                    )
+                generation_zero = active_decision.command.expected_authority
+            else:
+                raise ChangeControlApplicationUnsupportedOperationError(
+                    "the v0.3 query resolver supports only the first managed successor"
+                )
+            if generation_zero.active_generation.generation_number != 0:
+                raise ChangeControlApplicationIntegrityError(
+                    "managed authority does not retain generation-zero lineage"
+                )
+            selected = _select_generation_authority(
+                selection=selection,
+                active=active,
+                generation_zero=generation_zero,
+            )
+
+            serving = None
+            evidence_workspaces: dict[str, Path | EvidenceLocation]
+            if selected.active_generation.generation_number == 0:
+                backend = index_guard.open_read_only_index()
+                metadata = _query_metadata(
+                    selection=selection,
+                    selected=selected,
+                    active=active,
+                    logical_fingerprint=readiness.index_logical_fingerprint,
+                    file_sha256=readiness.index_file_sha256,
+                    file_byte_count=readiness.index_file_byte_count,
+                    schema_version=readiness.index_schema_version,
+                    embedding_model=readiness.embedding_model,
+                    embedding_dimensions=readiness.embedding_dimensions,
+                )
+                evidence_workspaces = {
+                    note.rel_path: note.workspace for note in resolved.exact_vault_notes
+                }
+                if len(evidence_workspaces) != len(resolved.exact_vault_notes):
+                    raise ChangeControlApplicationIntegrityError(
+                        "workspace evidence contains duplicate logical query paths"
+                    )
+            else:
+                assert active_decision is not None
+                serving = self._open_managed_query_generation(
+                    paths=paths,
+                    store=store,
+                    context=context,
+                    active=active,
+                    active_decision=active_decision,
+                    workspace_base_notes=resolved.exact_vault_notes,
+                )
+                backend = serving.backend
+                receipt = serving.index_receipt
+                metadata = _query_metadata(
+                    selection=selection,
+                    selected=selected,
+                    active=active,
+                    logical_fingerprint=receipt.logical_index_fingerprint,
+                    file_sha256=receipt.index_file_sha256,
+                    file_byte_count=receipt.index_file_byte_count,
+                    schema_version=receipt.storage_schema_version,
+                    embedding_model=receipt.embedding_model_version,
+                    embedding_dimensions=receipt.embedding_dimensions,
+                )
+                evidence_workspaces = {
+                    note.rel_path: (
+                        EvidenceLocation(
+                            note_workspace=note.workspace,
+                            support_workspace=resolved.workspace_root,
+                        )
+                        if note.supporting_files and note.workspace != resolved.workspace_root
+                        else note.workspace
+                    )
+                    for note in serving.index_notes
+                }
+                if len(evidence_workspaces) != len(serving.index_notes):
+                    raise ChangeControlApplicationIntegrityError(
+                        "managed generation contains duplicate logical query paths"
+                    )
+
+            def verify_live_authority() -> None:
+                try:
+                    current = _fresh_active_query_authority(
+                        state_path=paths.state_db,
+                        aggregate_id=state.intent.aggregate_id,
+                        context=context,
+                    )
+                except (TypeError, AssertionError):
+                    raise
+                except Exception as exc:
+                    raise ChangeControlApplicationIntegrityError(
+                        "active authority cannot be freshly verified"
+                    ) from exc
+                if current != active:
+                    raise ChangeControlApplicationConflictError(
+                        "active authority changed while the query generation was open"
+                    )
+
+            return ResolvedQueryGeneration(
+                backend=backend,
+                metadata=metadata,
+                evidence_workspaces=evidence_workspaces,
+                _verify_callbacks=(_guard_query_verification(verify_live_authority),),
+                _verify_backend=_guard_query_verification(
+                    (
+                        lambda: index_guard.verify_open_read_only_index(backend)
+                    )
+                    if serving is None
+                    else serving.verify
+                ),
+                _close_backend=_guard_query_verification(backend.close),
+                _close_callbacks=tuple(
+                    _guard_query_verification(callback)
+                    for callback in (
+                        store.close,
+                        index_guard.close,
+                        workspace_guard.close,
+                    )
+                ),
+            )
+        except BaseException as exc:
+            _close_failed_query_resources(
+                exc,
+                backend,
+                store,
+                index_guard,
+                workspace_guard,
+            )
+
+    def _resolve_seed_query_generation(
+        self,
+        *,
+        paths: _ApplicationPaths,
+        selection: QueryGenerationSelectionV1,
+    ) -> ResolvedQueryGeneration:
+        from mastervault.change_control.managed_query_resolver import (
+            build_read_only_managed_query_resolver,
+            reopen_sealed_seed_query_bootstrap,
+        )
+
+        cfg = self._settings.query_generation
+        if (
+            cfg.seed_repository_root is None
+            or cfg.evidence_repository_root is None
+            or cfg.canonical_repository_root is None
+            or cfg.temporal_analysis_manifest_sha256 is None
+        ):
+            raise ChangeControlApplicationUsageError(
+                "sealed-seed managed queries require seed, evidence, canonical, and "
+                "temporal-analysis runtime locators"
+            )
+        store = None
+        backend = None
+        try:
+            bootstrap = reopen_sealed_seed_query_bootstrap(
+                seed_repository_root=cfg.seed_repository_root,
+                evidence_repository_root=cfg.evidence_repository_root,
+                temporal_analysis_manifest_sha256=(
+                    cfg.temporal_analysis_manifest_sha256
+                ),
+            )
+            context = bootstrap.authority_context
+            store = SqliteManagedChangeControlStore(
+                paths.state_db,
+                secure_open=True,
+                read_only=True,
+            )
+            aggregate_id = bootstrap.prechange_head.aggregate_id
+            active = store.get_active_generation(
+                aggregate_id,
+                authority_context=context,
+            )
+            if active.active_generation.generation_number == 0:
+                raise ChangeControlApplicationUnsupportedOperationError(
+                    "sealed-seed generation zero has no generic legacy query index; "
+                    "configure a workspace bootstrap manifest to serve generation zero"
+                )
+            if active.active_generation.generation_number != 1:
+                raise ChangeControlApplicationUnsupportedOperationError(
+                    "the v0.3 query resolver supports only the first managed successor"
+                )
+            active_decision = store.get_active_managed_decision_record(
+                aggregate_id,
+                authority_context=context,
+            )
+            if active_decision is None:
+                raise ChangeControlApplicationIntegrityError(
+                    "active managed generation lacks its exact decision record"
+                )
+            generation_zero = active_decision.command.expected_authority
+            selected = _select_generation_authority(
+                selection=selection,
+                active=active,
+                generation_zero=generation_zero,
+            )
+            if selected.active_generation.generation_number == 0:
+                raise ChangeControlApplicationUnsupportedOperationError(
+                    "sealed-seed generation zero does not expose a generic legacy query index"
+                )
+            restarted = build_read_only_managed_query_resolver(
+                store=store,
+                active_decision=active_decision,
+                bootstrap=bootstrap,
+                canonical_repository_root=cfg.canonical_repository_root,
+            )
+            serving = open_active_managed_sqlite_generation(
+                aggregate_id=aggregate_id,
+                store=store,
+                resolver=restarted.resolver,
+                authority_context=context,
+                generation_root=paths.generation_root,
+                protected_paths=_existing_query_protected_paths(paths),
+            )
+            backend = serving.backend
+            receipt = serving.index_receipt
+            metadata = _query_metadata(
+                selection=selection,
+                selected=selected,
+                active=active,
+                logical_fingerprint=receipt.logical_index_fingerprint,
+                file_sha256=receipt.index_file_sha256,
+                file_byte_count=receipt.index_file_byte_count,
+                schema_version=receipt.storage_schema_version,
+                embedding_model=receipt.embedding_model_version,
+                embedding_dimensions=receipt.embedding_dimensions,
+            )
+            evidence_workspaces = {
+                note.entry.logical_path: note.workspace
+                for note in serving.resolved_notes
+                if note.entry.included_in_serving_index
+            }
+            if len(evidence_workspaces) != sum(
+                note.entry.included_in_serving_index for note in serving.resolved_notes
+            ):
+                raise ChangeControlApplicationIntegrityError(
+                    "managed generation contains duplicate logical query paths"
+                )
+
+            def verify_live_authority() -> None:
+                try:
+                    current = _fresh_active_query_authority(
+                        state_path=paths.state_db,
+                        aggregate_id=aggregate_id,
+                        context=context,
+                    )
+                except (TypeError, AssertionError):
+                    raise
+                except Exception as exc:
+                    raise ChangeControlApplicationIntegrityError(
+                        "active authority cannot be freshly verified"
+                    ) from exc
+                if current != active:
+                    raise ChangeControlApplicationConflictError(
+                        "active authority changed while the query generation was open"
+                    )
+
+            return ResolvedQueryGeneration(
+                backend=backend,
+                metadata=metadata,
+                evidence_workspaces=evidence_workspaces,
+                _verify_callbacks=(_guard_query_verification(verify_live_authority),),
+                _verify_backend=_guard_query_verification(serving.verify),
+                _close_backend=_guard_query_verification(backend.close),
+                _close_callbacks=(_guard_query_verification(store.close),),
+            )
+        except BaseException as exc:
+            _close_failed_query_resources(exc, backend, store)
+
+    def _open_managed_query_generation(
+        self,
+        *,
+        paths: _ApplicationPaths,
+        store: SqliteManagedChangeControlStore,
+        context: AuthorityVerificationContext,
+        active: AuthorityRevisionBinding,
+        active_decision: object,
+        workspace_base_notes: tuple[ExactVaultNoteInput, ...],
+    ) -> ManagedServingResolution:
+        """Rebuild the process-local resolver and open one active gen1 index."""
+
+        from mastervault.change_control.managed_query_resolver import (
+            build_read_only_managed_query_resolver,
+            reopen_sealed_seed_query_bootstrap,
+        )
+        from mastervault.change_control.managed_review import (
+            ManagedRevisionDecisionRecord,
+            ManagedRunBindingV2,
+        )
+
+        if not isinstance(active_decision, ManagedRevisionDecisionRecord):
+            raise ChangeControlApplicationIntegrityError(
+                "active managed generation decision type is invalid"
+            )
+        cfg = self._settings.query_generation
+        if (
+            cfg.seed_repository_root is None
+            or cfg.evidence_repository_root is None
+            or cfg.canonical_repository_root is None
+        ):
+            raise ChangeControlApplicationUsageError(
+                "active managed queries require seed, evidence, and canonical "
+                "runtime locators"
+            )
+        run_binding = active_decision.command.bundle.run_binding
+        operation_prefix = "temporal-commit:"
+        if type(run_binding) is not ManagedRunBindingV2 or not run_binding.operation_id.startswith(
+            operation_prefix
+        ):
+            raise ChangeControlApplicationIntegrityError(
+                "active managed run lacks its exact temporal-analysis locator"
+            )
+        temporal_sha256 = run_binding.operation_id.removeprefix(operation_prefix)
+        if (
+            len(temporal_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in temporal_sha256)
+            or (
+                cfg.temporal_analysis_manifest_sha256 is not None
+                and cfg.temporal_analysis_manifest_sha256 != temporal_sha256
+            )
+        ):
+            raise ChangeControlApplicationIntegrityError(
+                "active managed run differs from the configured temporal analysis"
+            )
+        bootstrap = reopen_sealed_seed_query_bootstrap(
+            seed_repository_root=cfg.seed_repository_root,
+            evidence_repository_root=cfg.evidence_repository_root,
+            temporal_analysis_manifest_sha256=temporal_sha256,
+        )
+        restarted = build_read_only_managed_query_resolver(
+            store=store,
+            active_decision=active_decision,
+            bootstrap=bootstrap,
+            canonical_repository_root=cfg.canonical_repository_root,
+            authority_context=context,
+        )
+        serving = open_active_managed_sqlite_generation(
+            aggregate_id=active.aggregate_id,
+            store=store,
+            resolver=restarted.resolver,
+            authority_context=context,
+            generation_root=paths.generation_root,
+            protected_paths=_existing_query_protected_paths(paths),
+            workspace_base_notes=workspace_base_notes,
+        )
+        if serving.authority != active:
+            serving.close()
+            raise ChangeControlApplicationConflictError(
+                "active authority changed during managed generation resolution"
+            )
+        return serving
 
     def bootstrap(
         self,

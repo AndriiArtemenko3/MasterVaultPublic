@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Protocol
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generation_corpus import (
+    verify_generation_base_inventory,
+)
 from mastervault.change_control.generation_resolution import (
     ManagedActivationServiceError,
     derive_generation_projection,
@@ -21,6 +24,7 @@ from mastervault.change_control.managed_generation import (
 )
 from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepository,
+    RepositoryVerifiedManagedGenerationEffects,
 )
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
@@ -41,6 +45,7 @@ from mastervault.change_control.managed_store import (
 )
 from mastervault.change_control.store import ChangeControlIdempotencyError
 from mastervault.providers import EmbeddingProvider
+from mastervault.sync.indexer import ExactVaultNoteInput
 
 
 class ManagedGenerationSourceResolver(ManagedReviewRepositoryResolver, Protocol):
@@ -93,6 +98,7 @@ def activate_reviewed_managed_generation(
     authority_context: AuthorityVerificationContext | None = None,
     backend_kind: str = "sqlite",
     protected_paths: tuple[Path, ...] = (),
+    workspace_base_notes: tuple[ExactVaultNoteInput, ...] | None = None,
     failure_hook: FailureHook | None = None,
 ) -> ManagedActivationServiceResult:
     """Publish, index, and activate one exact managed decision synchronously.
@@ -105,6 +111,11 @@ def activate_reviewed_managed_generation(
     if backend_kind != "sqlite":
         raise ManagedActivationBackendUnsupportedError(
             "managed generation activation supports SQLite only in PR15"
+        )
+    coordinated = getattr(store, "securely_coordinated", False)
+    if type(coordinated) is not bool or not coordinated:
+        raise ManagedActivationServiceError(
+            "managed generation activation requires one secure coordinated authority store"
         )
     if authority_context is not None:
         if verified_bootstrap is not None or prechange_head is not None:
@@ -157,6 +168,14 @@ def activate_reviewed_managed_generation(
         raise ManagedActivationServiceError(
             "PR15 activation supports exactly one managed successor from generation zero"
         )
+    try:
+        verified_base_notes = verify_generation_base_inventory(
+            expected_authority=expected_authority,
+            verified_workspace_bootstrap=context.verified_workspace_bootstrap,
+            base_notes=workspace_base_notes,
+        )
+    except ValueError as exc:
+        raise ManagedActivationServiceError(str(exc)) from exc
     active_authority = store.get_active_generation(
         expected_authority.aggregate_id,
         authority_context=context,
@@ -247,6 +266,8 @@ def activate_reviewed_managed_generation(
                 command=command,
                 publication_events=(event,),
                 index_receipt=None,
+                base_notes=verified_base_notes,
+                verified_workspace_bootstrap=context.verified_workspace_bootstrap,
             )
             store.record_managed_publication(
                 event,
@@ -272,6 +293,8 @@ def activate_reviewed_managed_generation(
             notes=notes,
             embedder=embedder,
             ready_at=state.intent.created_at,
+            base_notes=verified_base_notes,
+            verified_workspace_bootstrap=context.verified_workspace_bootstrap,
         )
         _notify(failure_hook, "index-file-ready")
         index_capability = repository.verify_effects(
@@ -279,6 +302,8 @@ def activate_reviewed_managed_generation(
             publication_events=state.publication_events,
             index_receipt=built.receipt,
             notes=notes,
+            base_notes=verified_base_notes,
+            verified_workspace_bootstrap=context.verified_workspace_bootstrap,
         )
         store.record_managed_index_readiness(
             built.receipt,
@@ -290,6 +315,8 @@ def activate_reviewed_managed_generation(
             receipt=state.index_receipt,
             command=command,
             notes=notes,
+            base_notes=verified_base_notes,
+            verified_workspace_bootstrap=context.verified_workspace_bootstrap,
         )
 
     # Mutation guard: reopen the decision, reviewed snapshot, exact SourceNote
@@ -321,16 +348,32 @@ def activate_reviewed_managed_generation(
         state=state,
         repository=repository,
     )
+    try:
+        fresh_base_notes = verify_generation_base_inventory(
+            expected_authority=expected_authority,
+            verified_workspace_bootstrap=context.verified_workspace_bootstrap,
+            base_notes=workspace_base_notes,
+        )
+    except ValueError as exc:
+        raise ManagedActivationServiceError(str(exc)) from exc
+    if fresh_base_notes != verified_base_notes:
+        raise ManagedActivationServiceError(
+            "workspace base inventory changed before authority CAS"
+        )
     repository.verify_index(
         receipt=state.index_receipt,
         command=command,
         notes=fresh_notes,
+        base_notes=fresh_base_notes,
+        verified_workspace_bootstrap=context.verified_workspace_bootstrap,
     )
     effects_capability = repository.verify_effects(
         command=command,
         publication_events=state.publication_events,
         index_receipt=state.index_receipt,
         notes=fresh_notes,
+        base_notes=fresh_base_notes,
+        verified_workspace_bootstrap=context.verified_workspace_bootstrap,
     )
     _notify(failure_hook, "before-authority-cas")
     receipt = store.activate_managed_generation(
@@ -339,6 +382,14 @@ def activate_reviewed_managed_generation(
         resolver=resolver,
         authority_context=context,
         failure_hook=failure_hook,
+    )
+    # Lost acknowledgement and post-commit workspace/repository drift must not
+    # return a successful activation result from this bounded service call.
+    RepositoryVerifiedManagedGenerationEffects.verify(
+        effects_capability,
+        command=command,
+        publication_events=state.publication_events,
+        index_receipt=state.index_receipt,
     )
     _notify(failure_hook, "authority-cas-committed")
     return ManagedActivationServiceResult(

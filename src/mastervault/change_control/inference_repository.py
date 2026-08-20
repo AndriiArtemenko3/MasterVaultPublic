@@ -282,7 +282,15 @@ class RepositoryVerifiedInferenceEvidenceBatch:
 class FilesystemInferenceEvidenceRepository:
     """No-follow, create-only authority for inference and temporal evidence."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        create: bool = True,
+        read_only: bool = False,
+    ) -> None:
+        if type(create) is not bool or type(read_only) is not bool:
+            raise TypeError("create and read_only must be exact booleans")
         required_dir_fd = (os.open, os.mkdir, os.unlink, os.link, os.stat)
         if (
             os.name != "posix"
@@ -297,7 +305,8 @@ class FilesystemInferenceEvidenceRepository:
             )
         requested = Path(root)
         try:
-            requested.mkdir(mode=0o700, parents=False, exist_ok=True)
+            if create and not read_only:
+                requested.mkdir(mode=0o700, parents=False, exist_ok=True)
             resolved = verified_repository_root(requested)
         except (OSError, RepositoryFileBoundaryError, RepositoryFileIntegrityError) as exc:
             raise InferenceEvidenceRepositoryError(
@@ -307,6 +316,7 @@ class FilesystemInferenceEvidenceRepository:
         self._root = resolved
         self._root_signature = (info.st_dev, info.st_ino)
         self._repository_id = _repository_identity(resolved)
+        self._read_only = read_only
 
     @property
     def root(self) -> Path:
@@ -315,6 +325,16 @@ class FilesystemInferenceEvidenceRepository:
     @property
     def repository_id(self) -> str:
         return self._repository_id
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    def _require_writable(self) -> None:
+        if self._read_only:
+            raise InferenceEvidenceRepositoryError(
+                "read-only inference evidence repository rejects mutation"
+            )
 
     def _verified_root(self) -> Path:
         try:
@@ -331,28 +351,46 @@ class FilesystemInferenceEvidenceRepository:
         return resolved
 
     @contextmanager
-    def _exclusive_lock(self) -> Iterator[None]:
+    def _repository_lock(self, *, exclusive: bool, create: bool) -> Iterator[None]:
         lock_parent = -1
         fd = -1
         try:
+            if exclusive:
+                self._require_writable()
             self._verified_root()
-            lock_parent, lock_name = self._open_parent(_LOCK_PATH, create=True)
+            lock_parent, lock_name = self._open_parent(_LOCK_PATH, create=create)
             names = os.listdir(lock_parent)
-            if lock_name not in names and any(
-                name.casefold() == lock_name.casefold() for name in names
+            if lock_name not in names:
+                if any(name.casefold() == lock_name.casefold() for name in names):
+                    raise InferenceEvidenceRepositoryError(
+                        "repository lock path does not use exact case"
+                    )
+                if not create:
+                    raise InferenceEvidenceRepositoryError("repository lock is missing")
+            flags = (
+                (os.O_RDWR if exclusive else os.O_RDONLY)
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_NONBLOCK", 0)
+            )
+            if create:
+                flags |= os.O_CREAT
+                fd = os.open(lock_name, flags, 0o600, dir_fd=lock_parent)
+            else:
+                fd = os.open(lock_name, flags, dir_fd=lock_parent)
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or info.st_mode & 0o077
             ):
                 raise InferenceEvidenceRepositoryError(
-                    "repository lock path does not use exact case"
+                    "repository lock is not one private owned regular file"
                 )
-            flags = (
-                os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-            )
-            fd = os.open(lock_name, flags, 0o600, dir_fd=lock_parent)
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
-                raise InferenceEvidenceRepositoryError("repository lock is not a regular file")
-            _fcntl.flock(fd, _fcntl.LOCK_EX)
+            _fcntl.flock(fd, _fcntl.LOCK_EX if exclusive else _fcntl.LOCK_SH)
             yield
+        except InferenceEvidenceRepositoryError:
+            raise
         except OSError as exc:
             raise InferenceEvidenceRepositoryError(
                 "cannot acquire evidence repository lock"
@@ -365,6 +403,19 @@ class FilesystemInferenceEvidenceRepository:
                     os.close(fd)
             if lock_parent >= 0:
                 os.close(lock_parent)
+
+    @contextmanager
+    def _exclusive_lock(self) -> Iterator[None]:
+        with self._repository_lock(exclusive=True, create=True):
+            yield
+
+    @contextmanager
+    def _read_lock(self) -> Iterator[None]:
+        with self._repository_lock(
+            exclusive=not self._read_only,
+            create=not self._read_only,
+        ):
+            yield
 
     def _open_parent(self, relative: str, *, create: bool) -> tuple[int, str]:
         canonical = canonical_repo_relative(relative)
@@ -497,6 +548,7 @@ class FilesystemInferenceEvidenceRepository:
                 os.close(parent)
 
     def _cleanup_pending_create_only_files(self, directory_fd: int, *, label: str) -> None:
+        self._require_writable()
         pending: list[tuple[str, tuple[int, int, int]]] = []
         try:
             for entry in os.scandir(directory_fd):
@@ -541,6 +593,7 @@ class FilesystemInferenceEvidenceRepository:
         *,
         label: str,
     ) -> None:
+        self._require_writable()
         parent = -1
         fd = -1
         try:
@@ -574,6 +627,7 @@ class FilesystemInferenceEvidenceRepository:
             )
 
     def _create_only(self, relative: str, content: bytes, *, label: str) -> None:
+        self._require_writable()
         canonical_repo_relative(relative)
         cleanup_parent, _name = self._open_parent(relative, create=True)
         try:
@@ -775,6 +829,8 @@ class FilesystemInferenceEvidenceRepository:
         *,
         cleanup_pending: bool = False,
     ) -> tuple[str, ...]:
+        if cleanup_pending:
+            self._require_writable()
         relative = f"{_RECEIPT_ROOT}/{receipt_sha256}"
         try:
             directory_fd, _name = self._open_parent(
@@ -1129,6 +1185,7 @@ class FilesystemInferenceEvidenceRepository:
     ) -> RepositoryVerifiedInferenceEvidenceBatch:
         """Persist and reopen one exact outcome, returning a sealed one-item batch."""
 
+        self._require_writable()
         return self.persist_batch((outcome,))
 
     @staticmethod
@@ -1151,6 +1208,7 @@ class FilesystemInferenceEvidenceRepository:
     ) -> str:
         """Create and reopen one exact temporal-analysis identity payload."""
 
+        self._require_writable()
         if not isinstance(content, bytes):
             raise TypeError("temporal analysis manifest content must be bytes")
         if len(content) > MAX_TEMPORAL_ANALYSIS_MANIFEST_CANONICAL_BYTES_V1:
@@ -1194,7 +1252,7 @@ class FilesystemInferenceEvidenceRepository:
             manifest_id=manifest_id,
             manifest_sha256=manifest_sha256,
         )
-        with self._exclusive_lock():
+        with self._read_lock():
             content = self._read_optional(
                 path,
                 limit=MAX_TEMPORAL_ANALYSIS_MANIFEST_CANONICAL_BYTES_V1,
@@ -1213,6 +1271,7 @@ class FilesystemInferenceEvidenceRepository:
     ) -> RepositoryVerifiedInferenceEvidenceBatch:
         """Persist one exact non-empty recorded-inference shard evidence set."""
 
+        self._require_writable()
         prepared = self._prepare_batch(outcomes)
         execution_ids = tuple(item.outcome.execution.execution_id for item in prepared)
         receipt_ids = tuple(
@@ -1447,10 +1506,10 @@ class FilesystemInferenceEvidenceRepository:
     ) -> RecordedInferenceOutcome:
         """Resolve one receipt to exactly one committed, complete LIVE outcome."""
 
-        with self._exclusive_lock():
+        with self._read_lock():
             return self._resolve_replay_evidence(
                 receipt_artifact=receipt_artifact,
-                cleanup_pending=True,
+                cleanup_pending=not self._read_only,
             )
 
     def open_artifact(self, artifact: ManagedArtifactRef) -> bytes:
@@ -1479,7 +1538,7 @@ class FilesystemInferenceEvidenceRepository:
             raise InferenceEvidenceResolutionError(
                 "inference artifact reopen rejects non-evidence or staging paths"
             )
-        with self._exclusive_lock():
+        with self._read_lock():
             payload = self._read_optional(
                 artifact.path,
                 limit=artifact.byte_count,
@@ -1552,7 +1611,7 @@ class FilesystemInferenceEvidenceRepository:
     ) -> tuple[RecordedInferenceOutcome, ...]:
         """Reopen an exact batch only after any concurrent durable write completes."""
 
-        with self._exclusive_lock():
+        with self._read_lock():
             return self._resolve_batch(
                 batch_id=batch_id,
                 batch_sha256=batch_sha256,
@@ -1569,7 +1628,7 @@ class FilesystemInferenceEvidenceRepository:
     ]:
         """Reopen one committed batch and mint fresh process-local authority."""
 
-        with self._exclusive_lock():
+        with self._read_lock():
             outcomes = self._resolve_batch(
                 batch_id=batch_id,
                 batch_sha256=batch_sha256,
@@ -1580,19 +1639,21 @@ class FilesystemInferenceEvidenceRepository:
                 raise InferenceEvidenceResolutionError(
                     "reopened batch content differs from its requested public identity"
                 )
-            self._synchronize_existing_create_only(
-                path,
-                content,
-                label="inference evidence batch manifest",
-            )
-            durable_outcomes = self._resolve_batch(
-                batch_id=batch_id,
-                batch_sha256=batch_sha256,
-            )
-            if durable_outcomes != outcomes:
-                raise InferenceEvidenceResolutionError(
-                    "durably synchronized batch differs from its first exact reopen"
+            durable_outcomes = outcomes
+            if not self._read_only:
+                self._synchronize_existing_create_only(
+                    path,
+                    content,
+                    label="inference evidence batch manifest",
                 )
+                durable_outcomes = self._resolve_batch(
+                    batch_id=batch_id,
+                    batch_sha256=batch_sha256,
+                )
+                if durable_outcomes != outcomes:
+                    raise InferenceEvidenceResolutionError(
+                        "durably synchronized batch differs from its first exact reopen"
+                    )
             capability = self._mint_capability(manifest)
         return durable_outcomes, capability
 

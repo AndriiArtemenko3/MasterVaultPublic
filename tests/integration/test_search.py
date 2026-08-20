@@ -194,6 +194,15 @@ def test_cli_init_sync_status_search(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "policy-returns-02" in result.output
 
+    result = runner.invoke(
+        app,
+        ["claims", "restocking", "--affects", "restocking-fee", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    claims_payload = json.loads(result.output)
+    assert isinstance(claims_payload, list)
+    assert claims_payload[0]["claim_id"] == "policy-returns-02"
+
     result = runner.invoke(app, ["wiki"])
     assert result.exit_code == 0, result.output
     assert "refund-window" in result.output

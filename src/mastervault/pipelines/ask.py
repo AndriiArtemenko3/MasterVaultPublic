@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,9 +40,11 @@ from typing import Any
 from mastervault.config import Settings
 from mastervault.contracts.judge import SufficiencyJudgeContract
 from mastervault.contracts.synthesis import GroundedSynthesisContract
+from mastervault.core.budget import BudgetLedger
 from mastervault.core.errors import BudgetExceeded
 from mastervault.core.events import Clock, EventName
 from mastervault.core.runctx import RunContext
+from mastervault.evidence import EvidenceWorkspaceMap
 from mastervault.models import Confidence, Hit
 from mastervault.prompts.untrusted import fence, neutralise
 from mastervault.providers.embedding import EmbeddingProvider
@@ -264,26 +267,57 @@ def run_ask(
     max_rounds: int | None = None,
     budget_usd: float | None = None,
     clock: Clock | None = None,
+    evidence_workspaces: EvidenceWorkspaceMap | None = None,
+    persist_run: bool = True,
 ) -> AskOutcome:
-    runs_dir = Path(settings.paths.runs_dir)
+    if type(persist_run) is not bool:
+        raise TypeError("persist_run must be an exact boolean")
     cap = budget_usd if budget_usd is not None else settings.ask.budget_usd
     max_r = max_rounds if max_rounds is not None else settings.ask.max_rounds
 
-    ctx = RunContext.create(runs_dir, "ask", clock=clock, cap_usd=cap)
-    ctx.freeze_plan({"question": question, "domain": domain, "max_rounds": max_r, "budget": cap})
+    ctx = (
+        RunContext.create(
+            Path(settings.paths.runs_dir),
+            "ask",
+            clock=clock,
+            cap_usd=cap,
+        )
+        if persist_run
+        else None
+    )
+    if ctx is not None:
+        ctx.freeze_plan(
+            {"question": question, "domain": domain, "max_rounds": max_r, "budget": cap}
+        )
+        run_id = ctx.run_id
+        run_dir = ctx.run_dir
+        ledger = ctx.ledger
+    else:
+        run_id = f"ask-query-only-{uuid.uuid4().hex}"
+        run_dir = Path()
+        ledger = BudgetLedger(cap)
 
     def emit(event: str, payload: dict) -> None:
-        ctx.emit(event, stage="ask", payload=payload)
+        if ctx is not None:
+            ctx.emit(event, stage="ask", payload=payload)
 
     # -- zero-evidence short-circuit -------------------------------------------
-    round0 = hybrid_search(question, settings, backend, embedder, domain=domain)
+    round0 = hybrid_search(
+        question,
+        settings,
+        backend,
+        embedder,
+        domain=domain,
+        evidence_workspaces=evidence_workspaces,
+    )
     if not round0.hits and round0.wiki_card is None:
         nearest = _nearest_wiki_titles(backend, embedder, question)
         message = "corpus has no grounding for this question"
-        summary = {"run_id": ctx.run_id, "zero_evidence": True, "nearest_wiki_titles": nearest}
-        ctx.write_summary(summary)
+        summary = {"run_id": run_id, "zero_evidence": True, "nearest_wiki_titles": nearest}
+        if ctx is not None:
+            ctx.write_summary(summary)
         return AskOutcome(
-            exit_code=0, run_id=ctx.run_id, run_dir=ctx.run_dir, answer_markdown=message,
+            exit_code=0, run_id=run_id, run_dir=run_dir, answer_markdown=message,
             confidence=None, gaps=[], sources=[], trace="0 rounds, 0 evidence items",
             extractive=True, zero_evidence=True, rounds=0, cost_usd=0.0,
             nearest_wiki_titles=nearest,
@@ -301,16 +335,22 @@ def run_ask(
         round_snapshot: dict[str, list[str]] = {}
         for q in queries_this_round:
             result = round0 if (round_idx == 1 and q == question) else hybrid_search(
-                q, settings, backend, embedder, domain=domain
+                q,
+                settings,
+                backend,
+                embedder,
+                domain=domain,
+                evidence_workspaces=evidence_workspaces,
             )
             round_snapshot[q] = [h.record_id for h in result.hits]
             for h in result.hits:
                 if h.record_id not in evidence_by_id:
                     evidence_by_id[h.record_id] = h
                     new_ids += 1
-        (ctx.artifacts_dir / f"round-{round_idx}.json").write_text(
-            json.dumps(round_snapshot, indent=2), encoding="utf-8"
-        )
+        if ctx is not None:
+            (ctx.artifacts_dir / f"round-{round_idx}.json").write_text(
+                json.dumps(round_snapshot, indent=2), encoding="utf-8"
+            )
 
         remaining = max_r - round_idx
         evidence_summary = _evidence_cards(evidence_by_id.values())
@@ -318,11 +358,11 @@ def run_ask(
             judge_result = SufficiencyJudgeContract().dispatch(
                 llm,
                 {"question": question, "evidence_summary": evidence_summary, "rounds_remaining": remaining},
-                ledger=ctx.ledger,
+                ledger=ledger,
                 emit=emit,
             )
         except BudgetExceeded:
-            emit("budget.exhausted", ctx.ledger.snapshot())
+            emit("budget.exhausted", ledger.snapshot())
             break
 
         if not judge_result.ok or judge_result.parsed is None:
@@ -365,7 +405,7 @@ def run_ask(
             llm,
             {"question": question, "evidence_cards": _evidence_cards(top15), "missing_aspects": missing_text},
             {"missing_aspects": missing_aspects},
-            ledger=ctx.ledger,
+            ledger=ledger,
             emit=emit,
         )
     except (BudgetExceeded, StructuredOutputError):
@@ -397,23 +437,24 @@ def run_ask(
         confidence = Confidence.LOW.value if top5 else None
         cited_hits = top5
 
-    trace = f"{rounds_run} round(s), {len(all_hits)} evidence item(s), ${ctx.ledger.spent:.4f} spent"
+    trace = f"{rounds_run} round(s), {len(all_hits)} evidence item(s), ${ledger.spent:.4f} spent"
     summary = {
-        "run_id": ctx.run_id,
+        "run_id": run_id,
         "zero_evidence": False,
         "rounds": rounds_run,
         "evidence_count": len(all_hits),
         "extractive": extractive,
-        "cost_usd": round(ctx.ledger.spent, 6),
+        "cost_usd": round(ledger.spent, 6),
         "gaps": gaps,
     }
-    ctx.write_summary(summary)
-    ctx.emit(EventName.RUN_COMPLETED, stage="ask", payload=summary)
+    if ctx is not None:
+        ctx.write_summary(summary)
+        ctx.emit(EventName.RUN_COMPLETED, stage="ask", payload=summary)
 
     return AskOutcome(
         exit_code=0,
-        run_id=ctx.run_id,
-        run_dir=ctx.run_dir,
+        run_id=run_id,
+        run_dir=run_dir,
         answer_markdown=answer_markdown,
         confidence=confidence,
         gaps=gaps,
@@ -422,7 +463,7 @@ def run_ask(
         extractive=extractive,
         zero_evidence=False,
         rounds=rounds_run,
-        cost_usd=round(ctx.ledger.spent, 6),
+        cost_usd=round(ledger.spent, 6),
         warnings=warnings,
         evidence=_render_sources(all_hits),
     )

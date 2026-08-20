@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import shutil
 import sqlite3
+import stat
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import replace
@@ -18,10 +21,12 @@ from managed_v2_test_support import (
     build_real_managed_v2_variant,
     clone_real_managed_v2_scenario,
 )
+from typer.testing import CliRunner
 
 from mastervault.change_control import (
     managed_generation_repository as generation_repository_module,
 )
+from mastervault.change_control.application import ChangeControlApplication
 from mastervault.change_control.managed_activation_service import (
     ManagedActivationBackendUnsupportedError,
     ManagedActivationOutcome,
@@ -38,6 +43,10 @@ from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepositoryError,
     RepositoryVerifiedManagedGenerationEffects,
 )
+from mastervault.change_control.managed_query_resolver import (
+    build_read_only_managed_query_resolver,
+    reopen_sealed_seed_query_bootstrap,
+)
 from mastervault.change_control.managed_review import (
     ManagedRevisionDisposition,
     ManagedRevisionPlan,
@@ -51,6 +60,7 @@ from mastervault.change_control.managed_review_service import (
 )
 from mastervault.change_control.managed_serving import (
     ManagedServingError,
+    open_active_managed_sqlite_generation,
     open_active_managed_sqlite_index,
 )
 from mastervault.change_control.managed_store import (
@@ -59,11 +69,15 @@ from mastervault.change_control.managed_store import (
     SqliteManagedChangeControlStore,
 )
 from mastervault.change_control.models import canonical_json_bytes
+from mastervault.change_control.query_generation import QueryGenerationKind
 from mastervault.change_control.store import (
     ChangeControlBusyError,
     ChangeControlIdempotencyError,
 )
-from mastervault.providers import MockEmbedding
+from mastervault.config import Settings
+from mastervault.pipelines.ask import run_ask
+from mastervault.providers import MockEmbedding, MockLLM
+from mastervault.retrieval import hybrid_search
 from mastervault.storage.sqlite import SqliteBackend
 
 
@@ -133,6 +147,44 @@ def test_generation_repository_creation_fsyncs_new_root_parent(
         ManagedGenerationRepository(tmp_path / "generation-effects")
 
     assert parent_identity in synchronized
+
+
+@pytest.mark.generation_activation_d
+def test_generation_repository_read_only_open_cannot_create_or_mutate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generation-effects"
+    ManagedGenerationRepository(root)
+    before = tuple(
+        (path.relative_to(root).as_posix(), path.lstat().st_mode, path.lstat().st_size)
+        for path in sorted(root.rglob("*"))
+    )
+
+    def forbidden_effect(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("read-only generation repository attempted a filesystem effect")
+
+    with monkeypatch.context() as guarded:
+        guarded.setattr(generation_repository_module.os, "mkdir", forbidden_effect)
+        guarded.setattr(
+            generation_repository_module.os,
+            "supports_dir_fd",
+            {*os.supports_dir_fd, forbidden_effect},
+        )
+        guarded.setattr(generation_repository_module.os, "fsync", forbidden_effect)
+        repository = ManagedGenerationRepository(
+            root,
+            create=False,
+            read_only=True,
+        )
+
+    assert repository.read_only
+    with pytest.raises(ManagedGenerationRepositoryError, match="rejects mutation"):
+        repository._ensure_index_file("generations/example/index/mastervault.sqlite3")
+    assert tuple(
+        (path.relative_to(root).as_posix(), path.lstat().st_mode, path.lstat().st_size)
+        for path in sorted(root.rglob("*"))
+    ) == before
 
 
 @pytest.mark.generation_activation_d
@@ -573,7 +625,7 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
             ).fetchone()[0]
             == 1
         )
-        backend = open_active_managed_sqlite_index(
+        serving = open_active_managed_sqlite_generation(
             aggregate_id=scenario.run_binding.prechange_head.aggregate_id,
             store=scenario.store,
             resolver=scenario.resolver,
@@ -582,6 +634,22 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
             generation_root=generation_root,
         )
         try:
+            assert serving.authority == result.receipt.activated_authority
+            assert serving.activation_state == first_state
+            assert serving.index_receipt == first_state.index_receipt
+            assert tuple(note.entry for note in serving.resolved_notes) == (
+                result.command.projection.entries
+            )
+            assert {note.workspace for note in serving.resolved_notes} == {
+                scenario.canonical_root.resolve(),
+                (
+                    generation_root
+                    / "generations"
+                    / result.command.projection.generation_id
+                    / "canonical"
+                ).resolve(),
+            }
+            backend = serving.backend
             paths = tuple(
                 str(row[0])
                 for row in backend.conn.execute("SELECT rel_path FROM documents ORDER BY rel_path")
@@ -593,8 +661,49 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
             )
             with pytest.raises(sqlite3.OperationalError):
                 backend.conn.execute("DELETE FROM documents")
+
+            original_index = first_index_path.read_bytes()
+            first_index_path.chmod(0o600)
+            with first_index_path.open("r+b") as stream:
+                stream.seek(100)
+                original_byte = stream.read(1)
+                stream.seek(100)
+                stream.write(bytes([original_byte[0] ^ 1]))
+                stream.flush()
+                os.fsync(stream.fileno())
+                stream.seek(100)
+                stream.write(original_byte)
+                stream.flush()
+                os.fsync(stream.fileno())
+            first_index_path.chmod(0o400)
+            assert first_index_path.read_bytes() == original_index
+            with pytest.raises(ManagedServingError, match="changed while serving"):
+                serving.close()
         finally:
-            backend.close()
+            serving.close()
+
+        parent_backend = open_active_managed_sqlite_index(
+            aggregate_id=scenario.run_binding.prechange_head.aggregate_id,
+            store=scenario.store,
+            resolver=scenario.resolver,
+            verified_bootstrap=scenario.verified_bootstrap,
+            prechange_head=scenario.prechange_head,
+            generation_root=generation_root,
+        )
+        index_parent = first_index_path.parent
+        moved_index_parent = index_parent.with_name("index.pinned-original")
+        index_parent.replace(moved_index_parent)
+        index_parent.mkdir(mode=0o700)
+        for source in moved_index_parent.iterdir():
+            if source.is_file():
+                shutil.copy2(source, index_parent / source.name)
+        try:
+            with pytest.raises(ManagedServingError, match="changed while serving"):
+                parent_backend.close()
+        finally:
+            parent_backend.close()
+            shutil.rmtree(index_parent)
+            moved_index_parent.replace(index_parent)
 
         original_active_state = scenario.store.get_active_managed_generation_state
         active_state_reads = 0
@@ -662,6 +771,37 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
             missing_publication.replace(publication_path)
 
         index_path = generation_root / state.index_receipt.index_relative_path
+        for suffix in ("-wal", "-shm", "-journal"):
+            sidecar = index_path.with_name(index_path.name + suffix)
+            sidecar.write_bytes(b"unsafe residue")
+            try:
+                with pytest.raises(ManagedServingError):
+                    open_active_managed_sqlite_index(
+                        aggregate_id=scenario.run_binding.prechange_head.aggregate_id,
+                        store=scenario.store,
+                        resolver=scenario.resolver,
+                        verified_bootstrap=scenario.verified_bootstrap,
+                        prechange_head=scenario.prechange_head,
+                        generation_root=generation_root,
+                    )
+            finally:
+                sidecar.unlink()
+
+        hardlink = tmp_path / "managed-index-hardlink.sqlite3"
+        os.link(index_path, hardlink)
+        try:
+            with pytest.raises(ManagedServingError):
+                open_active_managed_sqlite_index(
+                    aggregate_id=scenario.run_binding.prechange_head.aggregate_id,
+                    store=scenario.store,
+                    resolver=scenario.resolver,
+                    verified_bootstrap=scenario.verified_bootstrap,
+                    prechange_head=scenario.prechange_head,
+                    generation_root=generation_root,
+                )
+        finally:
+            hardlink.unlink()
+
         missing_index = index_path.with_name(f"{index_path.name}.missing")
         index_path.replace(missing_index)
         try:
@@ -676,6 +816,320 @@ def test_mixed_generation_publishes_indexes_activates_and_serves_exactly(
                 )
         finally:
             missing_index.replace(index_path)
+    finally:
+        scenario.store.close()
+
+
+@pytest.mark.generation_activation_d
+def test_active_managed_resolver_restarts_from_query_only_durable_evidence(
+    generation_seed: RealManagedV2Scenario,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = clone_real_managed_v2_scenario(
+        generation_seed,
+        tmp_path / "restart-scenario",
+    )
+    query_workspace = tmp_path / "query-workspace"
+    change_control_root = query_workspace / "change_control"
+    change_control_root.mkdir(parents=True, mode=0o700)
+    (query_workspace / "vault").mkdir(mode=0o700)
+    generation_root = change_control_root / "generations"
+
+    def tree_signature(
+        root: Path,
+    ) -> tuple[tuple[str, int, int, int, int, int, int, str | None], ...]:
+        result = []
+        for path in sorted(root.rglob("*")):
+            info = path.lstat()
+            result.append(
+                (
+                    path.relative_to(root).as_posix(),
+                    info.st_dev,
+                    info.st_ino,
+                    info.st_mode,
+                    info.st_nlink,
+                    info.st_size,
+                    info.st_mtime_ns,
+                    (
+                        hashlib.sha256(path.read_bytes()).hexdigest()
+                        if stat.S_ISREG(info.st_mode)
+                        else None
+                    ),
+                )
+            )
+        return tuple(result)
+
+    try:
+        request_id = _decide(
+            scenario,
+            prefix="generation:query-restart",
+            mode="mixed",
+        )
+        activated = _activate(
+            scenario,
+            request_id=request_id,
+            operation_id="generation:query-restart:activate",
+            generation_root=generation_root,
+            embedder=MockEmbedding(),
+        )
+        assert activated.command is not None
+        scenario.store.close()
+
+        secure_parent = tmp_path / "query-only-authority"
+        secure_parent.mkdir(mode=0o700)
+        secure_authority = secure_parent / "change-control.sqlite3"
+        shutil.copyfile(scenario.authority_path, secure_authority)
+        secure_authority.chmod(0o600)
+        authority_before = secure_authority.read_bytes()
+        authority_info = secure_authority.stat()
+        authority_identity_before = (
+            authority_info.st_dev,
+            authority_info.st_ino,
+            authority_info.st_mode,
+            authority_info.st_nlink,
+            authority_info.st_size,
+            authority_info.st_mtime_ns,
+            authority_info.st_ctime_ns,
+        )
+        evidence_before = tree_signature(scenario.evidence_root)
+        canonical_before = tree_signature(scenario.canonical_root)
+
+        operation_prefix = "temporal-commit:"
+        assert scenario.run_binding.operation_id.startswith(operation_prefix)
+        temporal_sha256 = scenario.run_binding.operation_id.removeprefix(
+            operation_prefix
+        )
+        bootstrap = reopen_sealed_seed_query_bootstrap(
+            seed_repository_root=Path(__file__).resolve().parents[3],
+            evidence_repository_root=scenario.evidence_root,
+            temporal_analysis_manifest_sha256=temporal_sha256,
+        )
+        store = SqliteManagedChangeControlStore(
+            secure_authority,
+            secure_open=True,
+            read_only=True,
+        )
+        try:
+            assert store.conn.execute("PRAGMA query_only").fetchone()[0] == 1
+            active_decision = store.get_active_managed_decision_record(
+                scenario.run_binding.prechange_head.aggregate_id,
+                authority_context=bootstrap.authority_context,
+            )
+            assert active_decision is not None
+            restarted = build_read_only_managed_query_resolver(
+                store=store,
+                active_decision=active_decision,
+                bootstrap=bootstrap,
+                canonical_repository_root=scenario.canonical_root,
+            )
+            assert restarted.active_decision == active_decision
+            assert restarted.reviewed_snapshot.binding == (
+                scenario.reviewed_snapshot.binding
+            )
+            assert (
+                restarted.resolver.resolve_revision_planning_admission(
+                    scenario.run_binding.revision_planning_admission
+                )
+                == scenario.run_binding.revision_planning_admission
+            )
+            assert (
+                restarted.resolver.resolve_governing_source_adoption(
+                    scenario.run_binding.governing_source_adoption
+                )
+                == scenario.run_binding.governing_source_adoption
+            )
+            assert store.conn.execute("PRAGMA query_only").fetchone()[0] == 1
+        finally:
+            store.close()
+
+        authority_after = secure_authority.read_bytes()
+        authority_info = secure_authority.stat()
+        assert authority_after == authority_before
+        assert (
+            authority_info.st_dev,
+            authority_info.st_ino,
+            authority_info.st_mode,
+            authority_info.st_nlink,
+            authority_info.st_size,
+            authority_info.st_mtime_ns,
+            authority_info.st_ctime_ns,
+        ) == authority_identity_before
+        assert tree_signature(scenario.evidence_root) == evidence_before
+        assert tree_signature(scenario.canonical_root) == canonical_before
+
+        application_state = change_control_root / "state.sqlite3"
+        shutil.copyfile(scenario.authority_path, application_state)
+        application_state.chmod(0o600)
+        application_before = application_state.read_bytes()
+        generation_before = tree_signature(generation_root)
+        query_workspace_before = tree_signature(query_workspace)
+        settings = Settings.model_validate(
+            {
+                "storage": {"backend": "sqlite"},
+                "embedding": {"provider": "mock"},
+                "paths": {"workspace": query_workspace},
+                "query_generation": {
+                    "seed_repository_root": Path(__file__).resolve().parents[3],
+                    "evidence_repository_root": scenario.evidence_root,
+                    "canonical_repository_root": scenario.canonical_root,
+                    "temporal_analysis_manifest_sha256": temporal_sha256,
+                },
+            }
+        )
+        with ChangeControlApplication(settings).resolve_query_generation(
+            "active"
+        ) as resolved:
+            assert resolved.metadata.generation_kind == QueryGenerationKind.MANAGED
+            assert resolved.metadata.generation_id == (
+                resolved.metadata.active_generation_id
+            )
+            assert resolved.metadata.active_authority_revision == 1
+            assert resolved.metadata.is_active
+            assert resolved.metadata.index_file_sha256 is not None
+            assert resolved.metadata.index_logical_fingerprint is not None
+            assert int(resolved.backend.conn.execute("PRAGMA query_only").fetchone()[0]) == 1
+            assert resolved.evidence_workspaces
+            assert resolved.backend.conn.execute(
+                "SELECT count(*) FROM documents"
+            ).fetchone()[0] > 0
+            query_embedder = MockEmbedding()
+            approved_plan = next(
+                item
+                for item in scenario.subjects
+                if isinstance(item, ManagedRevisionPlan)
+                and any(
+                    predecessor.statement != successor.statement
+                    for predecessor, successor in zip(
+                        item.predecessor_projection.projected_claims,
+                        item.successor_projection.projected_claims,
+                        strict=True,
+                    )
+                )
+            )
+            predecessor_statements = {
+                item.statement
+                for item in approved_plan.predecessor_projection.projected_claims
+            }
+            successor_statements = {
+                item.statement for item in approved_plan.successor_projection.projected_claims
+            }
+            successor_only = successor_statements - predecessor_statements
+            predecessor_only = predecessor_statements - successor_statements
+            indexed_statements = {
+                str(row[0])
+                for row in resolved.backend.conn.execute("SELECT statement FROM claims")
+            }
+            assert successor_only
+            assert successor_only <= indexed_statements
+            assert predecessor_only.isdisjoint(indexed_statements)
+            query = sorted(successor_only)[0]
+            search = hybrid_search(
+                query,
+                settings,
+                resolved.backend,
+                query_embedder,
+                evidence_workspaces=resolved.evidence_workspaces,
+            )
+            assert search.hits or search.wiki_card is not None
+            answer = run_ask(
+                query,
+                settings,
+                resolved.backend,
+                query_embedder,
+                MockLLM(),
+                max_rounds=1,
+                evidence_workspaces=resolved.evidence_workspaces,
+                persist_run=False,
+            )
+            assert not answer.zero_evidence
+            assert answer.evidence
+
+        import mastervault.cli.ask as ask_cli_module
+        import mastervault.cli.query as query_cli_module
+        from mastervault.cli.app import app
+
+        monkeypatch.setattr(query_cli_module, "load_settings", lambda: settings)
+        monkeypatch.setattr(ask_cli_module, "load_settings", lambda: settings)
+        runner = CliRunner()
+        generation_id = activated.command.projection.generation_id
+
+        searched = runner.invoke(app, ["search", query, "--json"])
+        assert searched.exit_code == 0, searched.output
+        search_payload = json.loads(searched.output)
+        assert search_payload["generation"]["selection"]["selector"] == "auto"
+        assert search_payload["generation"]["generation_id"] == generation_id
+        assert search_payload["generation"]["is_active"] is True
+        assert search_payload["hits"]
+
+        exact = runner.invoke(
+            app,
+            ["search", query, "--generation", generation_id, "--json"],
+        )
+        assert exact.exit_code == 0, exact.output
+        exact_payload = json.loads(exact.output)
+        assert exact_payload["generation"]["generation_id"] == generation_id
+
+        asked = runner.invoke(app, ["ask", query, "--max-rounds", "1", "--json"])
+        assert asked.exit_code == 0, asked.output
+        ask_payload = json.loads(asked.output)
+        assert ask_payload["generation"]["generation_id"] == generation_id
+        assert "knowledge generation:" in ask_payload["trace"]
+        assert ask_payload["sources"]
+        serialized_cli = json.dumps(
+            {"search": search_payload, "exact": exact_payload, "ask": ask_payload},
+            sort_keys=True,
+        )
+        for protected_root in (
+            query_workspace,
+            scenario.evidence_root,
+            scenario.canonical_root,
+            generation_root,
+        ):
+            assert str(protected_root) not in serialized_cli
+
+        assert application_state.read_bytes() == application_before
+        assert tree_signature(generation_root) == generation_before
+        assert tree_signature(scenario.evidence_root) == evidence_before
+        assert tree_signature(scenario.canonical_root) == canonical_before
+        assert tree_signature(query_workspace) == query_workspace_before
+
+        managed_index = (
+            generation_root
+            / "generations"
+            / generation_id
+            / "index"
+            / "mastervault.sqlite3"
+        )
+        missing_index = managed_index.with_name("mastervault.sqlite3.missing")
+        managed_index.replace(missing_index)
+        try:
+            missing = runner.invoke(app, ["search", query, "--json"])
+            assert missing.exit_code == 1
+            assert "integrity-failure" in missing.output
+            assert "unmanaged" not in missing.output
+        finally:
+            missing_index.replace(managed_index)
+
+        exact_index_bytes = managed_index.read_bytes()
+        managed_index.chmod(0o600)
+        with managed_index.open("r+b") as stream:
+            stream.seek(100)
+            byte = stream.read(1)
+            stream.seek(100)
+            stream.write(bytes([byte[0] ^ 1]))
+            stream.flush()
+            os.fsync(stream.fileno())
+        managed_index.chmod(0o400)
+        try:
+            corrupt = runner.invoke(app, ["search", query, "--json"])
+            assert corrupt.exit_code == 1
+            assert "integrity-failure" in corrupt.output
+            assert "unmanaged" not in corrupt.output
+        finally:
+            managed_index.chmod(0o600)
+            managed_index.write_bytes(exact_index_bytes)
+            managed_index.chmod(0o400)
     finally:
         scenario.store.close()
 
@@ -1031,7 +1485,10 @@ def test_every_durable_activation_boundary_reconciles_exactly(
         scenario.store.close()
         scenario = replace(
             scenario,
-            store=SqliteManagedChangeControlStore(scenario.authority_path),
+            store=SqliteManagedChangeControlStore(
+                scenario.authority_path,
+                secure_open=True,
+            ),
         )
         recovered = _activate(
             scenario,
@@ -1211,7 +1668,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
         request_id = _decide(scenario, prefix=prefix, mode="mixed")
         operation_id = f"{prefix}:activate"
         generation_root = tmp_path / "generations"
-        original_sync = generation_repository_module.sync_exact_source_notes
+        original_sync = generation_repository_module.sync_exact_vault_notes
         poisoned_counts: dict[str, tuple[int, int]] = {}
 
         def poison_fts(*args: object, **kwargs: object) -> object:
@@ -1261,7 +1718,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
         with monkeypatch.context() as poisoned_sync:
             poisoned_sync.setattr(
                 generation_repository_module,
-                "sync_exact_source_notes",
+                "sync_exact_vault_notes",
                 poison_fts,
             )
             with pytest.raises(
@@ -1456,7 +1913,10 @@ def test_concurrent_activators_from_one_base_allow_exactly_one_successor(
             command: ManagedActivationCommand,
             capability: RepositoryVerifiedManagedGenerationEffects,
         ) -> None:
-            store = SqliteManagedChangeControlStore(runtime.authority_path)
+            store = SqliteManagedChangeControlStore(
+                runtime.authority_path,
+                secure_open=True,
+            )
             try:
                 store.activate_managed_generation(
                     command,

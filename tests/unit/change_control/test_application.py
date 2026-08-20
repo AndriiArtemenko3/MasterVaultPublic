@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -40,6 +41,11 @@ from mastervault.change_control.application_errors import (
 )
 from mastervault.change_control.managed_store import SqliteManagedChangeControlStore
 from mastervault.change_control.operator_run import OperatorRunLinkKind
+from mastervault.change_control.query_generation import (
+    QueryGenerationKind,
+    QueryGenerationSelectionV1,
+    QueryGenerationSelector,
+)
 from mastervault.config import Settings
 from mastervault.models import content_hash
 from mastervault.providers import MockEmbedding
@@ -141,6 +147,337 @@ def test_change_control_package_exports_the_stable_application_facade() -> None:
     assert change_control_package.ChangeControlApplication is ChangeControlApplication
     assert "BootstrapSourceRoot" in change_control_package.__all__
     assert "ChangeControlApplication" in change_control_package.__all__
+
+
+def test_failed_query_construction_closes_every_resource_and_retains_failure() -> None:
+    closed: list[str] = []
+
+    class Resource:
+        def __init__(self, name: str, *, fail: bool = False) -> None:
+            self.name = name
+            self.fail = fail
+
+        def close(self) -> None:
+            closed.append(self.name)
+            if self.fail:
+                raise RuntimeError(f"{self.name} close failed")
+
+    original = ChangeControlApplicationIntegrityError("construction failed")
+    with pytest.raises(ChangeControlApplicationIntegrityError) as captured:
+        application_module._close_failed_query_resources(  # noqa: SLF001
+            original,
+            Resource("backend", fail=True),
+            Resource("store"),
+            None,
+            Resource("workspace-guard"),
+        )
+
+    assert captured.value is original
+    assert closed == ["backend", "store", "workspace-guard"]
+
+
+def test_query_generation_selector_is_exact_and_versioned() -> None:
+    assert QueryGenerationSelectionV1.parse("auto") == QueryGenerationSelectionV1(
+        selector=QueryGenerationSelector.AUTO
+    )
+    exact = f"mgeneration:{'a' * 64}"
+    parsed = QueryGenerationSelectionV1.parse(exact)
+    assert parsed.selector == QueryGenerationSelector.GENERATION_ID
+    assert parsed.generation_id == exact
+    for invalid in ("", " auto", "generation-id", "mgeneration:" + "A" * 64):
+        with pytest.raises(ValueError):
+            QueryGenerationSelectionV1.parse(invalid)
+
+
+def test_query_generation_resolution_rejects_constructed_or_substituted_selection(
+    tmp_path: Path,
+) -> None:
+    workspace, _manifest = _workspace(tmp_path)
+    application = ChangeControlApplication(_settings(workspace))
+    constructed = QueryGenerationSelectionV1.model_construct(
+        selector=QueryGenerationSelector.GENERATION_ID,
+        generation_id=None,
+    )
+
+    with pytest.raises(ChangeControlApplicationUsageError):
+        application.resolve_query_generation(constructed)
+
+    class SubstitutedSelection(QueryGenerationSelectionV1):
+        pass
+
+    with pytest.raises(ChangeControlApplicationUsageError, match="substituted"):
+        application.resolve_query_generation(
+            SubstitutedSelection(selector=QueryGenerationSelector.AUTO)
+        )
+
+
+def test_unmanaged_query_resolution_preserves_v02_and_rejects_explicit_selection(
+    tmp_path: Path,
+) -> None:
+    workspace, _manifest = _workspace(tmp_path)
+    application = ChangeControlApplication(_settings(workspace))
+
+    with application.resolve_query_generation() as resolved:
+        assert resolved.metadata.generation_kind == QueryGenerationKind.UNMANAGED
+        assert resolved.metadata.backend == "sqlite"
+        assert resolved.metadata.generation_id is None
+        assert resolved.evidence_workspaces == {}
+        assert int(resolved.backend.conn.execute("PRAGMA query_only").fetchone()[0]) == 0
+
+    assert not (workspace / "change_control").exists()
+    with pytest.raises(ChangeControlApplicationUsageError, match="initialized authority"):
+        application.resolve_query_generation("active")
+    assert not (workspace / "change_control").exists()
+
+
+def test_unmanaged_postgres_auto_delegates_to_existing_backend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, _manifest = _workspace(tmp_path)
+    settings = _settings(workspace, backend="postgres")
+
+    class ExistingPostgresBackend:
+        name = "postgres"
+
+        def close(self) -> None:
+            pass
+
+    backend = ExistingPostgresBackend()
+    monkeypatch.setattr(application_module, "get_backend", lambda _settings: backend)
+    monkeypatch.setattr(
+        ChangeControlApplication,
+        "_preflight_backend",
+        lambda _application: pytest.fail("unmanaged auto must not run managed preflight"),
+    )
+
+    with ChangeControlApplication(settings).resolve_query_generation() as resolved:
+        assert resolved.backend is backend
+        assert resolved.metadata.backend == "postgres"
+        assert resolved.metadata.generation_kind == QueryGenerationKind.UNMANAGED
+    assert not (workspace / "change_control").exists()
+
+
+def test_workspace_generation_zero_resolution_is_query_only_and_byte_preserving(
+    tmp_path: Path,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    bootstrap_settings = _settings(workspace)
+    bootstrap = ChangeControlApplication(bootstrap_settings).bootstrap(manifest, OPERATION_ID)
+    state_db = workspace / "change_control" / "state.sqlite3"
+    before = {
+        path: (path.stat().st_ino, path.stat().st_size, path.read_bytes())
+        for path in (state_db, workspace / "index.db", manifest)
+    }
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+
+    with ChangeControlApplication(settings).resolve_query_generation("auto") as resolved:
+        inventory, readiness = bootstrap.bootstrap_state.require_complete()
+        assert resolved.metadata.generation_kind == QueryGenerationKind.GENERATION_ZERO
+        assert resolved.metadata.generation_id == bootstrap.authority.active_generation.generation_id
+        assert resolved.metadata.active_generation_id == resolved.metadata.generation_id
+        assert resolved.metadata.active_authority_revision == 0
+        assert resolved.metadata.index_file_sha256 == readiness.index_file_sha256
+        assert resolved.metadata.index_logical_fingerprint == (
+            readiness.index_logical_fingerprint
+        )
+        assert inventory.aggregate_revision == 1
+        assert int(resolved.backend.conn.execute("PRAGMA query_only").fetchone()[0]) == 1
+        assert resolved.backend.get_documents([]) == []
+        with pytest.raises(sqlite3.OperationalError):
+            resolved.backend.conn.execute("DELETE FROM documents")
+
+    generation_id = bootstrap.authority.active_generation.generation_id
+    for selector in ("legacy", "active", generation_id):
+        with ChangeControlApplication(settings).resolve_query_generation(selector) as resolved:
+            assert resolved.metadata.generation_id == generation_id
+            assert resolved.metadata.is_active
+            assert resolved.metadata.selection == QueryGenerationSelectionV1.parse(selector)
+
+    with pytest.raises(ChangeControlApplicationUsageError, match="not available"):
+        ChangeControlApplication(settings).resolve_query_generation(
+            "mgeneration:" + "f" * 64
+        )
+
+    assert {
+        path: (path.stat().st_ino, path.stat().st_size, path.read_bytes())
+        for path in before
+    } == before
+
+
+def test_managed_query_backend_is_rejected_before_provider_or_repository_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    state = workspace / "change_control" / "state.sqlite3"
+    state.parent.mkdir()
+    state.write_bytes(b"not-opened")
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "postgres"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+
+    def forbidden_provider(_settings: Settings) -> MockEmbedding:
+        pytest.fail("managed PostgreSQL rejection must precede provider resolution")
+
+    monkeypatch.setattr(application_module, "get_embedding_provider", forbidden_provider)
+    with pytest.raises(ChangeControlApplicationUnsupportedOperationError):
+        ChangeControlApplication(settings).resolve_query_generation()
+    assert state.read_bytes() == b"not-opened"
+
+
+def test_configured_managed_query_never_falls_back_when_state_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+
+    def forbidden_backend(_settings: Settings) -> SqliteBackend:
+        pytest.fail("configured managed resolution must not open an unmanaged backend")
+
+    monkeypatch.setattr(application_module, "get_backend", forbidden_backend)
+    with pytest.raises(ChangeControlApplicationIntegrityError, match="does not exist"):
+        ChangeControlApplication(settings).resolve_query_generation()
+    assert not (workspace / "change_control").exists()
+
+
+def test_generation_zero_tamper_and_authority_race_fail_before_result_release(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    ChangeControlApplication(_settings(workspace)).bootstrap(manifest, OPERATION_ID)
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+    application = ChangeControlApplication(settings)
+
+    resolved = application.resolve_query_generation()
+    resolved.__enter__()
+    index_path = workspace / "index.db"
+    index_path.write_bytes(index_path.read_bytes() + b"tampered")
+    with pytest.raises(ChangeControlApplicationIntegrityError):
+        resolved.close()
+
+    # Use a fresh exact workspace to prove a post-resolution authority change
+    # is checked again before any caller can release output.
+    workspace2, manifest2 = _workspace(tmp_path / "race")
+    ChangeControlApplication(_settings(workspace2)).bootstrap(manifest2, OPERATION_ID)
+    settings2 = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace2},
+            "query_generation": {"bootstrap_manifest": manifest2},
+        }
+    )
+    original = SqliteManagedChangeControlStore.get_active_generation
+    reads = 0
+
+    def race_after_open(store: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal reads
+        reads += 1
+        active = original(store, *args, **kwargs)
+        return active if reads < 3 else None
+
+    monkeypatch.setattr(
+        SqliteManagedChangeControlStore,
+        "get_active_generation",
+        race_after_open,
+    )
+    with (
+        pytest.raises(ChangeControlApplicationConflictError, match="changed"),
+        ChangeControlApplication(settings2).resolve_query_generation(),
+    ):
+        pass
+    assert reads == 3
+
+
+def test_query_close_reopens_a_fresh_read_only_authority_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    ChangeControlApplication(_settings(workspace)).bootstrap(manifest, OPERATION_ID)
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+    observed_stores: list[SqliteManagedChangeControlStore] = []
+    original = SqliteManagedChangeControlStore.get_active_generation
+
+    def observe(
+        store: SqliteManagedChangeControlStore,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        observed_stores.append(store)
+        return original(store, *args, **kwargs)
+
+    monkeypatch.setattr(
+        SqliteManagedChangeControlStore,
+        "get_active_generation",
+        observe,
+    )
+    with ChangeControlApplication(settings).resolve_query_generation():
+        pass
+
+    assert len(observed_stores) == 3
+    assert observed_stores[0] is not observed_stores[1]
+    assert observed_stores[1] is not observed_stores[2]
+    assert observed_stores[0] is not observed_stores[2]
+    assert all(store._read_only for store in observed_stores)  # noqa: SLF001
+
+
+def test_query_close_maps_original_authority_guard_drift_to_public_integrity(
+    tmp_path: Path,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    ChangeControlApplication(_settings(workspace)).bootstrap(manifest, OPERATION_ID)
+    settings = Settings.model_validate(
+        {
+            "storage": {"backend": "sqlite"},
+            "embedding": {"provider": "mock"},
+            "paths": {"workspace": workspace},
+            "query_generation": {"bootstrap_manifest": manifest},
+        }
+    )
+    resolved = ChangeControlApplication(settings).resolve_query_generation()
+    resolved.__enter__()
+
+    os.utime(workspace / "change_control" / "state.sqlite3")
+
+    with pytest.raises(ChangeControlApplicationIntegrityError):
+        resolved.close()
 
 
 def _sha(value: bytes) -> str:

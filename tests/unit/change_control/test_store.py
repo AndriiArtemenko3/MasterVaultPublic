@@ -6,6 +6,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from mastervault.change_control import (
     ChangeControlReviewMissingError,
     ChangeControlReviewStaleError,
     ChangeControlReviewTransitionError,
+    ChangeControlSnapshot,
     ClaimRevisionRegistry,
     ClaimSourceReference,
     ComparableClaimPair,
@@ -608,10 +610,20 @@ def test_historical_receipt_replay_survives_replacements_and_preserves_timestamp
     change_replay = store.compare_and_swap(
         proposed_full_aggregate(), expected_revision=1, operation_id="change-lost-ack"
     )
+    historical_lookup = store.get_operation_commit("change-lost-ack")
     assert create_replay.replayed and create_replay.revision == 1
     assert create_replay.committed_at == created.committed_at
     assert change_replay.replayed and change_replay.revision == 2
     assert change_replay.committed_at == changed.committed_at
+    assert historical_lookup == ChangeControlCommit(
+        aggregate_id=changed.aggregate_id,
+        revision=changed.revision,
+        aggregate_sha256=changed.aggregate_sha256,
+        changed=changed.changed,
+        committed_at=changed.committed_at,
+        replayed=True,
+    )
+    assert store.get_operation_commit("missing-operation") is None
     assert store.conn.execute("SELECT count(*) FROM change_control_operations").fetchone()[0] == 3
     store.close()
 
@@ -2062,6 +2074,129 @@ def test_held_write_lock_is_typed_busy_and_writes_nothing(tmp_path: Path) -> Non
     )
     contender.close()
     owner.close()
+
+
+def test_secure_read_snapshot_excludes_a_writer_until_close(tmp_path: Path) -> None:
+    path = tmp_path / "authority" / "state.sqlite3"
+    seed = SqliteChangeControlStore(path, secure_open=True)
+    seed.init_schema()
+    seed.create(empty_aggregate(), operation_id="seed")
+    seed.close()
+
+    reader = SqliteChangeControlStore(path, secure_open=True, read_only=True)
+    try:
+        before = reader.load("workspace")
+        assert before is not None and before.revision == 1
+
+        def attempt_write() -> str:
+            try:
+                contender = SqliteChangeControlStore(
+                    path,
+                    secure_open=True,
+                    timeout_seconds=0.02,
+                )
+            except ChangeControlBusyError:
+                return "busy"
+            try:
+                contender.compare_and_swap(
+                    proposed_full_aggregate(),
+                    expected_revision=1,
+                    operation_id="blocked-by-query",
+                )
+            finally:
+                contender.close()
+            return "written"
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            assert pool.submit(attempt_write).result(timeout=2.0) == "busy"
+        after = reader.load("workspace")
+        assert after == before
+    finally:
+        reader.close()
+
+    writer = SqliteChangeControlStore(path, secure_open=True)
+    try:
+        committed = writer.compare_and_swap(
+            proposed_full_aggregate(),
+            expected_revision=1,
+            operation_id="after-query",
+        )
+        assert committed.revision == 2
+    finally:
+        writer.close()
+
+
+def test_secure_reader_waits_for_writer_and_opens_exact_committed_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "authority" / "state.sqlite3"
+    seed = SqliteChangeControlStore(path, secure_open=True)
+    seed.init_schema()
+    seed.create(empty_aggregate(), operation_id="seed")
+    seed.close()
+
+    write_staged = Event()
+    allow_commit = Event()
+    reader_attempted = Event()
+    original_commit = SqliteChangeControlStore._commit
+    original_acquire = SqliteChangeControlStore._acquire_coordination
+
+    def paused_commit(store: SqliteChangeControlStore) -> None:
+        if not store._read_only and store.conn.in_transaction:
+            write_staged.set()
+            assert allow_commit.wait(timeout=2.0)
+        original_commit(store)
+
+    def observed_acquire(
+        store: SqliteChangeControlStore,
+        *,
+        exclusive: bool,
+    ) -> None:
+        if not exclusive:
+            reader_attempted.set()
+        original_acquire(store, exclusive=exclusive)
+
+    monkeypatch.setattr(SqliteChangeControlStore, "_commit", paused_commit)
+    monkeypatch.setattr(SqliteChangeControlStore, "_acquire_coordination", observed_acquire)
+
+    def write_successor() -> ChangeControlCommit:
+        writer = SqliteChangeControlStore(path, secure_open=True, timeout_seconds=2.0)
+        try:
+            return writer.compare_and_swap(
+                proposed_full_aggregate(),
+                expected_revision=1,
+                operation_id="writer-first",
+            )
+        finally:
+            writer.close()
+
+    def read_after_writer() -> ChangeControlSnapshot | None:
+        reader = SqliteChangeControlStore(
+            path,
+            secure_open=True,
+            read_only=True,
+            timeout_seconds=2.0,
+        )
+        try:
+            return reader.load("workspace")
+        finally:
+            reader.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writer_future = pool.submit(write_successor)
+        assert write_staged.wait(timeout=2.0)
+        reader_future = pool.submit(read_after_writer)
+        assert reader_attempted.wait(timeout=2.0)
+        assert not reader_future.done()
+        allow_commit.set()
+        committed = writer_future.result(timeout=2.0)
+        snapshot = reader_future.result(timeout=2.0)
+
+    assert committed.revision == 2
+    assert snapshot is not None
+    assert snapshot.revision == 2
+    assert snapshot.aggregate == proposed_full_aggregate()
 
 
 def test_unidentified_database_and_tampered_ledger_are_refused(tmp_path: Path) -> None:

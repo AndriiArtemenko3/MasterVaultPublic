@@ -71,6 +71,25 @@ class AskCfg(BaseModel):
     budget_usd: float = 0.25
 
 
+class QueryGenerationCfg(BaseModel):
+    """Runtime-only roots needed to re-open managed query authority.
+
+    Absolute source/repository locators intentionally remain configuration,
+    not durable authority.  Their contents are revalidated against the
+    content-addressed SQLite records on every managed query.
+    """
+
+    bootstrap_manifest: Path | None = None
+    source_roots: dict[str, Path] = Field(default_factory=dict)
+    seed_repository_root: Path | None = None
+    evidence_repository_root: Path | None = None
+    canonical_repository_root: Path | None = None
+    temporal_analysis_manifest_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+
+
 class BudgetsCfg(BaseModel):
     ingest: float = 5.00
     lint: float = 0.50
@@ -178,6 +197,7 @@ class Settings(BaseSettings):
     ingestion: IngestionCfg = Field(default_factory=IngestionCfg)
     document: DocumentCfg = Field(default_factory=DocumentCfg)
     ask: AskCfg = Field(default_factory=AskCfg)
+    query_generation: QueryGenerationCfg = Field(default_factory=QueryGenerationCfg)
     budgets: BudgetsCfg = Field(default_factory=BudgetsCfg)
     paths: PathsCfg = Field(default_factory=PathsCfg)
 

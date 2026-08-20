@@ -11,11 +11,16 @@ import json
 
 import typer
 
+from mastervault.change_control.application import ChangeControlApplication
+from mastervault.change_control.application_errors import (
+    ChangeControlApplicationError,
+    ChangeControlApplicationIntegrityError,
+)
+from mastervault.change_control.query_generation import QueryGenerationMetadataV1
 from mastervault.config import load_settings
 from mastervault.models import Hit
 from mastervault.providers import get_embedding_provider, get_reranker
 from mastervault.retrieval import hybrid_search
-from mastervault.storage import get_backend
 
 query_app = typer.Typer(help="Query the index.")
 
@@ -33,6 +38,32 @@ def _render_hit(hit: Hit) -> str:
     return f"[{hit.record_type.value}] ({confidence}) {_one_line(hit.text)} -> {hit.rel_path}"
 
 
+def _generation_error(exc: ChangeControlApplicationError) -> None:
+    typer.echo(f"error [{exc.code.value}]: {exc}", err=True)
+    raise typer.Exit(code=2 if exc.code.value == "usage-error" else 1)
+
+
+def _verify_embedder_identity(
+    metadata: QueryGenerationMetadataV1,
+    *,
+    model_version: str,
+    dimensions: int,
+) -> None:
+    if metadata.embedding_model is None:
+        return
+    if (
+        metadata.embedding_model != model_version
+        or metadata.embedding_dimensions != dimensions
+    ):
+        raise ChangeControlApplicationIntegrityError(
+            "configured embedding provider differs from the resolved generation"
+        )
+
+
+def _render_generation(metadata: QueryGenerationMetadataV1) -> None:
+    typer.echo(f"knowledge generation: {metadata.human_label}")
+
+
 @query_app.command()
 def search(
     query: str = typer.Argument(..., help="Free-text query."),
@@ -42,6 +73,11 @@ def search(
         "all", "--type", help="Filter hits: claim | chunk | wiki | structural | all."
     ),
     rerank: bool = typer.Option(False, "--rerank", help="Rerank the top pool."),
+    generation: str = typer.Option(
+        "auto",
+        "--generation",
+        help="Serve auto, legacy, active, or one exact mgeneration:<sha256>.",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON with channel provenance."),
 ) -> None:
     """Hybrid search across claims, chunks, wiki, and PDF structural records."""
@@ -49,27 +85,37 @@ def search(
         typer.echo(f"error: --type must be one of {', '.join(_RECORD_TYPES)}", err=True)
         raise typer.Exit(code=2)
     settings = load_settings()
-    backend = get_backend(settings)
-    embedder = get_embedding_provider(settings)
-    reranker = get_reranker(settings) if rerank else None
     try:
-        result = hybrid_search(
-            query,
-            settings,
-            backend,
-            embedder,
-            reranker,
-            k=k,
-            domain=domain,
-            record_types=None if record_type == "all" else [record_type],
-            rerank=rerank,
-        )
-    finally:
-        backend.close()
+        with ChangeControlApplication(settings).resolve_query_generation(
+            generation
+        ) as resolved:
+            embedder = get_embedding_provider(settings)
+            _verify_embedder_identity(
+                resolved.metadata,
+                model_version=embedder.model_version,
+                dimensions=embedder.dimensions,
+            )
+            reranker = get_reranker(settings) if rerank else None
+            result = hybrid_search(
+                query,
+                settings,
+                resolved.backend,
+                embedder,
+                reranker,
+                k=k,
+                domain=domain,
+                record_types=None if record_type == "all" else [record_type],
+                rerank=rerank,
+                evidence_workspaces=resolved.evidence_workspaces or None,
+            )
+            generation_metadata = resolved.metadata
+    except ChangeControlApplicationError as exc:
+        _generation_error(exc)
 
     if json_out:
         payload = {
             "query": query,
+            "generation": generation_metadata.model_dump(mode="json"),
             "wiki_card": (
                 result.wiki_card.model_dump(mode="json") if result.wiki_card else None
             ),
@@ -80,6 +126,7 @@ def search(
         typer.echo(json.dumps(payload, indent=2))
         return
 
+    _render_generation(generation_metadata)
     if result.wiki_card is not None:
         card = result.wiki_card
         typer.echo(f"=== {card.doc_id} -> {card.rel_path}")
@@ -99,6 +146,11 @@ def claims(
         None, "--confidence", help="Filter: low | medium | high."
     ),
     domain: str | None = typer.Option(None, "--domain", help="Restrict to one domain."),
+    generation: str = typer.Option(
+        "auto",
+        "--generation",
+        help="Serve auto, legacy, active, or one exact mgeneration:<sha256>.",
+    ),
     json_out: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     """Lexical search over the claims layer."""
@@ -106,12 +158,15 @@ def claims(
         typer.echo(f"error: --confidence must be one of {', '.join(_CONFIDENCES)}", err=True)
         raise typer.Exit(code=2)
     settings = load_settings()
-    backend = get_backend(settings)
     try:
-        claim_ids = backend.lexical_claims(query, _CLAIMS_FETCH_K, domain)
-        rows = backend.get_claims(claim_ids)
-    finally:
-        backend.close()
+        with ChangeControlApplication(settings).resolve_query_generation(
+            generation
+        ) as resolved:
+            claim_ids = resolved.backend.lexical_claims(query, _CLAIMS_FETCH_K, domain)
+            rows = resolved.backend.get_claims(claim_ids)
+            generation_metadata = resolved.metadata
+    except ChangeControlApplicationError as exc:
+        _generation_error(exc)
     if affects is not None:
         rows = [r for r in rows if affects in r.affects]
     if confidence is not None:
@@ -132,6 +187,7 @@ def claims(
         ]
         typer.echo(json.dumps(payload, indent=2))
         return
+    _render_generation(generation_metadata)
     if not rows:
         typer.echo("no claims matched")
         return
@@ -143,50 +199,71 @@ def claims(
 def wiki(
     action: str | None = typer.Argument(None, help="Omit to list; 'show' to display one entry."),
     slug: str | None = typer.Argument(None, help="Wiki slug for 'show'."),
+    generation: str = typer.Option(
+        "auto",
+        "--generation",
+        help="Serve auto, legacy, active, or one exact mgeneration:<sha256>.",
+    ),
 ) -> None:
     """List wiki entries per domain, or `wiki show <slug>` for one entry."""
+    if action is not None and (action != "show" or slug is None):
+        typer.echo("usage: wiki           (list per domain)", err=True)
+        typer.echo("       wiki show <slug>", err=True)
+        raise typer.Exit(code=2)
     settings = load_settings()
-    backend = get_backend(settings)
+    wiki_error: str | None = None
     try:
-        alias_index = backend.alias_index()
-        pairs = sorted({(domain, wiki_slug) for wiki_slug, domain in alias_index.values()})
+        with ChangeControlApplication(settings).resolve_query_generation(
+            generation
+        ) as resolved:
+            backend = resolved.backend
+            generation_metadata = resolved.metadata
+            alias_index = backend.alias_index()
+            pairs = sorted({(domain, wiki_slug) for wiki_slug, domain in alias_index.values()})
 
-        if action is None:
-            if not pairs:
-                typer.echo("no wiki entries indexed")
-                return
-            docs = backend.get_documents([f"wiki:{d}:{s}" for d, s in pairs])
-            titles = {doc.doc_id: doc.title for doc in docs}
-            current_domain = None
-            for domain, wiki_slug in pairs:
-                if domain != current_domain:
-                    typer.echo(f"{domain}:")
-                    current_domain = domain
-                title = titles.get(f"wiki:{domain}:{wiki_slug}", "")
-                typer.echo(f"  {wiki_slug} — {title}")
+            if action is None:
+                docs = backend.get_documents([f"wiki:{d}:{s}" for d, s in pairs])
+                titles = {doc.doc_id: doc.title for doc in docs}
+            else:
+                docs = []
+                titles = {}
+
+            match = next(((d, s) for d, s in pairs if s == slug), None)
+            if action is not None:
+                if match is None:
+                    wiki_error = f"no wiki entry with slug {slug!r}"
+                else:
+                    domain, wiki_slug = match
+                    docs = backend.get_documents([f"wiki:{domain}:{wiki_slug}"])
+                    if not docs:
+                        wiki_error = f"wiki entry {slug!r} has aliases but no document row"
+    except ChangeControlApplicationError as exc:
+        _generation_error(exc)
+
+    if wiki_error is not None:
+        typer.echo(wiki_error, err=True)
+        raise typer.Exit(code=1)
+    _render_generation(generation_metadata)
+    if action is None:
+        if not pairs:
+            typer.echo("no wiki entries indexed")
             return
+        current_domain = None
+        for domain, wiki_slug in pairs:
+            if domain != current_domain:
+                typer.echo(f"{domain}:")
+                current_domain = domain
+            title = titles.get(f"wiki:{domain}:{wiki_slug}", "")
+            typer.echo(f"  {wiki_slug} — {title}")
+        return
 
-        if action != "show" or slug is None:
-            typer.echo("usage: wiki           (list per domain)", err=True)
-            typer.echo("       wiki show <slug>", err=True)
-            raise typer.Exit(code=2)
-
-        match = next(((d, s) for d, s in pairs if s == slug), None)
-        if match is None:
-            typer.echo(f"no wiki entry with slug {slug!r}", err=True)
-            raise typer.Exit(code=1)
-        domain, wiki_slug = match
-        docs = backend.get_documents([f"wiki:{domain}:{wiki_slug}"])
-        if not docs:
-            typer.echo(f"wiki entry {slug!r} has aliases but no document row", err=True)
-            raise typer.Exit(code=1)
-        doc = docs[0]
-        aliases = sorted(a for a, (s, _d) in alias_index.items() if s == wiki_slug)
-        typer.echo(f"# {doc.title}")
-        typer.echo(f"domain: {doc.domain}")
-        typer.echo(f"path: {doc.rel_path}")
-        typer.echo(f"aliases: {', '.join(aliases)}")
-        typer.echo("")
-        typer.echo(doc.body.strip())
-    finally:
-        backend.close()
+    assert action == "show" and slug is not None
+    assert match is not None and docs
+    doc = docs[0]
+    aliases = sorted(a for a, (s, _d) in alias_index.items() if s == match[1])
+    typer.echo(f"# {doc.title}")
+    typer.echo(f"domain: {doc.domain}")
+    typer.echo(f"path: {doc.rel_path}")
+    typer.echo(f"aliases: {', '.join(aliases)}")
+    typer.echo("")
+    typer.echo(doc.body.strip())

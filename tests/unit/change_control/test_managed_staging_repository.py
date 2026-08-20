@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from mastervault.change_control.inference_repository import InferenceEvidenceConflictError
+from mastervault.change_control.inference_repository import (
+    InferenceEvidenceConflictError,
+    InferenceEvidenceRepositoryError,
+)
 from mastervault.change_control.managed_review import ManagedArtifactKind, ManagedArtifactRef
 from mastervault.change_control.managed_staging_repository import ManagedStagingRepository
 
@@ -18,6 +21,23 @@ def _artifact(*, run_id: str, name: str, content: bytes) -> ManagedArtifactRef:
         sha256=hashlib.sha256(content).hexdigest(),
         byte_count=len(content),
     )
+
+
+def _repository_snapshot(
+    root: Path,
+) -> dict[str, tuple[int, int, int, int, int, bytes | None]]:
+    snapshot: dict[str, tuple[int, int, int, int, int, bytes | None]] = {}
+    for path in sorted(root.rglob("*")):
+        info = path.stat()
+        snapshot[str(path.relative_to(root))] = (
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+            path.read_bytes() if path.is_file() else None,
+        )
+    return snapshot
 
 
 def test_stage_persists_complete_manifest_and_reopens_from_fresh_repository(
@@ -43,6 +63,48 @@ def test_stage_persists_complete_manifest_and_reopens_from_fresh_repository(
     assert fresh.resolve_completed_run(capability.completion).manifest == capability.manifest
     assert fresh.resolve_completed_run(run_id).completion == capability.completion
     assert capability.verify(fresh) == capability.manifest
+
+
+def test_read_only_staging_repository_delegates_nonmutating_reopen(
+    tmp_path: Path,
+) -> None:
+    run_id = "stage-read-only"
+    content = b'{"value":"exact"}'
+    artifact = _artifact(run_id=run_id, name="value", content=content)
+    writable = ManagedStagingRepository(tmp_path / "stage")
+    capability = writable.stage(run_id=run_id, artifacts=((artifact, content),))
+    before = _repository_snapshot(writable.root)
+    repository = ManagedStagingRepository(
+        writable.root,
+        create=False,
+        read_only=True,
+    )
+
+    assert repository.read_only is True
+    assert repository.resolve_completed_run(capability.completion).manifest == (
+        capability.manifest
+    )
+    assert repository.resolve_completed_run(run_id).completion == capability.completion
+    assert repository.open_member(
+        completion=capability.completion,
+        artifact=artifact,
+    ) == content
+    assert repository.reopen(capability.manifest) == capability.manifest
+    assert capability.verify(repository) == capability.manifest
+    with pytest.raises(InferenceEvidenceRepositoryError, match="read-only"):
+        repository.stage(run_id=run_id, artifacts=((artifact, content),))
+    assert _repository_snapshot(writable.root) == before
+
+
+def test_read_only_staging_construction_does_not_create_missing_root(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "missing-stage"
+
+    with pytest.raises(InferenceEvidenceRepositoryError):
+        ManagedStagingRepository(root, read_only=True)
+
+    assert not root.exists()
 
 
 def test_manifest_last_interruption_is_incomplete_then_idempotently_recoverable(

@@ -10,6 +10,7 @@ for the shipped demo dataset.
 
 from mastervault.sync.indexer import (
     ExactVaultNoteInput,
+    ExactVaultSyncReport,
     ExactWorkspaceFileInput,
     PreparedIndexDocument,
     PreparedIndexUnit,
@@ -18,6 +19,7 @@ from mastervault.sync.indexer import (
     prepare_exact_vault_notes,
     prepare_vault,
     record_content_hashes,
+    sync_exact_vault_notes,
     sync_vault,
     wiki_definition_text,
 )
@@ -31,6 +33,7 @@ from mastervault.sync.load import (
 __all__ = [
     "DemoLoadReport",
     "ExactVaultNoteInput",
+    "ExactVaultSyncReport",
     "ExactWorkspaceFileInput",
     "LoadEmbeddingsReport",
     "PreparedIndexDocument",
@@ -43,5 +46,6 @@ __all__ = [
     "prepare_vault",
     "record_content_hashes",
     "sync_vault",
+    "sync_exact_vault_notes",
     "wiki_definition_text",
 ]

@@ -206,8 +206,18 @@ class VerifiedManagedStagingCapability:
 class ManagedStagingRepository:
     """Shares one canonical root/lock implementation with recorded evidence."""
 
-    def __init__(self, root: Path) -> None:
-        self._backend = FilesystemInferenceEvidenceRepository(root)
+    def __init__(
+        self,
+        root: Path,
+        *,
+        create: bool = True,
+        read_only: bool = False,
+    ) -> None:
+        self._backend = FilesystemInferenceEvidenceRepository(
+            root,
+            create=create,
+            read_only=read_only,
+        )
 
     @property
     def root(self) -> Path:
@@ -216,6 +226,10 @@ class ManagedStagingRepository:
     @property
     def repository_id(self) -> str:
         return self._backend.repository_id
+
+    @property
+    def read_only(self) -> bool:
+        return self._backend.read_only
 
     @staticmethod
     def _manifest_path(manifest: ManagedStagingManifest) -> str:
@@ -237,6 +251,7 @@ class ManagedStagingRepository:
     ) -> VerifiedManagedStagingCapability:
         """Write members, immutable manifest, then the fixed completion pointer."""
 
+        self._backend._require_writable()
         by_id: dict[str, tuple[ManagedArtifactRef, bytes]] = {}
         by_path: dict[str, tuple[ManagedArtifactRef, bytes]] = {}
         for artifact, content in artifacts:
@@ -311,7 +326,7 @@ class ManagedStagingRepository:
             _token=_CAPABILITY_TOKEN,
         )
 
-    def resolve_completed_run(
+    def _resolve_completed_run(
         self,
         binding_or_run_id: ManagedStagingCompletionBinding | str,
     ) -> VerifiedManagedStagingCapability:
@@ -370,6 +385,15 @@ class ManagedStagingRepository:
                 raise ValueError("managed staging member is absent or substituted")
         return self._mint_capability(manifest=manifest, completion=expected)
 
+    def resolve_completed_run(
+        self,
+        binding_or_run_id: ManagedStagingCompletionBinding | str,
+    ) -> VerifiedManagedStagingCapability:
+        """Reopen one exact manifest-last run under the repository read lock."""
+
+        with self._backend._read_lock():
+            return self._resolve_completed_run(binding_or_run_id)
+
     def open_member(
         self,
         *,
@@ -382,22 +406,25 @@ class ManagedStagingRepository:
             ManagedArtifactRef
         ):
             raise TypeError("managed staging member reopen requires exact typed bindings")
-        verified = self.resolve_completed_run(completion)
-        member = next(
-            (
-                item.artifact
-                for item in verified.manifest.members
-                if item.artifact.artifact_id == artifact.artifact_id
-            ),
-            None,
-        )
-        if member != artifact:
-            raise ValueError("managed staging artifact is not an exact completed-manifest member")
-        payload = self._backend._read_optional(
-            artifact.path,
-            limit=artifact.byte_count,
-            label="managed staging member",
-        )
+        with self._backend._read_lock():
+            verified = self._resolve_completed_run(completion)
+            member = next(
+                (
+                    item.artifact
+                    for item in verified.manifest.members
+                    if item.artifact.artifact_id == artifact.artifact_id
+                ),
+                None,
+            )
+            if member != artifact:
+                raise ValueError(
+                    "managed staging artifact is not an exact completed-manifest member"
+                )
+            payload = self._backend._read_optional(
+                artifact.path,
+                limit=artifact.byte_count,
+                label="managed staging member",
+            )
         if payload is None or len(payload) != artifact.byte_count or (
             hashlib.sha256(payload).hexdigest() != artifact.sha256
         ):

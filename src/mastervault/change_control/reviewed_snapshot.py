@@ -542,6 +542,7 @@ def resolve_reviewed_temporal_snapshot(
     temporal_request_id: str,
     evidence_repository: FilesystemInferenceEvidenceRepository,
     source_note_resolver: RepositorySourceNoteInventoryResolver,
+    read_only: bool = False,
 ) -> ReviewedTemporalSnapshotAuthority:
     """Mint rev4 SourceNote authority from exact durable evidence and a decided review."""
 
@@ -557,6 +558,8 @@ def resolve_reviewed_temporal_snapshot(
         raise ReviewedTemporalSnapshotAuthorityError(
             "reviewed snapshot authority requires the exact repository SourceNote resolver"
         )
+    if type(read_only) is not bool:
+        raise ReviewedTemporalSnapshotAuthorityError("read_only must be an exact boolean")
     if (
         type(temporal_analysis_manifest_id) is not str
         or type(temporal_analysis_manifest_sha256) is not str
@@ -643,10 +646,14 @@ def resolve_reviewed_temporal_snapshot(
         preliminary_head = _exact_snapshot(preliminary_head, revision=4)
 
         operation_id = f"temporal-commit:{temporal_analysis.manifest_sha256}"
-        commit_receipt = store.compare_and_swap(
-            reproduced.proposed_aggregate,
-            expected_revision=2,
-            operation_id=operation_id,
+        commit_receipt = (
+            store.get_operation_commit(operation_id)
+            if read_only
+            else store.compare_and_swap(
+                reproduced.proposed_aggregate,
+                expected_revision=2,
+                operation_id=operation_id,
+            )
         )
         if (
             type(commit_receipt) is not ChangeControlCommit

@@ -14,7 +14,7 @@ import hmac
 import os
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from datetime import datetime
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
@@ -54,6 +54,7 @@ _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
 _CAPABILITY_TOKEN = object()
 _EVIDENCE_VERIFIER_TOKEN = object()
 _CAPABILITY_SECRET = os.urandom(32)
+_EVIDENCE_VERIFIER_SECRET = os.urandom(32)
 
 
 class _StrictFrozenModel(BaseModel):
@@ -87,6 +88,80 @@ def _sha256(value: Any) -> str:
     elif isinstance(value, dict):
         value = {str(key): _json_ready(item) for key, item in value.items()}
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _live_guard_binding(value: Any, *, seen: set[int] | None = None) -> Any:
+    """Canonicalize a process-local guard graph without copying authority bytes."""
+
+    if seen is None:
+        seen = set()
+    if value is None or type(value) in {bool, int, float, str}:
+        return value
+    if type(value) is bytes:
+        return {
+            "byte_count": len(value),
+            "sha256": hashlib.sha256(value).hexdigest(),
+        }
+    if isinstance(value, os.PathLike):
+        return {"path": os.fspath(value), "object_id": id(value)}
+    if isinstance(value, BaseModel):
+        return {
+            "model": f"{type(value).__module__}.{type(value).__qualname__}",
+            "object_id": id(value),
+            "value": value.model_dump(mode="json"),
+        }
+    object_id = id(value)
+    if object_id in seen:
+        return {"object_id": object_id, "recursive": True}
+    seen.add(object_id)
+    if type(value) is tuple:
+        return {
+            "object_id": object_id,
+            "tuple": [_live_guard_binding(item, seen=seen) for item in value],
+        }
+    if type(value) is list:
+        return {
+            "list": [_live_guard_binding(item, seen=seen) for item in value],
+            "object_id": object_id,
+        }
+    if type(value) is dict:
+        return {
+            "dict": [
+                [str(key), _live_guard_binding(item, seen=seen)]
+                for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+            ],
+            "object_id": object_id,
+        }
+    if callable(value):
+        return {
+            "callable_object_id": object_id,
+            "type": f"{type(value).__module__}.{type(value).__qualname__}",
+        }
+    declared: dict[str, Any] = {}
+    if is_dataclass(value) and not isinstance(value, type):
+        declared = {
+            item.name: _live_guard_binding(getattr(value, item.name), seen=seen)
+            for item in fields(value)
+        }
+    attributes = vars(value) if hasattr(value, "__dict__") else {}
+    extras = {
+        str(name): _live_guard_binding(item, seen=seen)
+        for name, item in sorted(attributes.items())
+        if name not in declared
+        and (
+            str(name).startswith("_")
+            or name == "verify"
+            or name in {"attestation", "resolved", "workspace", "legacy_index"}
+        )
+    }
+    return {
+        "attributes": declared,
+        "extras": extras,
+        "object_id": object_id,
+        "type": f"{type(value).__module__}.{type(value).__qualname__}",
+        "type_id": id(type(value)),
+        "verify_method_id": id(getattr(type(value), "verify", None)),
+    }
 
 
 def _json_ready(value: Any) -> Any:
@@ -524,12 +599,43 @@ class WorkspaceBootstrapState(_StrictFrozenModel):
         return self.inventory_receipt, self.index_readiness_receipt
 
 
-def _capability_seal(state: WorkspaceBootstrapState) -> str:
+def _evidence_verifier_binding(
+    verifier: VerifiedWorkspaceBootstrapEvidenceVerifier,
+) -> dict[str, Any]:
+    """Describe exact live guard owners for the process-local capability seal."""
+
+    guard = verifier._evidence_guard
+    binding: dict[str, Any] = {
+        "evidence_guard_object_id": id(guard),
+        "evidence_verifier_object_id": id(verifier),
+        "legacy_attestation": _live_guard_binding(verifier._legacy_attestation),
+        "resolved_aggregate": _live_guard_binding(verifier._resolved_aggregate),
+        "resolved_inventory": _live_guard_binding(verifier._resolved_inventory),
+    }
+    workspace = getattr(guard, "workspace", None)
+    legacy_index = getattr(guard, "legacy_index", None)
+    if workspace is not None or legacy_index is not None:
+        if workspace is None or legacy_index is None:
+            raise TypeError("workspace bootstrap composite evidence guard is incomplete")
+        binding.update(
+            {
+                "legacy_index_guard_object_id": id(legacy_index),
+                "workspace_guard_object_id": id(workspace),
+            }
+        )
+    return binding
+
+
+def _capability_seal(
+    state: WorkspaceBootstrapState,
+    evidence_verifier: VerifiedWorkspaceBootstrapEvidenceVerifier,
+) -> str:
     return hmac.new(
         _CAPABILITY_SECRET,
         canonical_json_bytes(
             {
                 "namespace": "mastervault.verified-workspace-bootstrap-capability.v1",
+                "evidence_verifier": _evidence_verifier_binding(evidence_verifier),
                 "state": state.model_dump(mode="json"),
             }
         ),
@@ -537,7 +643,7 @@ def _capability_seal(state: WorkspaceBootstrapState) -> str:
     ).hexdigest()
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class VerifiedWorkspaceBootstrapEvidenceVerifier:
     """Process-local handle retaining the live composite evidence guard."""
 
@@ -546,6 +652,8 @@ class VerifiedWorkspaceBootstrapEvidenceVerifier:
     _resolved_aggregate: ChangeControlAggregate
     _legacy_attestation: LegacyIndexAttestation
     _token: object
+    _guard_binding: bytes = b""
+    _guard_seal: str = ""
 
     def __post_init__(self) -> None:
         if self._token is not _EVIDENCE_VERIFIER_TOKEN:
@@ -566,6 +674,19 @@ class VerifiedWorkspaceBootstrapEvidenceVerifier:
             or self._token is not _EVIDENCE_VERIFIER_TOKEN
         ):
             raise TypeError("workspace bootstrap evidence verifier is invalid")
+        expected = canonical_json_bytes(
+            _live_guard_binding(self._evidence_guard)
+        )
+        expected_seal = hmac.new(
+            _EVIDENCE_VERIFIER_SECRET,
+            expected,
+            hashlib.sha256,
+        ).hexdigest()
+        if (
+            not hmac.compare_digest(self._guard_binding, expected)
+            or not hmac.compare_digest(self._guard_seal, expected_seal)
+        ):
+            raise TypeError("workspace bootstrap evidence guard graph was substituted")
         self._evidence_guard.verify()
 
 
@@ -607,14 +728,14 @@ def create_workspace_bootstrap_evidence_verifier(
             "legacy-index guard does not bind the workspace guard's exact projection"
         )
 
-    @dataclass(frozen=True)
+    @dataclass(frozen=True, slots=True)
     class _CompleteEvidenceGuard:
         workspace: WorkspaceBootstrapEvidenceGuard
         legacy_index: LegacyIndexAttestationGuard
 
         def verify(self) -> None:
-            self.workspace.verify()
-            self.legacy_index.verify()
+            WorkspaceBootstrapEvidenceGuard.verify(self.workspace)
+            LegacyIndexAttestationGuard.verify(self.legacy_index)
 
     return _mint_verified_workspace_bootstrap_evidence_verifier(
         _CompleteEvidenceGuard(workspace_guard, legacy_index_guard),
@@ -633,18 +754,25 @@ def _mint_verified_workspace_bootstrap_evidence_verifier(
 ) -> VerifiedWorkspaceBootstrapEvidenceVerifier:
     """Internal constructor retained for focused trust-boundary tests."""
 
+    guard_binding = canonical_json_bytes(_live_guard_binding(evidence_guard))
     verifier = VerifiedWorkspaceBootstrapEvidenceVerifier(
         _evidence_guard=evidence_guard,
         _resolved_inventory=resolved_inventory,
         _resolved_aggregate=resolved_aggregate,
         _legacy_attestation=legacy_attestation,
         _token=_EVIDENCE_VERIFIER_TOKEN,
+        _guard_binding=guard_binding,
+        _guard_seal=hmac.new(
+            _EVIDENCE_VERIFIER_SECRET,
+            guard_binding,
+            hashlib.sha256,
+        ).hexdigest(),
     )
     verifier.verify()
     return verifier
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class VerifiedWorkspaceBootstrapCapability:
     """Live process-local proof over freshly guarded repository/index evidence."""
 
@@ -671,7 +799,7 @@ class VerifiedWorkspaceBootstrapCapability:
 
     def verify(self) -> WorkspaceBootstrapState:
         try:
-            self._evidence_verifier.verify()
+            VerifiedWorkspaceBootstrapEvidenceVerifier.verify(self._evidence_verifier)
         except Exception as exc:
             raise ValueError(
                 "workspace bootstrap capability cannot freshly verify its evidence"
@@ -683,10 +811,13 @@ class VerifiedWorkspaceBootstrapCapability:
             exact.require_complete()
         except (TypeError, ValueError) as exc:
             raise ValueError("workspace bootstrap capability state is invalid") from exc
-        if exact != self.state or not hmac.compare_digest(self._seal, _capability_seal(exact)):
+        if exact != self.state or not hmac.compare_digest(
+            self._seal,
+            _capability_seal(exact, self._evidence_verifier),
+        ):
             raise ValueError("workspace bootstrap capability seal is invalid")
         try:
-            self._evidence_verifier.verify()
+            VerifiedWorkspaceBootstrapEvidenceVerifier.verify(self._evidence_verifier)
         except Exception as exc:
             raise ValueError(
                 "workspace bootstrap capability evidence changed during verification"
@@ -709,13 +840,23 @@ def _mint_verified_workspace_bootstrap_capability(
         canonical_json_bytes(state.model_dump(mode="json"))
     )
     exact.require_complete()
-    evidence_verifier.verify()
+    VerifiedWorkspaceBootstrapEvidenceVerifier.verify(evidence_verifier)
     return VerifiedWorkspaceBootstrapCapability(
         state=exact,
         _token=_CAPABILITY_TOKEN,
-        _seal=_capability_seal(exact),
+        _seal=_capability_seal(exact, evidence_verifier),
         _evidence_verifier=evidence_verifier,
     )
+
+
+def verify_workspace_bootstrap_capability(
+    capability: VerifiedWorkspaceBootstrapCapability,
+) -> WorkspaceBootstrapState:
+    """Verify an exact capability without instance-level method dispatch."""
+
+    if type(capability) is not VerifiedWorkspaceBootstrapCapability:
+        raise TypeError("workspace bootstrap capability type was substituted")
+    return VerifiedWorkspaceBootstrapCapability.verify(capability)
 
 
 def verify_workspace_bootstrap_evidence(
@@ -736,7 +877,7 @@ def verify_workspace_bootstrap_evidence(
     """
 
     try:
-        evidence_verifier.verify()
+        VerifiedWorkspaceBootstrapEvidenceVerifier.verify(evidence_verifier)
         exact_state = WorkspaceBootstrapState.model_validate_json(
             canonical_json_bytes(state.model_dump(mode="json"))
         )
@@ -801,7 +942,7 @@ def verify_workspace_bootstrap_evidence(
         exact_state,
         evidence_verifier=evidence_verifier,
     )
-    capability.verify()
+    verify_workspace_bootstrap_capability(capability)
     return capability
 
 
@@ -818,5 +959,6 @@ __all__ = [
     "WorkspaceNoteKind",
     "WorkspaceVaultMember",
     "create_workspace_bootstrap_evidence_verifier",
+    "verify_workspace_bootstrap_capability",
     "verify_workspace_bootstrap_evidence",
 ]

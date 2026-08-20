@@ -16,10 +16,11 @@ from mastervault.contracts.page_grounded_claims import (
     PageGroundedClaimCandidate,
     PageGroundedClaimExtractionOut,
 )
-from mastervault.core.errors import EvidenceGroundingError
+from mastervault.core.errors import DocumentIntegrityError, EvidenceGroundingError
 from mastervault.document_intelligence.docling_normalizer import normalize_docling_export
 from mastervault.document_intelligence.structural_records import structural_records
-from mastervault.models import Domain
+from mastervault.evidence import EvidenceLocation
+from mastervault.models import Domain, SourceNote
 from mastervault.pipelines.ask import run_ask
 from mastervault.pipelines.ingest import run_ingest
 from mastervault.providers.embedding import MockEmbedding
@@ -344,6 +345,145 @@ def test_return_policy_pdf_replay_retrieves_header_scoped_row_and_exact_cli_cita
     assert payload["hits"][0]["channels"]["structural"] == 1
     assert payload["hits"][0]["evidence"][-1]["cell_id"] == "cell-0006"
     assert payload["hits"][0]["evidence"][-1]["quote"] == "45 days"
+
+
+def test_search_routes_each_source_to_its_mapped_evidence_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, backend, embedder = _ingest(tmp_path, monkeypatch)
+    try:
+        baseline = hybrid_search("Premium 45 days", settings, backend, embedder, k=10)
+        evidence_paths = {
+            hit.rel_path
+            for hit in baseline.hits
+            if hit.record_type.value in {"claim", "structural"}
+        }
+        assert evidence_paths
+        wrong_settings = settings.model_copy(
+            update={"paths": PathsCfg(workspace=tmp_path / "wrong-workspace")}
+        )
+        for legacy_root in (
+            settings.paths.workspace,
+            str(settings.paths.workspace),
+        ):
+            routed = hybrid_search(
+                "Premium 45 days",
+                wrong_settings,
+                backend,
+                embedder,
+                k=10,
+                evidence_workspaces={rel_path: legacy_root for rel_path in evidence_paths},
+            )
+            assert any(hit.evidence for hit in routed.hits if hit.record_type.value == "claim")
+            assert any(hit.structural_kind == "table_row" for hit in routed.hits)
+
+        for query, channels in (
+            ("Premium customers 45-day return window", ("lexical_claims",)),
+            ("Premium 45 days", ("structural",)),
+        ):
+            with pytest.raises(
+                DocumentIntegrityError,
+                match="evidence workspace mapping has no path",
+            ):
+                hybrid_search(
+                    query,
+                    settings,
+                    backend,
+                    embedder,
+                    channels=channels,
+                    use_alias=False,
+                    evidence_workspaces={},
+                )
+    finally:
+        backend.close()
+
+
+def test_search_hydrates_indexed_note_frontmatter_from_a_separate_support_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, backend, embedder = _ingest(tmp_path, monkeypatch)
+    try:
+        baseline = hybrid_search("Premium 45 days", settings, backend, embedder, k=10)
+        claim_hit = next(hit for hit in baseline.hits if hit.record_type.value == "claim")
+        assert claim_hit.rel_path is not None
+
+        # The generation owns the canonical note provenance, but hydration
+        # reads its immutable frontmatter from DocumentRow.  An invalid note on
+        # disk therefore cannot displace the indexed snapshot; only the support
+        # root is used to reopen the content-addressed PDF and parse artefact.
+        generation_note_root = tmp_path / "generation-note-root"
+        generation_note_path = generation_note_root / claim_hit.rel_path
+        generation_note_path.parent.mkdir(parents=True)
+        generation_note_path.write_text("not the indexed SourceNote", encoding="utf-8")
+        wrong_default = settings.model_copy(
+            update={"paths": PathsCfg(workspace=tmp_path / "wrong-default")}
+        )
+        location = EvidenceLocation(
+            note_workspace=generation_note_root,
+            support_workspace=settings.paths.workspace,
+        )
+
+        routed = hybrid_search(
+            "Premium 45 days",
+            wrong_default,
+            backend,
+            embedder,
+            k=10,
+            evidence_workspaces={claim_hit.rel_path: location},
+        )
+
+        assert any(hit.evidence for hit in routed.hits if hit.record_type.value == "claim")
+        assert any(hit.structural_kind == "table_row" for hit in routed.hits)
+    finally:
+        backend.close()
+
+
+def test_search_fails_closed_for_missing_or_wrong_split_support_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings, backend, embedder = _ingest(tmp_path, monkeypatch)
+    try:
+        baseline = hybrid_search("Premium 45 days", settings, backend, embedder, k=10)
+        claim_hit = next(hit for hit in baseline.hits if hit.record_type.value == "claim")
+        assert claim_hit.rel_path is not None
+        document_row = backend.get_documents([claim_hit.doc_id])[0]
+        note = SourceNote.model_validate(document_row.frontmatter)
+        assert note.source_asset is not None
+        assert note.parsed_document is not None
+
+        wrong_support = tmp_path / "wrong-support"
+        for rel_path in (
+            note.source_asset.stored_path,
+            note.parsed_document.artifact_path,
+        ):
+            path = wrong_support / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"wrong supporting bytes")
+
+        for support_root, error in (
+            (tmp_path / "missing-support", "cannot be read"),
+            (wrong_support, "source asset integrity mismatch"),
+        ):
+            location = EvidenceLocation(
+                note_workspace=tmp_path / "generation-note-root",
+                support_workspace=support_root,
+            )
+            for query, channels in (
+                ("Premium customers 45-day return window", ("lexical_claims",)),
+                ("Premium 45 days", ("structural",)),
+            ):
+                with pytest.raises(DocumentIntegrityError, match=error):
+                    hybrid_search(
+                        query,
+                        settings,
+                        backend,
+                        embedder,
+                        channels=channels,
+                        use_alias=False,
+                        evidence_workspaces={claim_hit.rel_path: location},
+                    )
+    finally:
+        backend.close()
 
 
 def test_structural_sync_is_idempotent_and_empty_legacy_channel_shape_is_unchanged(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -27,6 +29,24 @@ from mastervault.storage.base import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class EvidenceLocation:
+    """Runtime-only roots for one indexed note and its supporting evidence.
+
+    ``DocumentRow.frontmatter`` is the canonical note snapshot during query
+    hydration; the note file is deliberately not reopened here.  The note root
+    is nevertheless retained as provenance for the selected generation, while
+    PDF assets and parsed artefacts are reopened only below ``support_workspace``.
+    Legacy ``Path``/``str`` mapping values mean that both roots are the same.
+    """
+
+    note_workspace: Path | str
+    support_workspace: Path | str
+
+
+EvidenceWorkspaceMap = Mapping[str, Path | str | EvidenceLocation]
+
+
 class EvidenceBundle(BaseModel):
     claim_id: str
     statement: str
@@ -47,12 +67,42 @@ def _load_source_note(row: DocumentRow) -> SourceNote:
         ) from exc
 
 
+def _evidence_location(
+    row: DocumentRow,
+    default_workspace: Path | str,
+    evidence_workspaces: EvidenceWorkspaceMap | None,
+) -> EvidenceLocation:
+    if evidence_workspaces is None:
+        return EvidenceLocation(default_workspace, default_workspace)
+    if row.rel_path not in evidence_workspaces:
+        raise DocumentIntegrityError(f"evidence workspace mapping has no path for {row.rel_path}")
+    workspace = evidence_workspaces[row.rel_path]
+    if isinstance(workspace, EvidenceLocation):
+        location = workspace
+    else:
+        location = EvidenceLocation(workspace, workspace)
+    if any(
+        not isinstance(value, (Path, str)) or (isinstance(value, str) and not value.strip())
+        for value in (location.note_workspace, location.support_workspace)
+    ):
+        raise DocumentIntegrityError(
+            f"evidence workspace mapping has no valid path for {row.rel_path}"
+        )
+    return location
+
+
 def evidence_by_claim(
     claims: list[HydratedClaimRow],
     backend: StorageBackend,
     workspace: Path | str,
+    *,
+    evidence_workspaces: EvidenceWorkspaceMap | None = None,
 ) -> dict[str, list[EvidenceRef | StructuralEvidenceRef]]:
-    """Batch-resolve evidence for hydrated claims; legacy claims map to ``[]``."""
+    """Batch-resolve claim evidence using an optional strict rel-path workspace map.
+
+    Without a map, every claim retains the legacy single-workspace behavior.
+    Supplying a map makes it authoritative for every hydrated source claim.
+    """
     document_rows = {
         row.doc_id: row for row in backend.get_documents(sorted({claim.doc_id for claim in claims}))
     }
@@ -64,6 +114,7 @@ def evidence_by_claim(
         if row is None or row.doc_type != "source":
             result[claim.claim_id] = []
             continue
+        evidence_location = _evidence_location(row, workspace, evidence_workspaces)
         note = notes.get(claim.doc_id)
         if note is None:
             note = _load_source_note(row)
@@ -81,8 +132,11 @@ def evidence_by_claim(
                 f"grounded claim {claim.claim_id!r} has no asset/parse reference"
             )
         if claim.doc_id not in parsed:
-            verify_source_asset(note.source_asset, workspace)
-            parsed[claim.doc_id] = load_parsed_document(note.parsed_document, workspace)
+            verify_source_asset(note.source_asset, evidence_location.support_workspace)
+            parsed[claim.doc_id] = load_parsed_document(
+                note.parsed_document,
+                evidence_location.support_workspace,
+            )
         validate_resolved_evidence(parsed[claim.doc_id], canonical.evidence)
         result[claim.claim_id] = list(canonical.evidence)
     return result
@@ -136,8 +190,10 @@ def validate_structural_hits(
     rows: list[StructuralRecordRow],
     backend: StorageBackend,
     workspace: Path | str,
+    *,
+    evidence_workspaces: EvidenceWorkspaceMap | None = None,
 ) -> None:
-    """Re-derive structural hits from verified artefacts; reject stale/forged rows."""
+    """Re-derive structural hits through the optional strict rel-path workspace map."""
     documents = {
         row.doc_id: row for row in backend.get_documents(sorted({item.doc_id for item in rows}))
     }
@@ -146,12 +202,20 @@ def validate_structural_hits(
         document_row = documents.get(item.doc_id)
         if document_row is None or document_row.doc_type != "source":
             raise DocumentIntegrityError(f"structural hit parent is not a source: {item.doc_id}")
+        evidence_location = _evidence_location(
+            document_row,
+            workspace,
+            evidence_workspaces,
+        )
         if item.doc_id not in expected_by_doc:
             note = _load_source_note(document_row)
             if note.source_asset is None or note.parsed_document is None:
                 raise DocumentIntegrityError("structural hit has no asset/parse reference")
-            verify_source_asset(note.source_asset, workspace)
-            parsed = load_parsed_document(note.parsed_document, workspace)
+            verify_source_asset(note.source_asset, evidence_location.support_workspace)
+            parsed = load_parsed_document(
+                note.parsed_document,
+                evidence_location.support_workspace,
+            )
             from mastervault.document_intelligence.models import ParsedDocumentV2
 
             if not isinstance(parsed, ParsedDocumentV2):

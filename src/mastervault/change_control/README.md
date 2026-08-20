@@ -264,6 +264,12 @@ knowledge-change workflow.
   It reopens authority, decision, projection, publications, and index evidence,
   returns an immutable query-only backend, and rereads authority before
   returning. Missing, corrupt, substituted, or mismatched state fails closed.
+- `generation_corpus.py` joins a workspace-origin successor with its complete
+  attested generation-zero inventory. It removes every managed projection path,
+  overlays only the current managed entries, preserves all other source, wiki,
+  decision, and strategy notes, and binds that exact full set through index
+  build, replay verification, and serving. Seed-origin activation retains its
+  projection-only corpus because it has no generic all-note inventory.
 - `workspace_bootstrap.py` is the generic existing-workspace adoption boundary.
   A caller-supplied versioned manifest explicitly selects managed SourceNotes
   and supplies their document identity, effective dates, role, authority, and
@@ -298,17 +304,25 @@ knowledge-change workflow.
   bootstrap, review, publication, index readiness, or activation and may be
   reconciled after lost acknowledgement from authoritative receipts.
 - `application.py` is the first stable synchronous library façade. This slice
-  exposes generic bootstrap and durable status/navigation; later operator
-  operations must extend the same boundary. It owns configuration/root
-  preflight and maps internal failures through `application_errors.py` to
+  exposes generic bootstrap, durable status/navigation, and read-only
+  query-generation resolution; later operator operations must extend the same
+  boundary. It owns configuration/root preflight and maps internal failures
+  through `application_errors.py` to
   `usage-error`, `review-required`, `conflict-or-stale-authority`,
   `integrity-failure`, or `unsupported-operation` while retaining the cause
-  chain. This is the boundary for future operator commands; this slice adds no
-  public CLI or ordinary `search`/`ask` integration. Its authority store uses
-  a private descriptor-pinned directory and database inode; status uses a
-  separate immutable/query-only no-create opener and never initializes or
-  migrates state. `BootstrapSourceRoot` is part of this stable boundary;
+  chain. Ordinary query commands now use this boundary; public
+  change-control/operator commands remain deferred. Its authority store uses a
+  private descriptor-pinned directory and database inode; status and query
+  resolution use immutable/query-only no-create openers and never initialize or
+  migrate state. `BootstrapSourceRoot` is part of this stable boundary;
   source-root paths are process inputs, not serialized authority.
+- `query_generation.py` defines the versioned `auto`/`legacy`/`active`/exact-ID
+  selection and path-free serving metadata, and owns the context-managed
+  backend lifetime that keeps all verification guards live through a query.
+- `managed_query_resolver.py` reconstructs the process-local managed review
+  resolver from the active SQLite decision, sealed seed, committed inference
+  evidence, and canonical governing source using no-create, read-only
+  repositories. It does not persist runtime locators as authority.
 - `seed.py` strictly loads the SL2 pre-change source inventory, verifies one
   raw/note byte snapshot per manifest entry, and materializes a disposable
   vault without touching the shipped current-state corpus.
@@ -492,7 +506,7 @@ and cannot create review, publication, index, or activation authority.
 
 Deliberately deferred: concrete hosted/local provider adapters and model
 dependencies, background workers, targeted post-activation regressions, final
-JSON/Markdown audit reporting, public application/operator commands, ordinary
-`search`/`ask` generation selection, operator review UI integration, managed
-`EDIT` execution, PostgreSQL managed-bootstrap/generation parity, multi-event
-operator support, retention/cleanup, the public v0.3 release, and deployment.
+JSON/Markdown audit reporting, public change-control/operator commands,
+operator review UI integration, managed `EDIT` execution, PostgreSQL
+managed-bootstrap/generation parity, multi-event operator support,
+retention/cleanup, the public v0.3 release, and deployment.

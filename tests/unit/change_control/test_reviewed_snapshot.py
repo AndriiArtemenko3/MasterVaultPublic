@@ -55,7 +55,11 @@ from mastervault.change_control.source_note_inventory import (
     RepositorySourceNoteInventoryResolver,
     SourceNoteInventoryResolutionError,
 )
-from mastervault.change_control.store import ChangeControlSnapshot, SqliteChangeControlStore
+from mastervault.change_control.store import (
+    ChangeControlCommit,
+    ChangeControlSnapshot,
+    SqliteChangeControlStore,
+)
 from mastervault.change_control.temporal_analysis import TemporalAnalysisEvidence
 from mastervault.change_control.temporal_commit import commit_temporal_proposal
 from mastervault.change_control.temporal_proposal import (
@@ -169,6 +173,7 @@ def _resolve(
         source_note_resolver=overrides.get(
             "source_note_resolver", fixture.case.build_inputs["inventory_resolver"]
         ),
+        read_only=overrides.get("read_only", False),
     )
 
 
@@ -223,6 +228,47 @@ def test_resolves_exact_mixed_review_and_mints_distinct_rev4_authority(
             old_capability.verify(snapshot=resolved.snapshot)
     finally:
         store.close()
+
+
+def test_secure_read_only_replay_uses_existing_commit_without_cas(
+    reviewed_fixture: _ReviewedFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = tmp_path / "secure-authority" / "change-control.sqlite3"
+    database.parent.mkdir(mode=0o700)
+    shutil.copy2(reviewed_fixture.database, database)
+    database.chmod(0o600)
+    before = database.read_bytes()
+    store = SqliteChangeControlStore(database, secure_open=True, read_only=True)
+
+    def reject_cas(*args: object, **kwargs: object) -> ChangeControlCommit:
+        del args, kwargs
+        raise AssertionError("read-only resolution must not invoke compare_and_swap")
+
+    monkeypatch.setattr(store, "compare_and_swap", reject_cas)
+    try:
+        resolved = _resolve(reviewed_fixture, store, read_only=True)
+        receipt = store.get_operation_commit(reviewed_fixture.commit.operation_id)
+        assert receipt is not None
+        assert receipt.replayed and receipt.changed and receipt.revision == 3
+        assert receipt.aggregate_id == reviewed_fixture.commit.aggregate_id
+        assert receipt.aggregate_sha256 == reviewed_fixture.commit.aggregate_sha256
+        assert resolved.temporal_commit.committed_at == receipt.committed_at
+        assert resolved.temporal_commit.replayed
+        assert resolved.snapshot.revision == 4
+        assert int(store.conn.execute("PRAGMA query_only").fetchone()[0]) == 1
+
+        monkeypatch.setattr(store, "get_operation_commit", lambda operation_id: None)
+        with pytest.raises(
+            ReviewedTemporalSnapshotAuthorityError,
+            match="exact temporal proposal commit receipt",
+        ):
+            _resolve(reviewed_fixture, store, read_only=True)
+    finally:
+        store.close()
+
+    assert database.read_bytes() == before
 
 
 def test_capability_rejects_serialization_snapshot_substitution_and_seal_tamper(
