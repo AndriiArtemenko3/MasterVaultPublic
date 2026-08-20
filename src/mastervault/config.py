@@ -147,6 +147,12 @@ class PathsCfg(BaseModel):
 
         return self.workspace / "change_control" / "generations"
 
+    @property
+    def change_control_evidence_root(self) -> Path:
+        """Dedicated private root for immutable change-control evidence."""
+
+        return self.workspace / "change_control" / "evidence"
+
 
 def resolve_config_path() -> Path | None:
     """Return the exact TOML source selected by the settings precedence."""
