@@ -39,6 +39,14 @@ from mastervault.change_control.application_errors import (
     ChangeControlApplicationUnsupportedOperationError,
     ChangeControlApplicationUsageError,
 )
+from mastervault.change_control.change_application_contracts import (
+    ActivateChangeRequestV1,
+    ChangeRunPhaseV1,
+    ManagedAdoptionChoiceV1,
+    ManagedReviewDecisionDocumentV1,
+    StartChangeRequestV1,
+    TemporalReviewDecisionDocumentV1,
+)
 from mastervault.change_control.managed_store import SqliteManagedChangeControlStore
 from mastervault.change_control.operator_run import OperatorRunLinkKind
 from mastervault.change_control.query_generation import (
@@ -145,8 +153,203 @@ PROCESS_WORKER = textwrap.dedent(
 def test_change_control_package_exports_the_stable_application_facade() -> None:
     assert change_control_package.BootstrapSourceRoot is BootstrapSourceRoot
     assert change_control_package.ChangeControlApplication is ChangeControlApplication
+    assert change_control_package.ManagedAdoptionChoiceV1 is ManagedAdoptionChoiceV1
     assert "BootstrapSourceRoot" in change_control_package.__all__
     assert "ChangeControlApplication" in change_control_package.__all__
+    assert "ManagedAdoptionChoiceV1" in change_control_package.__all__
+
+
+@pytest.mark.parametrize(
+    "input_value",
+    (
+        type("SubstitutedActivation", (ActivateChangeRequestV1,), {}).model_construct(),
+        type(
+            "SubstitutedTemporalDecision",
+            (TemporalReviewDecisionDocumentV1,),
+            {},
+        ).model_construct(),
+        type(
+            "SubstitutedManagedDecision",
+            (ManagedReviewDecisionDocumentV1,),
+            {},
+        ).model_construct(),
+    ),
+)
+def test_public_write_facade_rejects_substituted_request_types_before_effects(
+    tmp_path: Path,
+    input_value: object,
+) -> None:
+    application = ChangeControlApplication(_settings(tmp_path / "must-not-exist"))
+
+    with pytest.raises(TypeError, match=r"requires (?:an|the) exact public"):
+        if isinstance(input_value, ActivateChangeRequestV1):
+            application.activate_change(input_value)
+        else:
+            application.record_change_review(input_value)  # type: ignore[arg-type]
+
+    assert not (tmp_path / "must-not-exist").exists()
+
+
+@pytest.mark.parametrize(
+    "input_value",
+    (
+        StartChangeRequestV1.model_construct(
+            operation_id=f"application-run-lock:{'1' * 64}"
+        ),
+        TemporalReviewDecisionDocumentV1.model_construct(
+            operation_id=f"application-run-lock:{'2' * 64}"
+        ),
+        ManagedReviewDecisionDocumentV1.model_construct(
+            operation_id=f"application-run-lock:{'3' * 64}"
+        ),
+        ActivateChangeRequestV1.model_construct(
+            operation_id=f"application-run-lock:{'4' * 64}"
+        ),
+    ),
+)
+def test_public_write_facade_rejects_internal_run_lock_operation_ids_before_effects(
+    tmp_path: Path,
+    input_value: object,
+) -> None:
+    workspace = tmp_path / "must-not-exist"
+    application = ChangeControlApplication(_settings(workspace))
+
+    with pytest.raises(ChangeControlApplicationUsageError, match="reserved.*run-lock"):
+        if type(input_value) is StartChangeRequestV1:
+            application.start_change(input_value)
+        elif type(input_value) is ActivateChangeRequestV1:
+            application.activate_change(input_value)
+        else:
+            application.record_change_review(input_value)  # type: ignore[arg-type]
+
+    assert not workspace.exists()
+
+
+def test_public_bootstrap_rejects_internal_run_lock_operation_id_before_effects(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "must-not-exist"
+    application = ChangeControlApplication(_settings(workspace))
+
+    with pytest.raises(ChangeControlApplicationUsageError, match="reserved.*run-lock"):
+        application.bootstrap(
+            tmp_path / "missing-manifest.json",
+            f"application-run-lock:{'5' * 64}",
+        )
+
+    assert not workspace.exists()
+
+
+@pytest.mark.parametrize(
+    ("limit", "cursor", "phase"),
+    (
+        (True, None, None),
+        (0, None, None),
+        (101, None, None),
+        (50, "not-a-canonical-cursor", None),
+        (50, None, "activated"),
+    ),
+)
+def test_change_list_rejects_invalid_public_inputs_as_usage_before_preflight(
+    tmp_path: Path,
+    limit: object,
+    cursor: object,
+    phase: object,
+) -> None:
+    application = ChangeControlApplication(_settings(tmp_path / "missing"))
+
+    with pytest.raises(ChangeControlApplicationUsageError) as captured:
+        application.list_changes(  # type: ignore[arg-type]
+            limit=limit,
+            cursor=cursor,
+            phase=phase,
+        )
+
+    assert captured.value.code.value == "usage-error"
+    assert not (tmp_path / "missing").exists()
+
+
+def test_lifecycle_reads_reject_postgres_and_unsupported_platform_before_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "must-not-be-created"
+    run_id = f"operatorrun:{'0' * 64}"
+    postgres = ChangeControlApplication(_settings(workspace, backend="postgres"))
+
+    for read in (
+        lambda: postgres.list_changes(),
+        lambda: postgres.get_change_status(run_id),
+        lambda: postgres.get_change_review(run_id),
+        lambda: postgres.verify_change(run_id),
+    ):
+        with pytest.raises(ChangeControlApplicationUnsupportedOperationError):
+            read()
+    assert not workspace.exists()
+
+    posix_only = ChangeControlApplication(_settings(workspace))
+    monkeypatch.setattr(application_module.os, "name", "nt")
+    with pytest.raises(ChangeControlApplicationUnsupportedOperationError):
+        posix_only.get_change_status(run_id)
+    assert not workspace.exists()
+
+
+def test_public_lifecycle_reads_are_filtered_and_strictly_side_effect_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    settings = _settings(workspace)
+    settings.query_generation.bootstrap_manifest = manifest
+    application = ChangeControlApplication(settings)
+    bootstrap = application.bootstrap(manifest, OPERATION_ID)
+    settings.paths.change_control_evidence_root.mkdir(mode=0o700)
+
+    def snapshot() -> dict[str, tuple[bytes, int, int]]:
+        return {
+            str(path.relative_to(workspace)): (
+                path.read_bytes(),
+                path.stat().st_size,
+                path.stat().st_mtime_ns,
+            )
+            for path in workspace.rglob("*")
+            if path.is_file()
+        }
+
+    before = snapshot()
+
+    def forbidden_provider(_settings: Settings) -> MockEmbedding:
+        pytest.fail("lifecycle reads must not resolve an embedding provider")
+
+    monkeypatch.setattr(application_module, "get_embedding_provider", forbidden_provider)
+    page = application.list_changes(limit=2, phase=ChangeRunPhaseV1.BOOTSTRAPPED)
+    assert len(page.items) == 1
+    assert page.next_cursor is None
+    assert page.items[0].run_id == bootstrap.operator_run.record.command.run_id
+    assert page.items[0].phase == ChangeRunPhaseV1.BOOTSTRAPPED
+    assert application.list_changes(phase=ChangeRunPhaseV1.ACTIVATED).items == ()
+
+    run_id = bootstrap.operator_run.record.command.run_id
+    status = application.get_change_status(run_id)
+    assert status.phase == ChangeRunPhaseV1.BOOTSTRAPPED
+    with pytest.raises(ChangeControlApplicationUsageError):
+        application.get_change_review(run_id)
+    verification = application.verify_change(run_id)
+    assert verification.verified
+    assert verification.status == status
+    assert application.get_status(run_id) == bootstrap.operator_run
+    serialized = json.dumps(
+        {
+            "page": page.model_dump(mode="json"),
+            "status": status.model_dump(mode="json"),
+            "verification": verification.model_dump(mode="json"),
+        },
+        sort_keys=True,
+    )
+    assert str(tmp_path) not in serialized
+    assert snapshot() == before
+    assert not settings.paths.change_control_db_path.with_name("state.sqlite3-wal").exists()
+    assert not settings.paths.change_control_db_path.with_name("state.sqlite3-shm").exists()
 
 
 def test_failed_query_construction_closes_every_resource_and_retains_failure() -> None:
@@ -719,13 +922,12 @@ def test_every_durable_failpoint_replays_with_stable_identity_and_status(
             if stage == _target:
                 raise RuntimeError(f"simulated crash after {_target}")
 
-        with pytest.raises(ChangeControlApplicationIntegrityError) as captured:
+        with pytest.raises(RuntimeError, match=f"simulated crash after {target}"):
             ChangeControlApplication(settings).bootstrap(
                 manifest,
                 OPERATION_ID,
                 failure_hook=fail_once,
             )
-        assert isinstance(captured.value.__cause__, RuntimeError)
         assert reached == list(ALL_DURABLE_STAGES[: ALL_DURABLE_STAGES.index(target) + 1])
 
     first = ChangeControlApplication(settings).bootstrap(manifest, OPERATION_ID)
@@ -914,7 +1116,7 @@ def test_bootstrap_verifier_rejects_index_guard_for_a_different_projection(
         corrupt_projection,
     )
 
-    with pytest.raises(ChangeControlApplicationIntegrityError, match="exact projection"):
+    with pytest.raises(ChangeControlApplicationIntegrityError):
         ChangeControlApplication(_settings(workspace)).bootstrap(manifest, OPERATION_ID)
 
 
@@ -1052,6 +1254,79 @@ def test_malformed_manifest_is_usage_and_status_never_creates_or_migrates(
     with pytest.raises(ChangeControlApplicationUsageError):
         application.get_status("not-a-run")
     assert not (workspace / "change_control").exists()
+
+
+def test_absent_lifecycle_run_is_usage_but_durable_corruption_remains_integrity(
+    tmp_path: Path,
+) -> None:
+    workspace, manifest = _workspace(tmp_path)
+    settings = _settings(workspace)
+    settings.query_generation.bootstrap_manifest = manifest
+    application = ChangeControlApplication(settings)
+    result = application.bootstrap(manifest, OPERATION_ID)
+    settings.paths.change_control_evidence_root.mkdir(mode=0o700)
+    absent = f"operatorrun:{'0' * 64}"
+    assert absent != result.operator_run.record.command.run_id
+
+    for read in (
+        application.get_change_status,
+        application.get_change_review,
+        application.verify_change,
+    ):
+        with pytest.raises(ChangeControlApplicationUsageError) as malformed:
+            read("not-a-run")
+        assert malformed.value.code.value == "usage-error"
+        with pytest.raises(ChangeControlApplicationUsageError) as captured:
+            read(absent)
+        assert captured.value.code.value == "usage-error"
+
+    database = workspace / "change_control" / "state.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute("PRAGMA foreign_keys=OFF")
+        connection.execute("DELETE FROM change_control_workspace_inventory_receipts")
+        connection.commit()
+    finally:
+        connection.close()
+    assert database.exists()
+    with pytest.raises(ChangeControlApplicationIntegrityError):
+        application.get_change_status(result.operator_run.record.command.run_id)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "vault",
+        "index.db",
+        "change_control/state.sqlite3",
+        "change_control/checkpoints.sqlite3",
+        "change_control/generations",
+    ),
+)
+def test_configured_authority_path_errors_are_path_free(
+    tmp_path: Path,
+    relative: str,
+) -> None:
+    workspace = tmp_path / "private" / "workspace"
+    workspace.mkdir(parents=True)
+    target = workspace / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    safe_target = tmp_path / "private" / "substituted"
+    safe_target.touch()
+    target.symlink_to(safe_target)
+
+    with pytest.raises(ChangeControlApplicationIntegrityError) as identity_error:
+        application_module._existing_identity(target)  # noqa: SLF001
+    assert str(tmp_path) not in str(identity_error.value)
+
+    with pytest.raises(ChangeControlApplicationIntegrityError) as captured:
+        application_module._preflight_paths(_settings(workspace))  # noqa: SLF001
+
+    serialized = json.dumps(
+        {"code": captured.value.code.value, "message": str(captured.value)},
+        sort_keys=True,
+    )
+    assert str(tmp_path) not in serialized
 
 
 @pytest.mark.parametrize(

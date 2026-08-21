@@ -28,6 +28,7 @@ from mastervault.change_control.dependency_analysis import (
     DependencyDisposition,
     DependencyWorkload,
     SourceNoteInventory,
+    derive_governing_supersessions,
     generate_dependency_workload,
     materialize_dependencies,
     validate_dependency_results,
@@ -285,6 +286,39 @@ def _workload(fixture: _Fixture) -> DependencyWorkload:
         classification_results=fixture.classifier_results,
         inventory_capability=fixture.capability,
     )
+
+
+def test_governing_supersession_derivation_accepts_mixed_non_edges_and_rejects_edges() -> None:
+    fixture = _fixture()
+    assert len(derive_governing_supersessions(fixture.classifier_results)) == 2
+
+    revisions = {
+        item.claim_revision_id: item for item in fixture.snapshot.aggregate.claims.revisions
+    }
+    dispositions = (
+        PairDisposition.UNRELATED,
+        PairDisposition.COEXISTS,
+        PairDisposition.CONTRADICTS,
+    )
+    candidates = {item.pair_id: item for item in fixture.candidates.candidates}
+    mixed = tuple(
+        ClaimPairClassification.create(
+            candidate=candidates[item.pair_id],
+            endpoint_revisions=tuple(
+                revisions[revision_id]
+                for revision_id in candidates[item.pair_id].claim_revision_ids
+            ),
+            disposition=dispositions[index % len(dispositions)],
+            rationale="Synthetic non-governing mixed classification.",
+            confidence=0.9,
+        )
+        for index, item in enumerate(fixture.classifier_workload.selected)
+    )
+    mixed_results = ClassificationResultSet.create(
+        workload=fixture.classifier_workload,
+        classifications=mixed,
+    )
+    assert derive_governing_supersessions(mixed_results) == ()
 
 
 def test_complete_inventory_includes_body_only_expired_and_control_documents() -> None:

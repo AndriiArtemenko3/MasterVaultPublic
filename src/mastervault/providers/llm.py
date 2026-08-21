@@ -15,6 +15,7 @@ StructuredOutputError. Secrets come only from the environment via Settings.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ class Message:
 class LLMResult:
     text: str
     parsed: BaseModel | None
+    request_id: str
     model: str
     usage_in: int
     usage_out: int
@@ -187,6 +189,7 @@ class AnthropicLLM:
             return LLMResult(
                 text=text,
                 parsed=None,
+                request_id=str(response.id),
                 model=model,
                 usage_in=usage_in,
                 usage_out=usage_out,
@@ -208,6 +211,7 @@ class AnthropicLLM:
         return LLMResult(
             text=parsed.model_dump_json(),
             parsed=parsed,
+            request_id=str(response.id),
             model=model,
             usage_in=usage_in,
             usage_out=usage_out,
@@ -271,6 +275,7 @@ class OpenAILLM:
         model = resolve_model(self._settings, tier)
         usage_in = 0
         usage_out = 0
+        request_id = ""
 
         kwargs: dict[str, Any] = {"model": model, "max_tokens": max_tokens}
         effective_prompt = prompt
@@ -290,12 +295,13 @@ class OpenAILLM:
                 )
 
         def call(current_prompt: str) -> str:
-            nonlocal usage_in, usage_out
+            nonlocal request_id, usage_in, usage_out
             response = self._get_client().chat.completions.create(
                 messages=self._messages(current_prompt, system), **kwargs
             )
             usage_in += response.usage.prompt_tokens
             usage_out += response.usage.completion_tokens
+            request_id = str(response.id)
             return response.choices[0].message.content or ""
 
         text = call(effective_prompt)
@@ -314,6 +320,7 @@ class OpenAILLM:
         return LLMResult(
             text=text,
             parsed=parsed,
+            request_id=request_id,
             model=model,
             usage_in=usage_in,
             usage_out=usage_out,
@@ -409,6 +416,10 @@ class MockLLM:
         return LLMResult(
             text=text,
             parsed=parsed,
+            request_id=(
+                "mock:"
+                + hashlib.sha256(f"{len(self.calls)}\0{task}\0{prompt}".encode()).hexdigest()
+            ),
             model=self._model_for(tier),
             usage_in=estimate_tokens(prompt),
             usage_out=estimate_tokens(text),

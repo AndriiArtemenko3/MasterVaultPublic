@@ -67,6 +67,7 @@ from mastervault.change_control.dependency_analysis import (
     SelectedNeighbourRef,
     SourceNoteInventory,
     VerifiedSourceNoteInventoryCapability,
+    derive_governing_supersessions,
     generate_dependency_workload,
     materialize_dependencies,
     validate_dependency_results,
@@ -271,6 +272,9 @@ if TYPE_CHECKING:
     )
     from mastervault.change_control.change_application_contracts import (
         IncomingEvidenceSummaryV1 as IncomingEvidenceSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ManagedAdoptionChoiceV1 as ManagedAdoptionChoiceV1,
     )
     from mastervault.change_control.change_application_contracts import (
         ManagedReviewChoiceV1 as ManagedReviewChoiceV1,
@@ -576,10 +580,15 @@ if TYPE_CHECKING:
         RecordedInferenceProvider,
         RecordedInferenceTask,
         ReplayEvidenceResolver,
+        ReplayRebaseAttestationV1,
+        ReplayRebaseAuthorityMappingV1,
+        replay_rebase_semantic_sha256,
+        resolve_replay_source_input,
         run_classification_inference,
         run_dependency_inference,
         run_impact_inference,
         run_revision_planning_inference,
+        verify_replay_rebase_attestation,
     )
     from mastervault.change_control.reviewed_snapshot import (
         RepositoryVerifiedReviewedSourceNoteInventoryCapability,
@@ -749,6 +758,7 @@ _LAZY_EXPORTS = {
             "ChangeVerificationResultV1",
             "GenerationZeroBaselineSummaryV1",
             "IncomingEvidenceSummaryV1",
+            "ManagedAdoptionChoiceV1",
             "ManagedReviewChoiceV1",
             "ManagedReviewDecisionDocumentV1",
             "ManagedReviewDecisionItemV1",
@@ -975,10 +985,15 @@ _LAZY_EXPORTS = {
             "RecordedInferenceProvider",
             "RecordedInferenceTask",
             "ReplayEvidenceResolver",
+            "ReplayRebaseAttestationV1",
+            "ReplayRebaseAuthorityMappingV1",
+            "replay_rebase_semantic_sha256",
+            "resolve_replay_source_input",
             "run_classification_inference",
             "run_dependency_inference",
             "run_impact_inference",
             "run_revision_planning_inference",
+            "verify_replay_rebase_attestation",
         )
     },
     **{
@@ -1195,6 +1210,7 @@ __all__ = [
     "ChangeVerificationResultV1",
     "GenerationZeroBaselineSummaryV1",
     "IncomingEvidenceSummaryV1",
+    "ManagedAdoptionChoiceV1",
     "ManagedReviewChoiceV1",
     "ManagedReviewDecisionDocumentV1",
     "ManagedReviewDecisionItemV1",
@@ -1468,6 +1484,7 @@ __all__ = [
     "SelectedNeighbourRef",
     "SourceNoteInventory",
     "VerifiedSourceNoteInventoryCapability",
+    "derive_governing_supersessions",
     "generate_dependency_workload",
     "build_impact_workload",
     "decide_managed_revision_review",
@@ -1509,14 +1526,19 @@ __all__ = [
     "RecordedInferenceProvider",
     "RecordedInferenceTask",
     "ReplayEvidenceResolver",
+    "ReplayRebaseAttestationV1",
+    "ReplayRebaseAuthorityMappingV1",
     "RepositoryVerifiedReviewedSourceNoteInventoryCapability",
     "ReviewedTemporalSnapshotAuthority",
     "ReviewedTemporalSnapshotAuthorityError",
     "ReviewedTemporalSnapshotBinding",
+    "replay_rebase_semantic_sha256",
+    "resolve_replay_source_input",
     "run_classification_inference",
     "run_dependency_inference",
     "run_impact_inference",
     "run_revision_planning_inference",
+    "verify_replay_rebase_attestation",
     "RecordedRevisionPlanningInferenceRun",
     "RevisionPlanningPredecessorSnapshot",
     "RevisionPlanningReplaySourceBinding",
