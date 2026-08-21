@@ -20,6 +20,7 @@ from mastervault.change_control.inference_repository import (
 )
 from mastervault.change_control.managed_review import (
     InferenceExecutionMode,
+    ManagedArtifactKind,
     ManagedInferenceContractBinding,
 )
 from mastervault.change_control.models import canonical_json_bytes
@@ -187,6 +188,55 @@ def test_live_persist_reopens_exact_artifacts_and_stable_batch_reference(
         assert (evidence_repository.root / payload.artifact.path).read_bytes() == (
             payload.content_utf8.encode("utf-8")
         )
+
+
+def test_algorithm_manifest_reopens_from_its_exact_content_address(
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    live: RecordedInferenceOutcome,
+) -> None:
+    evidence_repository.persist_outcome(live)
+    digest = hashlib.sha256(ALGORITHM).hexdigest()
+    repository = FilesystemInferenceEvidenceRepository(
+        evidence_repository.root, create=False, read_only=True
+    )
+
+    artifact, payload = repository.reopen_algorithm_manifest(digest)
+
+    assert payload == ALGORITHM
+    assert artifact.kind == ManagedArtifactKind.INFERENCE_INPUT
+    assert artifact.path == f"inference/algorithms/{digest}.json"
+    assert artifact.sha256 == digest
+    assert artifact.byte_count == len(ALGORITHM)
+
+
+@pytest.mark.parametrize("damage", ("tamper", "surplus-case-alias"))
+def test_algorithm_manifest_content_address_rejects_tamper_and_alias(
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+    live: RecordedInferenceOutcome,
+    damage: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence_repository.persist_outcome(live)
+    digest = hashlib.sha256(ALGORITHM).hexdigest()
+    path = evidence_repository.root / f"inference/algorithms/{digest}.json"
+    if damage == "tamper":
+        path.write_bytes(ALGORITHM + b"\n")
+    else:
+        real_listdir = os.listdir
+
+        def listdir_with_case_alias(directory: int | str | bytes | os.PathLike[str]) -> list[str]:
+            names = real_listdir(directory)
+            if path.name in names:
+                return [*names, path.name.upper()]
+            return names
+
+        monkeypatch.setattr(inference_repository_module.os, "listdir", listdir_with_case_alias)
+    repository = FilesystemInferenceEvidenceRepository(
+        evidence_repository.root, create=False, read_only=True
+    )
+
+    with pytest.raises(InferenceEvidenceResolutionError):
+        repository.reopen_algorithm_manifest(digest)
 
 
 def test_pre_impact_outcome_shape_remains_exactly_reopenable_by_a_fresh_handle(

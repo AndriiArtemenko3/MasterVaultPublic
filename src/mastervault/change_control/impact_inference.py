@@ -8,7 +8,11 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mastervault.change_control.impact_analysis import ImpactWorkload, validate_impact_workload
+from mastervault.change_control.impact_analysis import (
+    ImpactInferenceShard,
+    ImpactWorkload,
+    validate_impact_workload,
+)
 from mastervault.change_control.impact_results import (
     ImpactResultSet,
     validate_impact_results,
@@ -28,6 +32,8 @@ from mastervault.change_control.recorded_inference import (
     RecordedInferenceOutcome,
     RecordedInferenceProvider,
     RecordedInferenceTask,
+    replay_rebase_semantic_sha256,
+    resolve_replay_source_input,
     run_impact_inference,
 )
 from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
@@ -169,15 +175,12 @@ def _reconstruct_reopened_results(
             output.workload_id != workload.index.workload_id
             or output.workload_sha256 != workload.index.workload_sha256
             or output.input_shard_sha256 != input_shard.shard_sha256
-            or output.document_version_id
-            != input_shard.target_note.document.document_version_id
+            or output.document_version_id != input_shard.target_note.document.document_version_id
         ):
             raise ValueError("impact evidence substitutes its exact workload or input shard")
     reconstructed = ImpactResultSet.create(
         workload=workload,
-        decisions=tuple(
-            decision for output in exact_outputs for decision in output.decisions
-        ),
+        decisions=tuple(decision for output in exact_outputs for decision in output.decisions),
     )
     reopened_outputs = tuple(
         sorted(
@@ -236,10 +239,30 @@ def execute_impact_workload(
         source_ids = tuple(item.input_shard_id for item in replay_sources)
         if source_ids != tuple(sorted(set(source_ids))):
             raise ValueError("impact replay sources must be unique and canonical")
-        replay_by_input = {item.input_shard_id: item for item in replay_sources}
-        expected_ids = {item.shard_id for item in exact_workload.input_shards}
-        if set(replay_by_input) != expected_ids:
-            raise ValueError("impact replay sources must exactly cover workload shards")
+        by_semantic: dict[str, ImpactReplaySourceBinding] = {}
+        for source in replay_sources:
+            source_shard = resolve_replay_source_input(
+                resolver=evidence_repository,
+                receipt_artifact=source.receipt_artifact,
+                task=RecordedInferenceTask.IMPACT,
+                input_shard_id=source.input_shard_id,
+                input_shard_sha256=source.input_shard_sha256,
+            )
+            if type(source_shard) is not ImpactInferenceShard:
+                raise ValueError("impact replay source has the wrong typed input")
+            semantic = replay_rebase_semantic_sha256(source_shard)
+            if semantic in by_semantic:
+                raise ValueError("impact replay sources have duplicate semantic authority")
+            by_semantic[semantic] = source
+        replay_by_input = {}
+        for shard in exact_workload.input_shards:
+            semantic = replay_rebase_semantic_sha256(shard)
+            if semantic not in by_semantic:
+                raise ValueError("impact replay sources do not cover current semantic shards")
+            source = by_semantic.pop(semantic)
+            replay_by_input[shard.shard_id] = source
+        if by_semantic:
+            raise ValueError("impact replay sources contain surplus semantic shards")
 
     transient: list[RecordedInferenceOutcome] = []
     for input_shard in exact_workload.input_shards:
@@ -255,8 +278,6 @@ def execute_impact_workload(
             )
         else:
             source = replay_by_input[input_shard.shard_id]
-            if source.input_shard_sha256 != input_shard.shard_sha256:
-                raise ValueError("impact replay source binds a substituted input shard")
             outcome = run_impact_inference(
                 contract=contract,
                 workload=exact_workload,

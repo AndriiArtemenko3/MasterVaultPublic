@@ -15,8 +15,16 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from mastervault.change_control.application_replay import ReplayArtifactRefV1
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
     InferenceEvidenceRepositoryError,
@@ -47,6 +55,16 @@ _SHA_PATTERN = r"^[0-9a-f]{64}$"
 _IDENTITY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,511}$"
 _MAX_ARTIFACT_BYTES = 16 * 1024 * 1024
 _CAPABILITY_SECRET = os.urandom(32)
+_HTTP_URL_TOKEN = re.compile(r"(?i)https?://[^\s<>'\"`]+")
+_FILE_URL_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9+.-])file://(?:/|[A-Za-z]:)")
+_EMBEDDED_POSIX_ABSOLUTE_PATH = re.compile(
+    r"(?<![A-Za-z0-9+./-])/(?!/)(?:[^/\s<>'\"`]+/)*[^/\s<>'\"`]+"
+)
+_EMBEDDED_WINDOWS_ABSOLUTE_PATH = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:[a-z]:[\\/](?:[^\\/\s<>'\"`]+[\\/])*"
+    r"[^\\/\s<>'\"`]+|\\\\[^\\/\s<>'\"`]+[\\/]"
+    r"(?:[^\\/\s<>'\"`]+[\\/])*[^\\/\s<>'\"`]+)"
+)
 
 
 class RegressionBaselineError(RuntimeError):
@@ -59,6 +77,12 @@ class _StrictFrozenModel(BaseModel):
 
 def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _baseline_run_name(run_id: str) -> str:
+    if type(run_id) is not str or re.fullmatch(_IDENTITY_PATTERN, run_id) is None:
+        raise RegressionBaselineError("baseline run ID is invalid")
+    return _sha(run_id.encode("utf-8"))
 
 
 def _reject_nonfinite_json_constant(value: str) -> object:
@@ -90,6 +114,7 @@ class RegressionRuntimeIdentityV1(_StrictFrozenModel):
     retrieval_rerank_pool: int = Field(ge=1)
     retrieval_mmr_lambda: float = Field(ge=0.0, le=1.0)
     embedding_provider: str = Field(min_length=1, max_length=128)
+    embedding_implementation: str = Field(min_length=1, max_length=512)
     embedding_model: str = Field(min_length=1, max_length=512)
     embedding_dimensions: int = Field(ge=1)
     llm_provider: str = Field(min_length=1, max_length=128)
@@ -169,12 +194,35 @@ class BufferedRegressionCaseV1(_StrictFrozenModel):
         )
 
 
+class GenerationZeroBaselineReplaySourceV1(_StrictFrozenModel):
+    """Exact prior COMPLETE receipt that authorized an offline replay copy."""
+
+    schema_version: Literal[1] = 1
+    run_id: str = Field(pattern=_IDENTITY_PATTERN)
+    receipt_id: str = Field(pattern=r"^regreceipt:[0-9a-f]{64}$")
+    receipt_sha256: str = Field(pattern=_SHA_PATTERN)
+    receipt_byte_count: int = Field(ge=1, le=_MAX_ARTIFACT_BYTES)
+    receipt_relative_locator: str
+
+    @model_validator(mode="after")
+    def _exact(self) -> Self:
+        expected = f"regression-baselines/runs/{_baseline_run_name(self.run_id)}/COMPLETE.json"
+        if (
+            self.receipt_id != f"regreceipt:{self.receipt_sha256}"
+            or self.receipt_relative_locator != expected
+        ):
+            raise ValueError("baseline replay source differs from its exact receipt locator")
+        return self
+
+
 class PreparedGenerationZeroBaselineV1(_StrictFrozenModel):
     schema_version: Literal[1] = 1
     authority: RegressionAuthorityBindingV1
     suite: AdmittedRegressionSuiteV1
     runtime: RegressionRuntimeIdentityV1
     cases: tuple[BufferedRegressionCaseV1, ...]
+    replay_source: GenerationZeroBaselineReplaySourceV1 | None = None
+    case_journal_repository_id: str | None = Field(default=None, exclude=True)
 
     @model_validator(mode="after")
     def _coverage(self) -> Self:
@@ -195,6 +243,7 @@ class PreparedGenerationZeroBaselineV1(_StrictFrozenModel):
             "suite_id": self.suite.suite.suite_id,
             "suite_version": self.suite.suite.suite_version,
             "suite_original_sha256": self.suite.original_sha256,
+            "suite_original_byte_count": self.suite.original_byte_count,
             "suite_canonical_sha256": self.suite.canonical_sha256,
             "runtime": self.runtime.model_dump(mode="json"),
             "cases": [
@@ -207,6 +256,8 @@ class PreparedGenerationZeroBaselineV1(_StrictFrozenModel):
                 for item in self.cases
             ],
         }
+        if self.replay_source is not None:
+            payload["replay_source"] = self.replay_source.model_dump(mode="json")
         return f"regbaseline:{_sha(canonical_json_bytes(payload))}"
 
 
@@ -242,11 +293,22 @@ class GenerationZeroBaselineReceiptV1(_StrictFrozenModel):
     suite_id: str
     suite_version: int = Field(ge=1)
     suite_original_sha256: str = Field(pattern=_SHA_PATTERN)
+    suite_original_byte_count: int | None = Field(default=None, ge=1, le=_MAX_ARTIFACT_BYTES)
     suite_canonical_sha256: str = Field(pattern=_SHA_PATTERN)
     runtime: RegressionRuntimeIdentityV1
     query_inventory: tuple[str, ...] = Field(min_length=1, max_length=128)
     artifacts: tuple[RegressionBaselineArtifactV1, ...] = Field(min_length=1, max_length=128)
+    replay_source: GenerationZeroBaselineReplaySourceV1 | None = None
     captured_at: str
+
+    @model_serializer(mode="wrap")
+    def _preserve_live_v1_bytes(self, handler: Any) -> Any:
+        data = handler(self)
+        if self.suite_original_byte_count is None:
+            data.pop("suite_original_byte_count", None)
+        if self.replay_source is None:
+            data.pop("replay_source", None)
+        return data
 
     @field_validator("captured_at")
     @classmethod
@@ -275,6 +337,10 @@ class GenerationZeroBaselineReceiptV1(_StrictFrozenModel):
                 for item in self.artifacts
             ],
         }
+        if self.suite_original_byte_count is not None:
+            baseline_identity["suite_original_byte_count"] = self.suite_original_byte_count
+        if self.replay_source is not None:
+            baseline_identity["replay_source"] = self.replay_source.model_dump(mode="json")
         if self.baseline_id != f"regbaseline:{_sha(canonical_json_bytes(baseline_identity))}":
             raise ValueError("baseline identity differs from its exact receipt descriptors")
         payload = self.model_dump(mode="json", exclude={"receipt_id", "receipt_sha256"})
@@ -299,12 +365,15 @@ class GenerationZeroBaselineReceiptV1(_StrictFrozenModel):
             "suite_id": prepared.suite.suite.suite_id,
             "suite_version": prepared.suite.suite.suite_version,
             "suite_original_sha256": prepared.suite.original_sha256,
+            "suite_original_byte_count": prepared.suite.original_byte_count,
             "suite_canonical_sha256": prepared.suite.canonical_sha256,
             "runtime": prepared.runtime.model_dump(mode="json"),
             "query_inventory": [item.case_id for item in prepared.cases],
             "artifacts": [item.model_dump(mode="json") for item in artifacts],
             "captured_at": canonical_captured_at,
         }
+        if prepared.replay_source is not None:
+            identity["replay_source"] = prepared.replay_source.model_dump(mode="json")
         digest = _sha(canonical_json_bytes(identity))
         return cls(
             receipt_id=f"regreceipt:{digest}",
@@ -314,12 +383,52 @@ class GenerationZeroBaselineReceiptV1(_StrictFrozenModel):
             suite_id=prepared.suite.suite.suite_id,
             suite_version=prepared.suite.suite.suite_version,
             suite_original_sha256=prepared.suite.original_sha256,
+            suite_original_byte_count=prepared.suite.original_byte_count,
             suite_canonical_sha256=prepared.suite.canonical_sha256,
             runtime=prepared.runtime,
             query_inventory=tuple(item.case_id for item in prepared.cases),
             artifacts=artifacts,
+            replay_source=prepared.replay_source,
             captured_at=canonical_captured_at,
         )
+
+    @property
+    def replay_ref(self) -> ReplayArtifactRefV1:
+        content = canonical_json_bytes(self.model_dump(mode="json"))
+        return ReplayArtifactRefV1(
+            artifact_kind="generation-zero-baseline",
+            artifact_id=self.receipt_id,
+            artifact_sha256=self.receipt_sha256,
+            artifact_byte_count=len(content),
+            relative_locator=(
+                "regression-baselines/runs/"
+                f"{_baseline_run_name(self.authority.run_id)}/COMPLETE.json"
+            ),
+            request_sha256=generation_zero_baseline_replay_request_sha256(self),
+        )
+
+
+def generation_zero_baseline_replay_request_sha256(
+    receipt: GenerationZeroBaselineReceiptV1,
+) -> str:
+    """Derive the exact replay-compatible baseline execution identity."""
+
+    authority = receipt.authority
+    payload = {
+        "schema_version": 1,
+        "workspace_inventory_receipt_id": authority.workspace_inventory_receipt_id,
+        "workspace_inventory_receipt_sha256": authority.workspace_inventory_receipt_sha256,
+        "legacy_readiness_receipt_id": authority.legacy_readiness_receipt_id,
+        "legacy_readiness_receipt_sha256": authority.legacy_readiness_receipt_sha256,
+        "query_generation": authority.query_generation.model_dump(mode="json"),
+        "suite_id": receipt.suite_id,
+        "suite_version": receipt.suite_version,
+        "suite_original_sha256": receipt.suite_original_sha256,
+        "suite_original_byte_count": receipt.suite_original_byte_count,
+        "suite_canonical_sha256": receipt.suite_canonical_sha256,
+        "runtime": receipt.runtime.model_dump(mode="json"),
+    }
+    return _sha(canonical_json_bytes(payload))
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,6 +436,15 @@ class VerifiedGenerationZeroBaselineCapability:
     receipt: GenerationZeroBaselineReceiptV1
     repository_id: str
     _seal: bytes = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedGenerationZeroBaselineReplayV1:
+    """Current-run replay projection plus its preserved source timestamp."""
+
+    prepared: PreparedGenerationZeroBaselineV1
+    captured_at: str
+    source_receipt: GenerationZeroBaselineReceiptV1
 
 
 def _hit_payload(hit: Hit) -> dict[str, Any]:
@@ -382,7 +500,14 @@ def _sanitize_projection(value: Any, *, key: str = "") -> Any:
     if isinstance(value, list):
         return [_sanitize_projection(item, key=key) for item in value]
     if isinstance(value, str):
-        if value.startswith(("/", "\\")) or (len(value) >= 3 and value[1:3] in {":/", ":\\"}):
+        path_scan_value = _HTTP_URL_TOKEN.sub("", value)
+        if (
+            value.startswith(("/", "\\"))
+            or (len(value) >= 3 and value[1:3] in {":/", ":\\"})
+            or _FILE_URL_TOKEN.search(value) is not None
+            or _EMBEDDED_POSIX_ABSOLUTE_PATH.search(path_scan_value) is not None
+            or _EMBEDDED_WINDOWS_ABSOLUTE_PATH.search(path_scan_value) is not None
+        ):
             raise RegressionBaselineError("baseline projection contains an absolute path")
         if "path" in folded or "locator" in folded or folded == "rel_path":
             return _safe_locator(value)
@@ -432,16 +557,193 @@ def regression_runtime_identity(
         retrieval_rerank_pool=settings.retrieval.rerank_pool,
         retrieval_mmr_lambda=settings.retrieval.mmr_lambda,
         embedding_provider=embedder.name,
+        embedding_implementation=_implementation_identity(embedder),
         embedding_model=embedder.model_version,
         embedding_dimensions=embedder.dimensions,
         llm_provider=settings.llm.provider,
-        llm_implementation=f"{type(llm).__module__}.{type(llm).__qualname__}",
+        llm_implementation=_implementation_identity(llm),
         llm_model_small=settings.llm.model_small,
         llm_model_medium=settings.llm.model_medium,
         llm_model_large=settings.llm.model_large,
         prompt_sha256=prompt_hashes,
         response_schema_sha256=schema_hashes,
     )
+
+
+def regression_replay_runtime_identity(
+    settings: Settings,
+    *,
+    source_runtime: RegressionRuntimeIdentityV1,
+    generation: QueryGenerationMetadataV1,
+) -> RegressionRuntimeIdentityV1:
+    """Re-derive replay compatibility without constructing provider objects."""
+
+    prompt_hashes, schema_hashes = _prompt_identities()
+    embedding_model, embedding_dimensions = regression_configured_embedding_identity(settings)
+    embedding_implementation = regression_configured_embedding_implementation(settings)
+    llm_implementation = regression_configured_llm_implementation(settings)
+    expected = source_runtime.model_copy(
+        update={
+            "retrieval_k": settings.retrieval.k,
+            "retrieval_rrf_k": settings.retrieval.rrf_k,
+            "retrieval_rerank_pool": settings.retrieval.rerank_pool,
+            "retrieval_mmr_lambda": settings.retrieval.mmr_lambda,
+            "embedding_provider": settings.embedding.provider,
+            "embedding_implementation": embedding_implementation,
+            "embedding_model": embedding_model,
+            "embedding_dimensions": embedding_dimensions,
+            "llm_provider": settings.llm.provider,
+            "llm_implementation": llm_implementation,
+            "llm_model_small": settings.llm.model_small,
+            "llm_model_medium": settings.llm.model_medium,
+            "llm_model_large": settings.llm.model_large,
+            "prompt_sha256": prompt_hashes,
+            "response_schema_sha256": schema_hashes,
+        }
+    )
+    if (
+        expected != source_runtime
+        or source_runtime.embedding_model != generation.embedding_model
+        or source_runtime.embedding_dimensions != generation.embedding_dimensions
+    ):
+        raise RegressionBaselineError(
+            "replay source baseline differs from current runtime identity"
+        )
+    return expected
+
+
+def _implementation_identity(provider: object) -> str:
+    provider_type = type(provider)
+    return f"{provider_type.__module__}.{provider_type.__qualname__}"
+
+
+def regression_configured_embedding_implementation(settings: Settings) -> str:
+    """Derive the configured embedding class name without construction."""
+
+    implementations = {
+        "openai": "mastervault.providers.embedding.OpenAIEmbedding",
+        "local": "mastervault.providers.embedding.LocalEmbedding",
+        "mock": "mastervault.providers.embedding.MockEmbedding",
+    }
+    try:
+        return implementations[settings.embedding.provider]
+    except KeyError as exc:
+        raise RegressionBaselineError("configured embedding provider is unsupported") from exc
+
+
+def regression_configured_embedding_identity(settings: Settings) -> tuple[str, int]:
+    """Derive configured embedding metadata without constructing its provider."""
+
+    embedding_models = {
+        "mock": ("mock-hashing-trick-v1", 384),
+        "local": ("BAAI/bge-small-en-v1.5", 384),
+        "openai": (
+            settings.embedding.model
+            if settings.embedding.model in {"text-embedding-3-small", "text-embedding-3-large"}
+            else "text-embedding-3-small",
+            3072 if settings.embedding.model == "text-embedding-3-large" else 1536,
+        ),
+    }
+    try:
+        return embedding_models[settings.embedding.provider]
+    except KeyError as exc:
+        raise RegressionBaselineError("configured embedding provider is unsupported") from exc
+
+
+def regression_configured_llm_implementation(settings: Settings) -> str:
+    """Derive the configured LLM implementation class name without construction."""
+
+    implementations = {
+        "anthropic": "mastervault.providers.llm.AnthropicLLM",
+        "openai": "mastervault.providers.llm.OpenAILLM",
+        "mock": "mastervault.providers.llm.MockLLM",
+    }
+    try:
+        return implementations[settings.llm.provider]
+    except KeyError as exc:
+        raise RegressionBaselineError("configured LLM provider is unsupported") from exc
+
+
+def _case_execution_descriptor(
+    *,
+    authority: RegressionAuthorityBindingV1,
+    suite: AdmittedRegressionSuiteV1,
+    runtime: RegressionRuntimeIdentityV1,
+    case: SearchRegressionCaseV1 | AskRegressionCaseV1,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "authority": authority.model_dump(mode="json"),
+        "suite": {
+            "suite_id": suite.suite.suite_id,
+            "suite_version": suite.suite.suite_version,
+            "original_sha256": suite.original_sha256,
+            "original_byte_count": suite.original_byte_count,
+            "canonical_sha256": suite.canonical_sha256,
+        },
+        "runtime": runtime.model_dump(mode="json"),
+        "case": case.model_dump(mode="json"),
+    }
+
+
+def _validate_case_payload(
+    payload: dict[str, Any],
+    *,
+    case: SearchRegressionCaseV1 | AskRegressionCaseV1,
+    generation: QueryGenerationMetadataV1,
+) -> None:
+    common = {
+        "schema_version": 1,
+        "case_id": case.case_id,
+        "kind": case.kind,
+        "query": case.query,
+        "domain": case.domain,
+        "generation": generation.model_dump(mode="json"),
+    }
+    if isinstance(case, SearchRegressionCaseV1):
+        expected_keys = {
+            *common,
+            "k",
+            "record_types",
+            "rerank",
+            "wiki_card",
+            "hits",
+            "channel_counts",
+        }
+        common.update({"k": case.k, "record_types": list(case.record_types), "rerank": False})
+    else:
+        expected_keys = {
+            *common,
+            "max_rounds",
+            "budget_usd_micros",
+            "answer_markdown",
+            "confidence",
+            "gaps",
+            "sources",
+            "evidence",
+            "warnings",
+            "extractive",
+            "zero_evidence",
+            "rounds",
+            "cost_usd_micros",
+            "nearest_wiki_titles",
+            "exit_code",
+        }
+        common.update(
+            {
+                "max_rounds": case.max_rounds,
+                "budget_usd_micros": case.budget_usd_micros,
+            }
+        )
+    if set(payload) != expected_keys or any(
+        payload.get(key) != value for key, value in common.items()
+    ):
+        raise RegressionBaselineError(
+            "journaled baseline case differs from its exact execution descriptor"
+        )
+    sanitized = _sanitize_projection(payload)
+    if sanitized != payload:
+        raise RegressionBaselineError("journaled baseline case is not sanitized evidence")
 
 
 def execute_generation_zero_baseline(
@@ -453,6 +755,8 @@ def execute_generation_zero_baseline(
     embedder: EmbeddingProvider,
     llm: LLMProvider,
     reranker: Reranker | None = None,
+    repository: GenerationZeroBaselineRepository | None = None,
+    failure_hook: Any | None = None,
 ) -> PreparedGenerationZeroBaselineV1:
     """Execute and buffer exact evidence without closing or mutating caller resources."""
 
@@ -469,6 +773,19 @@ def execute_generation_zero_baseline(
     resolved.verify()
     buffered: list[BufferedRegressionCaseV1] = []
     for case in suite.suite.cases:
+        journaled = (
+            repository.claim_case(
+                authority=authority,
+                suite=suite,
+                runtime=runtime,
+                case=case,
+            )
+            if repository is not None
+            else None
+        )
+        if journaled is not None:
+            buffered.append(journaled)
+            continue
         if isinstance(case, SearchRegressionCaseV1):
             result = hybrid_search(
                 case.query,
@@ -533,19 +850,30 @@ def execute_generation_zero_baseline(
             }
         else:  # pragma: no cover - discriminated union guard
             raise TypeError("unsupported regression case")
-        buffered.append(
-            BufferedRegressionCaseV1.create(
-                case_id=case.case_id,
-                case_kind=case.kind,
-                payload=payload,
-            )
+        item = BufferedRegressionCaseV1.create(
+            case_id=case.case_id,
+            case_kind=case.kind,
+            payload=payload,
         )
+        _validate_case_payload(item.payload, case=case, generation=authority.query_generation)
+        if repository is not None:
+            item = repository.complete_case(
+                authority=authority,
+                suite=suite,
+                runtime=runtime,
+                case=case,
+                buffered=item,
+            )
+            if failure_hook is not None:
+                failure_hook(f"baseline-case-completed:{case.case_id}")
+        buffered.append(item)
     resolved.verify()
     return PreparedGenerationZeroBaselineV1(
         authority=authority,
         suite=suite,
         runtime=runtime,
         cases=tuple(buffered),
+        case_journal_repository_id=(repository.repository_id if repository is not None else None),
     )
 
 
@@ -580,12 +908,195 @@ class GenerationZeroBaselineRepository:
 
     @staticmethod
     def _run_name(run_id: str) -> str:
-        if type(run_id) is not str or re.fullmatch(_IDENTITY_PATTERN, run_id) is None:
-            raise RegressionBaselineError("baseline run ID is invalid")
-        return _sha(run_id.encode("utf-8"))
+        return _baseline_run_name(run_id)
 
     def _relative(self, run_id: str, suffix: str) -> str:
         return f"regression-baselines/runs/{self._run_name(run_id)}/{suffix}"
+
+    def _journal_relative(self, run_id: str, case_id: str, suffix: str) -> str:
+        return (
+            "regression-baseline-case-journal/runs/"
+            f"{self._run_name(run_id)}/cases/{_sha(case_id.encode('utf-8'))}/{suffix}"
+        )
+
+    def _read_journal_case(
+        self,
+        *,
+        descriptor: dict[str, Any],
+        case: SearchRegressionCaseV1 | AskRegressionCaseV1,
+    ) -> BufferedRegressionCaseV1 | None:
+        run_id = cast(str, cast(dict[str, Any], descriptor["authority"])["run_id"])
+        complete = self._repository._read_optional(  # noqa: SLF001
+            self._journal_relative(run_id, case.case_id, "COMPLETE.json"),
+            limit=_MAX_ARTIFACT_BYTES,
+            label="completed baseline case journal",
+        )
+        if complete is None:
+            return None
+        claim = self._repository._read_optional(  # noqa: SLF001
+            self._journal_relative(run_id, case.case_id, "CLAIM.json"),
+            limit=_MAX_ARTIFACT_BYTES,
+            label="baseline case journal claim",
+        )
+        if claim != canonical_json_bytes(descriptor):
+            raise RegressionBaselineError("completed baseline case journal lacks its exact claim")
+        try:
+            decoded = json.loads(complete, parse_constant=_reject_nonfinite_json_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise RegressionBaselineError("completed baseline case journal is invalid") from exc
+        if (
+            not isinstance(decoded, dict)
+            or set(decoded) != {"schema_version", "descriptor", "buffered"}
+            or decoded.get("schema_version") != 1
+            or decoded.get("descriptor") != descriptor
+            or canonical_json_bytes(decoded) != complete
+        ):
+            raise RegressionBaselineError(
+                "completed baseline case journal differs from exact inputs"
+            )
+        buffered_value = decoded.get("buffered")
+        if not isinstance(buffered_value, dict):
+            raise RegressionBaselineError("completed baseline case journal payload is invalid")
+        try:
+            item = BufferedRegressionCaseV1.create(
+                case_id=buffered_value["case_id"],
+                case_kind=buffered_value["case_kind"],
+                payload=buffered_value["payload"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RegressionBaselineError(
+                "completed baseline case journal payload is invalid"
+            ) from exc
+        if (
+            set(buffered_value)
+            != {"case_id", "case_kind", "payload_sha256", "payload_byte_count", "payload"}
+            or item.payload_sha256 != buffered_value["payload_sha256"]
+            or item.payload_byte_count != buffered_value["payload_byte_count"]
+            or item.case_id != case.case_id
+            or item.case_kind != case.kind
+        ):
+            raise RegressionBaselineError(
+                "completed baseline case journal payload descriptor is invalid"
+            )
+        _validate_case_payload(
+            item.payload,
+            case=case,
+            generation=QueryGenerationMetadataV1.model_validate_json(
+                canonical_json_bytes(
+                    cast(dict[str, Any], descriptor["authority"])["query_generation"]
+                ),
+                strict=True,
+            ),
+        )
+        return item
+
+    def claim_case(
+        self,
+        *,
+        authority: RegressionAuthorityBindingV1,
+        suite: AdmittedRegressionSuiteV1,
+        runtime: RegressionRuntimeIdentityV1,
+        case: SearchRegressionCaseV1 | AskRegressionCaseV1,
+    ) -> BufferedRegressionCaseV1 | None:
+        """Claim an exact provider boundary, or replay its exact durable completion."""
+
+        descriptor = _case_execution_descriptor(
+            authority=authority, suite=suite, runtime=runtime, case=case
+        )
+        descriptor_bytes = canonical_json_bytes(descriptor)
+        claim_relative = self._journal_relative(authority.run_id, case.case_id, "CLAIM.json")
+        try:
+            with self._repository._exclusive_lock():  # noqa: SLF001
+                completed = self._read_journal_case(descriptor=descriptor, case=case)
+                if completed is not None:
+                    return completed
+                existing = self._repository._read_optional(  # noqa: SLF001
+                    claim_relative,
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="baseline case journal claim",
+                )
+                if existing is not None:
+                    if existing != descriptor_bytes:
+                        raise RegressionBaselineError(
+                            "baseline case journal claim differs from exact inputs"
+                        )
+                    raise RegressionBaselineError(
+                        "baseline case provider outcome is indeterminate after an incomplete claim"
+                    )
+                self._repository._create_only(  # noqa: SLF001
+                    claim_relative, descriptor_bytes, label="baseline case journal claim"
+                )
+                return None
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            if isinstance(exc, RegressionBaselineError):
+                raise
+            raise RegressionBaselineError("baseline case claim failed closed") from exc
+
+    def complete_case(
+        self,
+        *,
+        authority: RegressionAuthorityBindingV1,
+        suite: AdmittedRegressionSuiteV1,
+        runtime: RegressionRuntimeIdentityV1,
+        case: SearchRegressionCaseV1 | AskRegressionCaseV1,
+        buffered: BufferedRegressionCaseV1,
+    ) -> BufferedRegressionCaseV1:
+        """Durably complete one claimed case before allowing its result to escape."""
+
+        descriptor = _case_execution_descriptor(
+            authority=authority, suite=suite, runtime=runtime, case=case
+        )
+        descriptor_bytes = canonical_json_bytes(descriptor)
+        claim_relative = self._journal_relative(authority.run_id, case.case_id, "CLAIM.json")
+        complete_relative = self._journal_relative(authority.run_id, case.case_id, "COMPLETE.json")
+        _validate_case_payload(buffered.payload, case=case, generation=authority.query_generation)
+        completion = canonical_json_bytes(
+            {
+                "schema_version": 1,
+                "descriptor": descriptor,
+                "buffered": {
+                    "case_id": buffered.case_id,
+                    "case_kind": buffered.case_kind,
+                    "payload_sha256": buffered.payload_sha256,
+                    "payload_byte_count": buffered.payload_byte_count,
+                    "payload": buffered.payload,
+                },
+            }
+        )
+        try:
+            with self._repository._exclusive_lock():  # noqa: SLF001
+                claim = self._repository._read_optional(  # noqa: SLF001
+                    claim_relative,
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="baseline case journal claim",
+                )
+                if claim != descriptor_bytes:
+                    raise RegressionBaselineError(
+                        "baseline case completion lacks its exact durable claim"
+                    )
+                existing = self._repository._read_optional(  # noqa: SLF001
+                    complete_relative,
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="completed baseline case journal",
+                )
+                if existing is None:
+                    self._repository._create_only(  # noqa: SLF001
+                        complete_relative,
+                        completion,
+                        label="completed baseline case journal",
+                    )
+                elif existing != completion:
+                    raise RegressionBaselineError(
+                        "baseline case completion conflicts with durable evidence"
+                    )
+                reopened = self._read_journal_case(descriptor=descriptor, case=case)
+                if reopened is None or reopened != buffered:
+                    raise RegressionBaselineError("baseline case completion was not durable")
+                return reopened
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            if isinstance(exc, RegressionBaselineError):
+                raise
+            raise RegressionBaselineError("baseline case completion failed closed") from exc
 
     def _read_required(self, relative: str, *, limit: int, label: str) -> bytes:
         payload = self._repository._read_optional(  # noqa: SLF001
@@ -638,6 +1149,27 @@ class GenerationZeroBaselineRepository:
 
         try:
             with self._repository._exclusive_lock():  # noqa: SLF001
+                if prepared.case_journal_repository_id is not None:
+                    if prepared.case_journal_repository_id != self.repository_id:
+                        raise RegressionBaselineError(
+                            "LIVE baseline case journals belong to another repository"
+                        )
+                    for specification, buffered in zip(
+                        prepared.suite.suite.cases, prepared.cases, strict=True
+                    ):
+                        descriptor = _case_execution_descriptor(
+                            authority=prepared.authority,
+                            suite=prepared.suite,
+                            runtime=prepared.runtime,
+                            case=specification,
+                        )
+                        journaled = self._read_journal_case(
+                            descriptor=descriptor, case=specification
+                        )
+                        if journaled is None or journaled != buffered:
+                            raise RegressionBaselineError(
+                                "LIVE baseline publication requires exact completed case journals"
+                            )
                 complete_relative = self._relative(prepared.authority.run_id, "COMPLETE.json")
                 existing = self._repository._read_optional(  # noqa: SLF001
                     complete_relative,
@@ -713,12 +1245,233 @@ class GenerationZeroBaselineRepository:
             receipt.baseline_id == prepared.baseline_id
             and receipt.authority == prepared.authority
             and receipt.suite_original_sha256 == prepared.suite.original_sha256
+            and receipt.suite_original_byte_count == prepared.suite.original_byte_count
             and receipt.suite_canonical_sha256 == prepared.suite.canonical_sha256
             and receipt.runtime == prepared.runtime
+            and receipt.replay_source == prepared.replay_source
             and tuple(item.sha256 for item in receipt.artifacts)
             == tuple(item.payload_sha256 for item in prepared.cases)
         ):
             raise RegressionBaselineError("run baseline already exists for different inputs")
+
+    def require_receipt_matches(
+        self,
+        receipt: GenerationZeroBaselineReceiptV1,
+        prepared: PreparedGenerationZeroBaselineV1,
+    ) -> None:
+        """Public exact comparison for a freshly reopened replay preparation."""
+
+        self._require_receipt_matches(receipt, prepared)
+
+    def require_current_live_inputs(
+        self,
+        receipt: GenerationZeroBaselineReceiptV1,
+        *,
+        authority: RegressionAuthorityBindingV1,
+        suite: AdmittedRegressionSuiteV1,
+        runtime: RegressionRuntimeIdentityV1,
+    ) -> None:
+        """Require a COMPLETE LIVE baseline to match freshly derived current inputs."""
+
+        if receipt.replay_source is not None or not (
+            receipt.authority == authority
+            and receipt.suite_id == suite.suite.suite_id
+            and receipt.suite_version == suite.suite.suite_version
+            and receipt.suite_original_sha256 == suite.original_sha256
+            and receipt.suite_original_byte_count == suite.original_byte_count
+            and receipt.suite_canonical_sha256 == suite.canonical_sha256
+            and receipt.runtime == runtime
+            and receipt.query_inventory == tuple(item.case_id for item in suite.suite.cases)
+        ):
+            raise RegressionBaselineError(
+                "completed LIVE baseline differs from exact current inputs"
+            )
+
+    def prepare_replay(
+        self,
+        *,
+        source_reference: ReplayArtifactRefV1,
+        current_authority: RegressionAuthorityBindingV1,
+        current_suite: AdmittedRegressionSuiteV1,
+        expected_runtime: RegressionRuntimeIdentityV1,
+    ) -> PreparedGenerationZeroBaselineReplayV1:
+        """Reopen, verify, sanitize, and copy one exact prior baseline offline."""
+
+        if source_reference.artifact_kind != "generation-zero-baseline" or not (
+            source_reference.relative_locator.startswith("regression-baselines/runs/")
+            and source_reference.relative_locator.endswith("/COMPLETE.json")
+        ):
+            raise RegressionBaselineError(
+                "baseline replay reference is not an exact COMPLETE descriptor"
+            )
+        try:
+            with self._repository._read_lock():  # noqa: SLF001
+                complete = self._read_required(
+                    source_reference.relative_locator,
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="replay source baseline COMPLETE receipt",
+                )
+                try:
+                    provisional = GenerationZeroBaselineReceiptV1.model_validate_json(
+                        complete, strict=True
+                    )
+                except ValueError as exc:
+                    raise RegressionBaselineError(
+                        "replay source baseline COMPLETE receipt is invalid"
+                    ) from exc
+                source = self._open_locked(provisional.authority.run_id, complete)
+                if not (
+                    source.receipt_id == source_reference.artifact_id
+                    and source.receipt_sha256 == source_reference.artifact_sha256
+                    and len(complete) == source_reference.artifact_byte_count
+                    and source_reference.relative_locator
+                    == self._relative(source.authority.run_id, "COMPLETE.json")
+                    and source_reference.request_sha256
+                    == generation_zero_baseline_replay_request_sha256(source)
+                ):
+                    raise RegressionBaselineError(
+                        "baseline replay reference differs from exact source authority"
+                    )
+                source_authority = source.authority
+                if not (
+                    current_authority.workspace_inventory_receipt_id
+                    == source_authority.workspace_inventory_receipt_id
+                    and current_authority.workspace_inventory_receipt_sha256
+                    == source_authority.workspace_inventory_receipt_sha256
+                    and current_authority.legacy_readiness_receipt_id
+                    == source_authority.legacy_readiness_receipt_id
+                    and current_authority.legacy_readiness_receipt_sha256
+                    == source_authority.legacy_readiness_receipt_sha256
+                    and current_authority.query_generation == source_authority.query_generation
+                ):
+                    raise RegressionBaselineError(
+                        "replay source baseline differs from current workspace generation zero"
+                    )
+                if expected_runtime != source.runtime:
+                    raise RegressionBaselineError(
+                        "replay source baseline differs from current runtime identity"
+                    )
+                suite_payload = self._read_required(
+                    self._relative(source_authority.run_id, "SUITE.json"),
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="replay source canonical regression suite",
+                )
+                try:
+                    source_suite = parse_regression_suite_bytes(suite_payload)
+                except RegressionSuiteError as exc:
+                    raise RegressionBaselineError(
+                        "replay source canonical regression suite is invalid"
+                    ) from exc
+                if not (
+                    source_suite.suite == current_suite.suite
+                    and source_suite.canonical_sha256 == current_suite.canonical_sha256
+                    and source.suite_id == current_suite.suite.suite_id
+                    and source.suite_version == current_suite.suite.suite_version
+                    and source.suite_original_sha256 == current_suite.original_sha256
+                    and source.suite_original_byte_count == current_suite.original_byte_count
+                    and source.suite_canonical_sha256 == current_suite.canonical_sha256
+                ):
+                    raise RegressionBaselineError(
+                        "replay source suite differs from the exact current suite"
+                    )
+                copied: list[BufferedRegressionCaseV1] = []
+                for artifact in source.artifacts:
+                    payload = self._read_required(
+                        artifact.relative_path,
+                        limit=artifact.byte_count,
+                        label="replay source baseline case",
+                    )
+                    try:
+                        decoded = json.loads(
+                            payload, parse_constant=_reject_nonfinite_json_constant
+                        )
+                    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+                        raise RegressionBaselineError(
+                            "replay source baseline case is invalid"
+                        ) from exc
+                    if not isinstance(decoded, dict):
+                        raise RegressionBaselineError(
+                            "replay source baseline case is not an object"
+                        )
+                    sanitized = _sanitize_projection(decoded)
+                    if (
+                        not isinstance(sanitized, dict)
+                        or canonical_json_bytes(sanitized) != payload
+                    ):
+                        raise RegressionBaselineError(
+                            "replay source baseline case is not canonical sanitized evidence"
+                        )
+                    item = BufferedRegressionCaseV1.create(
+                        case_id=artifact.case_id,
+                        case_kind=artifact.case_kind,
+                        payload=sanitized,
+                    )
+                    if (
+                        item.payload_sha256 != artifact.sha256
+                        or item.payload_byte_count != artifact.byte_count
+                    ):
+                        raise RegressionBaselineError(
+                            "replay source baseline case differs from its exact descriptor"
+                        )
+                    copied.append(item)
+                replay_source = GenerationZeroBaselineReplaySourceV1(
+                    run_id=source_authority.run_id,
+                    receipt_id=source.receipt_id,
+                    receipt_sha256=source.receipt_sha256,
+                    receipt_byte_count=len(complete),
+                    receipt_relative_locator=source_reference.relative_locator,
+                )
+                prepared = PreparedGenerationZeroBaselineV1(
+                    authority=current_authority,
+                    suite=current_suite,
+                    runtime=expected_runtime,
+                    cases=tuple(copied),
+                    replay_source=replay_source,
+                )
+                return PreparedGenerationZeroBaselineReplayV1(
+                    prepared=prepared,
+                    captured_at=source.captured_at,
+                    source_receipt=source,
+                )
+        except RegressionBaselineError:
+            raise
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            raise RegressionBaselineError("baseline replay preparation failed closed") from exc
+
+    def replay_runtime(self, source_reference: ReplayArtifactRefV1) -> RegressionRuntimeIdentityV1:
+        """Read one exact source runtime without resolving any configured provider."""
+
+        if source_reference.artifact_kind != "generation-zero-baseline" or not (
+            source_reference.relative_locator.startswith("regression-baselines/runs/")
+            and source_reference.relative_locator.endswith("/COMPLETE.json")
+        ):
+            raise RegressionBaselineError(
+                "baseline replay reference is not an exact COMPLETE descriptor"
+            )
+        try:
+            with self._repository._read_lock():  # noqa: SLF001
+                complete = self._read_required(
+                    source_reference.relative_locator,
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="replay source baseline COMPLETE receipt",
+                )
+                receipt = GenerationZeroBaselineReceiptV1.model_validate_json(complete, strict=True)
+                reopened = self._open_locked(receipt.authority.run_id, complete)
+                if not (
+                    reopened.receipt_id == source_reference.artifact_id
+                    and reopened.receipt_sha256 == source_reference.artifact_sha256
+                    and len(complete) == source_reference.artifact_byte_count
+                    and reopened.replay_ref.request_sha256 == source_reference.request_sha256
+                    and reopened.replay_ref.relative_locator == source_reference.relative_locator
+                ):
+                    raise RegressionBaselineError(
+                        "baseline replay reference differs from its exact source receipt"
+                    )
+                return reopened.runtime
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            if isinstance(exc, RegressionBaselineError):
+                raise
+            raise RegressionBaselineError("baseline replay runtime failed closed") from exc
 
     def open(self, run_id: str) -> GenerationZeroBaselineReceiptV1:
         try:
@@ -838,6 +1591,24 @@ class GenerationZeroBaselineRepository:
                 raise
             raise RegressionBaselineError("baseline capability reopen failed closed") from exc
 
+    def reopen_optional(self, run_id: str) -> VerifiedGenerationZeroBaselineCapability | None:
+        """Reopen a COMPLETE baseline, returning ``None`` only when it is absent."""
+
+        try:
+            with self._repository._read_lock():  # noqa: SLF001
+                complete = self._repository._read_optional(  # noqa: SLF001
+                    self._relative(run_id, "COMPLETE.json"),
+                    limit=_MAX_ARTIFACT_BYTES,
+                    label="baseline COMPLETE receipt",
+                )
+                if complete is None:
+                    return None
+                return self._capability(self._open_locked(run_id, complete))
+        except (InferenceEvidenceRepositoryError, OSError, ValueError) as exc:
+            if isinstance(exc, RegressionBaselineError):
+                raise
+            raise RegressionBaselineError("baseline capability reopen failed closed") from exc
+
     def _capability(
         self, receipt: GenerationZeroBaselineReceiptV1
     ) -> VerifiedGenerationZeroBaselineCapability:
@@ -877,13 +1648,20 @@ class GenerationZeroBaselineRepository:
 __all__ = [
     "BufferedRegressionCaseV1",
     "GenerationZeroBaselineReceiptV1",
+    "GenerationZeroBaselineReplaySourceV1",
     "GenerationZeroBaselineRepository",
     "PreparedGenerationZeroBaselineV1",
+    "PreparedGenerationZeroBaselineReplayV1",
     "RegressionAuthorityBindingV1",
     "RegressionBaselineArtifactV1",
     "RegressionBaselineError",
     "RegressionRuntimeIdentityV1",
     "VerifiedGenerationZeroBaselineCapability",
     "execute_generation_zero_baseline",
+    "generation_zero_baseline_replay_request_sha256",
     "regression_runtime_identity",
+    "regression_replay_runtime_identity",
+    "regression_configured_embedding_identity",
+    "regression_configured_embedding_implementation",
+    "regression_configured_llm_implementation",
 ]

@@ -54,7 +54,10 @@ from mastervault.change_control.managed_review import (
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedGoverningSourceAdoptionBinding,
+    ManagedNoWorkAnalysisSetBindingV4,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedRevisionDecisionRecord,
+    ManagedRevisionPlanningAdmissionBinding,
     ManagedRunBindingV2,
 )
 from mastervault.change_control.managed_review_repository import (
@@ -810,8 +813,22 @@ def build_read_only_managed_query_resolver(
                 "configured repository roots differ from active governing-source adoption"
             )
 
-    algorithm_artifact = _algorithm_artifact(decision)
-    algorithm_bytes = bootstrap.evidence_repository.open_artifact(algorithm_artifact)
+    if bundle.targets:
+        algorithm_artifact = _algorithm_artifact(decision)
+        algorithm_bytes = bootstrap.evidence_repository.open_artifact(algorithm_artifact)
+    else:
+        if not (
+            type(admission) is ManagedNoWorkPlanningAdmissionBinding
+            and type(admission.analysis_set) is ManagedNoWorkAnalysisSetBindingV4
+        ):
+            raise ManagedQueryResolverRestartError(
+                "empty active targets require exact no-work planning authority"
+            )
+        algorithm_artifact, algorithm_bytes = (
+            bootstrap.evidence_repository.reopen_algorithm_manifest(
+                run_binding.inference_contract.algorithm_manifest_sha256
+            )
+        )
     approved_contract = ApprovedManagedInferenceContractAuthority(
         contract=run_binding.inference_contract,
         algorithm_manifest_bytes=algorithm_bytes,
@@ -827,6 +844,10 @@ def build_read_only_managed_query_resolver(
         ):
             raise ManagedQueryResolverRestartError(
                 "sealed query restart received generic governing authority"
+            )
+        if type(admission) is not ManagedRevisionPlanningAdmissionBinding:
+            raise ManagedQueryResolverRestartError(
+                "sealed query restart received a no-work planning admission"
             )
         approved_source = ApprovedManagedGoverningSourceAuthority(
             adoption=adoption,

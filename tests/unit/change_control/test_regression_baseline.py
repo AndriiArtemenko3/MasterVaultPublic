@@ -22,6 +22,8 @@ from mastervault.change_control.regression_baseline import (
     RegressionBaselineError,
     VerifiedGenerationZeroBaselineCapability,
     execute_generation_zero_baseline,
+    regression_replay_runtime_identity,
+    regression_runtime_identity,
 )
 from mastervault.change_control.regression_suite import parse_regression_suite_bytes
 from mastervault.change_control.synchronous_lifecycle_store_models import (
@@ -311,6 +313,190 @@ def test_executor_buffers_complete_path_safe_pipeline_evidence_without_effects(
     assert str(tmp_path).encode() not in encoded
 
 
+def test_runtime_identity_attests_actual_live_provider_implementations(
+    tmp_path: Path,
+) -> None:
+    class WrappedEmbedding(MockEmbedding):
+        pass
+
+    class WrappedLLM(MockLLM):
+        pass
+
+    settings = _settings(tmp_path)
+    runtime = regression_runtime_identity(
+        settings,
+        embedder=WrappedEmbedding(),
+        llm=WrappedLLM(),
+    )
+
+    assert runtime.embedding_implementation.endswith(".WrappedEmbedding")
+    assert runtime.llm_implementation.endswith(".WrappedLLM")
+    with pytest.raises(RegressionBaselineError, match="current runtime identity"):
+        regression_replay_runtime_identity(
+            settings,
+            source_runtime=runtime,
+            generation=_metadata(),
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    (
+        ("answer_markdown", "See /Users/alice/private/report.md for details"),
+        ("gaps", ["Missing C:\\Users\\alice\\private\\report.md"]),
+        ("warnings", [r"Unsafe \\server\share\report.md reference"]),
+        ("text", "Leaked from /private/tmp/mastervault/result.json"),
+        ("text", "Leaked from file:///Users/alice/private/report.md"),
+    ),
+)
+def test_projection_rejects_embedded_host_absolute_paths(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(RegressionBaselineError, match="absolute path"):
+        baseline_module._sanitize_projection({field: value})  # noqa: SLF001
+
+
+def test_projection_preserves_urls_and_relative_citations() -> None:
+    payload = {
+        "answer_markdown": (
+            "See https://example.com/policies/returns and support/returns.md#receipt."
+        ),
+        "text": "API endpoint https://api.example.test/v1/returns is authoritative.",
+        "rel_path": "support/returns.md",
+    }
+    assert baseline_module._sanitize_projection(payload) == payload  # noqa: SLF001
+
+
+def test_case_journal_fails_closed_on_incomplete_or_changed_owner_and_reopens_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    repository = GenerationZeroBaselineRepository(tmp_path / "case-journal")
+    case = prepared.suite.suite.cases[0]
+    buffered = prepared.cases[0]
+
+    assert (
+        repository.claim_case(
+            authority=prepared.authority,
+            suite=prepared.suite,
+            runtime=prepared.runtime,
+            case=case,
+        )
+        is None
+    )
+    with pytest.raises(RegressionBaselineError, match="indeterminate"):
+        repository.claim_case(
+            authority=prepared.authority,
+            suite=prepared.suite,
+            runtime=prepared.runtime,
+            case=case,
+        )
+    with pytest.raises(RegressionBaselineError, match="differs"):
+        repository.claim_case(
+            authority=prepared.authority,
+            suite=prepared.suite,
+            runtime=prepared.runtime.model_copy(update={"retrieval_k": 99}),
+            case=case,
+        )
+
+    assert (
+        repository.complete_case(
+            authority=prepared.authority,
+            suite=prepared.suite,
+            runtime=prepared.runtime,
+            case=case,
+            buffered=buffered,
+        )
+        == buffered
+    )
+    assert (
+        repository.claim_case(
+            authority=prepared.authority,
+            suite=prepared.suite,
+            runtime=prepared.runtime,
+            case=case,
+        )
+        == buffered
+    )
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    (
+        "prompt",
+        "schema",
+        "llm_model",
+        "llm_provider",
+        "llm_implementation",
+        "embedding_provider",
+        "embedding_implementation",
+        "embedding_model",
+        "embedding_dimensions",
+        "index_manifest",
+        "index_file",
+    ),
+)
+def test_completed_live_baseline_rejects_each_current_runtime_or_index_drift_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    root = tmp_path / "complete-current-inputs"
+    repository = GenerationZeroBaselineRepository(root)
+    receipt = repository.publish(prepared, captured_at="2026-08-20T12:00:00+00:00").receipt
+    authority = prepared.authority
+    runtime = prepared.runtime
+    if mismatch == "index_manifest":
+        authority = authority.model_copy(
+            update={
+                "query_generation": authority.query_generation.model_copy(
+                    update={"manifest_sha256": "8" * 64}
+                )
+            }
+        )
+    elif mismatch == "index_file":
+        authority = authority.model_copy(
+            update={
+                "query_generation": authority.query_generation.model_copy(
+                    update={"index_file_sha256": "9" * 64}
+                )
+            }
+        )
+    elif mismatch == "prompt":
+        hashes = dict(runtime.prompt_sha256)
+        hashes["grounded_synthesis.v1"] = "8" * 64
+        runtime = runtime.model_copy(update={"prompt_sha256": hashes})
+    elif mismatch == "schema":
+        hashes = dict(runtime.response_schema_sha256)
+        hashes["sufficiency_judge.v1"] = "8" * 64
+        runtime = runtime.model_copy(update={"response_schema_sha256": hashes})
+    else:
+        field = {
+            "llm_model": "llm_model_medium",
+            "llm_provider": "llm_provider",
+            "llm_implementation": "llm_implementation",
+            "embedding_provider": "embedding_provider",
+            "embedding_implementation": "embedding_implementation",
+            "embedding_model": "embedding_model",
+            "embedding_dimensions": "embedding_dimensions",
+        }[mismatch]
+        value: object = 385 if field == "embedding_dimensions" else f"other-{mismatch}"
+        runtime = runtime.model_copy(update={field: value})
+    before = _tree_snapshot(root)
+
+    with pytest.raises(RegressionBaselineError, match="exact current inputs"):
+        repository.require_current_live_inputs(
+            receipt,
+            authority=authority,
+            suite=prepared.suite,
+            runtime=runtime,
+        )
+
+    assert _tree_snapshot(root) == before
+
+
 def test_executor_rejects_generation_runtime_and_reranker_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -339,6 +525,123 @@ def test_executor_rejects_generation_runtime_and_reranker_drift(
             embedder=MockEmbedding(),
             llm=MockLLM(),
             reranker=object(),  # type: ignore[arg-type]
+        )
+
+
+def test_repository_prepares_exact_offline_replay_for_current_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    root = tmp_path / "replay-repository"
+    repository = GenerationZeroBaselineRepository(root)
+    source = repository.publish(source_prepared, captured_at="2026-08-20T12:00:00+00:00").receipt
+    current_authority = source_prepared.authority.model_copy(
+        update={
+            "run_id": "operatorrun:current-baseline-replay",
+            "incoming_admission_receipt_id": "incomingreceipt:current-source",
+            "incoming_admission_receipt_sha256": "9" * 64,
+        }
+    )
+
+    replayed = GenerationZeroBaselineRepository(root, create=False, read_only=True).prepare_replay(
+        source_reference=source.replay_ref,
+        current_authority=current_authority,
+        current_suite=_suite(),
+        expected_runtime=source.runtime,
+    )
+
+    assert replayed.captured_at == source.captured_at
+    assert replayed.source_receipt == source
+    assert replayed.prepared.authority == current_authority
+    assert tuple(item.payload for item in replayed.prepared.cases) == tuple(
+        item.payload for item in source_prepared.cases
+    )
+    current = repository.publish(replayed.prepared, captured_at=replayed.captured_at).receipt
+    assert current.captured_at == source.captured_at
+    assert current.replay_source is not None
+    assert current.replay_source.receipt_id == source.receipt_id
+    assert current.replay_source.receipt_sha256 == source.receipt_sha256
+
+
+@pytest.mark.parametrize("mismatch", ["inventory", "readiness", "runtime", "generation", "suite"])
+def test_repository_replay_rejects_each_local_authority_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mismatch: str,
+) -> None:
+    source_prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    repository = GenerationZeroBaselineRepository(tmp_path / "replay-repository")
+    source = repository.publish(source_prepared, captured_at="2026-08-20T12:00:00+00:00").receipt
+    authority = source_prepared.authority.model_copy(
+        update={
+            "run_id": "operatorrun:current-baseline-replay",
+            "incoming_admission_receipt_id": "incomingreceipt:current-source",
+            "incoming_admission_receipt_sha256": "9" * 64,
+        }
+    )
+    runtime = source.runtime
+    suite = _suite()
+    if mismatch == "inventory":
+        authority = authority.model_copy(update={"workspace_inventory_receipt_sha256": "7" * 64})
+    elif mismatch == "readiness":
+        authority = authority.model_copy(update={"legacy_readiness_receipt_sha256": "6" * 64})
+    elif mismatch == "runtime":
+        runtime = runtime.model_copy(update={"llm_model_medium": "other-medium"})
+    elif mismatch == "generation":
+        authority = authority.model_copy(
+            update={
+                "query_generation": authority.query_generation.model_copy(
+                    update={"manifest_sha256": "8" * 64}
+                )
+            }
+        )
+    else:
+        payload = json.loads(suite.suite.canonical_bytes)
+        payload["suite_version"] = 4
+        suite = parse_regression_suite_bytes(json.dumps(payload).encode())
+
+    with pytest.raises(RegressionBaselineError, match="differs"):
+        repository.prepare_replay(
+            source_reference=source.replay_ref,
+            current_authority=authority,
+            current_suite=suite,
+            expected_runtime=runtime,
+        )
+
+
+def test_repository_replay_missing_or_tampered_source_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_prepared, _verified, _resolved = _prepared(tmp_path, monkeypatch)
+    root = tmp_path / "replay-repository"
+    repository = GenerationZeroBaselineRepository(root)
+    source = repository.publish(source_prepared, captured_at="2026-08-20T12:00:00+00:00").receipt
+    current_authority = source_prepared.authority.model_copy(
+        update={
+            "run_id": "operatorrun:current-baseline-replay",
+            "incoming_admission_receipt_id": "incomingreceipt:current-source",
+            "incoming_admission_receipt_sha256": "9" * 64,
+        }
+    )
+    missing = source.replay_ref.model_copy(
+        update={"relative_locator": (f"regression-baselines/runs/{'f' * 64}/COMPLETE.json")}
+    )
+    with pytest.raises(RegressionBaselineError, match="missing"):
+        repository.prepare_replay(
+            source_reference=missing,
+            current_authority=current_authority,
+            current_suite=_suite(),
+            expected_runtime=source.runtime,
+        )
+
+    case_path = root / source.artifacts[0].relative_path
+    case_path.write_bytes(b"{}")
+    with pytest.raises(RegressionBaselineError, match="altered"):
+        repository.prepare_replay(
+            source_reference=source.replay_ref,
+            current_authority=current_authority,
+            current_suite=_suite(),
+            expected_runtime=source.runtime,
         )
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -68,6 +68,9 @@ from mastervault.change_control.recorded_inference import (
     InferenceInputEnvelope,
     RecordedInferenceOutcome,
     RecordedInferenceProvider,
+    RecordedInferenceTask,
+    replay_rebase_semantic_sha256,
+    resolve_replay_source_input,
     run_revision_planning_inference,
 )
 from mastervault.change_control.temporal_analysis import TemporalAnalysisEvidence
@@ -134,12 +137,15 @@ class RecordedRevisionPlanningInferenceRun:
             return
         if not self.subjects or len(self.subjects) != len(self.workload.input_shards):
             raise ValueError("revision run subjects must cover every workload shard")
-        if not isinstance(
-            self.analysis_set,
-            (ManagedAnalysisSetBinding, GenericManagedAnalysisSetBindingV3),
+        if type(self.analysis_set) not in (
+            ManagedAnalysisSetBinding,
+            GenericManagedAnalysisSetBindingV3,
         ):
             raise ValueError("eligible revision run requires its exact analysis set")
-        analysis_set = self.analysis_set
+        analysis_set = cast(
+            ManagedAnalysisSetBinding | GenericManagedAnalysisSetBindingV3,
+            self.analysis_set,
+        )
         if not self.outcomes or type(self.evidence_batch) is not (
             RepositoryVerifiedInferenceEvidenceBatch
         ):
@@ -605,15 +611,43 @@ def execute_revision_planning(
     )
     if workload.eligibility != eligibility:
         raise ValueError("revision planning batch projection differs from exact impact results")
-    replay_by_input = {item.input_shard_id: item for item in replay_sources}
-    if len(replay_by_input) != len(replay_sources):
+    replay_by_source_input = {item.input_shard_id: item for item in replay_sources}
+    if len(replay_by_source_input) != len(replay_sources):
         raise ValueError("revision replay sources require unique input shards")
     expected_input_ids = {item.shard_id for item in workload.input_shards}
     if contract.mode == InferenceExecutionMode.LIVE:
         if provider is None or replay_sources:
             raise ValueError("LIVE revision planning requires only one provider")
-    elif provider is not None or set(replay_by_input) != expected_input_ids:
-        raise ValueError("REPLAY revision planning requires exact all-target receipt coverage")
+        replay_by_input: dict[str, RevisionPlanningReplaySourceBinding] = {}
+    else:
+        if provider is not None:
+            raise ValueError("REPLAY revision planning cannot call a provider")
+        if len(replay_sources) != len(workload.input_shards):
+            raise ValueError("REPLAY revision planning requires exact all-target receipt coverage")
+        by_semantic: dict[str, RevisionPlanningReplaySourceBinding] = {}
+        for source in replay_sources:
+            source_shard = resolve_replay_source_input(
+                resolver=evidence_repository,
+                receipt_artifact=source.receipt_artifact,
+                task=RecordedInferenceTask.REVISION_PLANNING,
+                input_shard_id=source.input_shard_id,
+                input_shard_sha256=source.input_shard_sha256,
+            )
+            if type(source_shard) is not RevisionPlanningInferenceShard:
+                raise ValueError("revision replay source has the wrong typed input")
+            semantic = replay_rebase_semantic_sha256(source_shard)
+            if semantic in by_semantic:
+                raise ValueError("revision replay sources have duplicate semantic authority")
+            by_semantic[semantic] = source
+        replay_by_input = {}
+        for shard in workload.input_shards:
+            semantic = replay_rebase_semantic_sha256(shard)
+            if semantic not in by_semantic:
+                raise ValueError("revision replay sources do not cover current semantic targets")
+            source = by_semantic.pop(semantic)
+            replay_by_input[shard.shard_id] = source
+        if by_semantic or set(replay_by_input) != expected_input_ids:
+            raise ValueError("revision replay sources contain surplus semantic targets")
 
     materialized_candidates: dict[tuple[str, str], MaterializedRevisionTarget] = {}
     materialized: dict[str, MaterializedRevisionTarget] = {}

@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from mastervault.change_control.managed_review import (
     ClaimReconciliationAction,
     ClaimReconciliationBinding,
     ClaimReconciliationEntry,
+    GenericManagedAnalysisSetBindingV3,
     GroundedArtifactCitation,
     ManagedAnalysisSetAuthority,
+    ManagedAnalysisSetBinding,
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedRevisionPlan,
@@ -180,6 +182,15 @@ def materialize_revision_planning_response(
 ) -> MaterializedRevisionTarget:
     """Derive every path/hash/projection locally from one validated C0 response."""
 
+    if type(analysis_set) not in (
+        ManagedAnalysisSetBinding,
+        GenericManagedAnalysisSetBindingV3,
+    ):
+        raise ValueError("revision materialization requires non-empty impact authority")
+    analysis_set = cast(
+        ManagedAnalysisSetBinding | GenericManagedAnalysisSetBindingV3,
+        analysis_set,
+    )
     impact_evidence = analysis_set.impact_evidence
     if (
         analysis_set.analysis_set_id != shard.analysis_set_id

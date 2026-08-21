@@ -750,7 +750,15 @@ class RepositoryBackedManagedReviewResolver:
             allowed = (
                 len(parts) >= 3
                 and parts[0] == "inference"
-                and parts[1] in {"algorithms", "prompts", "schemas", "inputs", "citations"}
+                and parts[1]
+                in {
+                    "algorithms",
+                    "prompts",
+                    "schemas",
+                    "inputs",
+                    "citations",
+                    "rebase-attestations",
+                }
             ) or parts[:3] == ("temporal", "evidence", "analyses")
             if not allowed:
                 raise ValueError("inference-input artifact uses an unsupported evidence root")

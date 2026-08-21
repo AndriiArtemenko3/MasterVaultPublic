@@ -70,12 +70,10 @@ MAX_PROVIDER_OUTPUT_BYTES_V1 = 256 * 1024
 MAX_PROVIDER_REQUEST_CANONICAL_BYTES_V1 = 3 * 1024 * 1024
 MAX_ATTEMPTS_V1 = 2
 MAX_VALIDATION_ERROR_BYTES_V1 = 2_000
-MAX_OUTCOME_ARTIFACTS_V1 = 8
-MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = MAX_OUTCOME_ARTIFACTS_V1 * 256 * 1024
+MAX_OUTCOME_ARTIFACTS_V1 = 12
+MAX_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = 8 * 256 * 1024
 MAX_REVISION_OUTCOME_ARTIFACTS_V1 = 24
-MAX_REVISION_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = (
-    MAX_REVISION_OUTCOME_ARTIFACTS_V1 * 256 * 1024
-)
+MAX_REVISION_OUTCOME_ARTIFACT_CONTENT_BYTES_V1 = MAX_REVISION_OUTCOME_ARTIFACTS_V1 * 256 * 1024
 # JSON may expand each content byte to a six-byte ``\uXXXX`` escape.  One MiB
 # above that 12 MiB worst case bounds the eight fixed reference wrappers.
 MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1 = 13 * 1024 * 1024
@@ -302,9 +300,7 @@ class InferenceInputEnvelope(_StrictFrozenModel):
             sorted(self.input_artifacts, key=lambda item: item.artifact_id)
         ):
             raise ValueError("input artifacts must use canonical artifact-ID order")
-        if len({item.artifact_id for item in self.input_artifacts}) != len(
-            self.input_artifacts
-        ):
+        if len({item.artifact_id for item in self.input_artifacts}) != len(self.input_artifacts):
             raise ValueError("input artifacts must be unique")
         expected = {
             f"inference/algorithms/{self.algorithm_manifest_sha256}.json": (
@@ -341,6 +337,159 @@ class InferenceInputEnvelope(_StrictFrozenModel):
         if self.envelope_sha256 != digest or self.envelope_id != f"inference-input:{digest}":
             raise ValueError("input envelope ID/SHA does not match its exact content")
         return self
+
+
+ReplayRebaseMappingKindV1 = Literal[
+    "run-id",
+    "workload",
+    "input-shard",
+    "impact-workload",
+    "impact-result",
+    "analysis-set",
+    "impact-input-shard",
+    "impact-output-shard",
+    "validated-output",
+    "input-envelope",
+]
+
+
+class ReplayRebaseAuthorityMappingV1(_StrictFrozenModel):
+    """One narrowly enumerated source-LIVE to current-REPLAY authority mapping."""
+
+    kind: ReplayRebaseMappingKindV1
+    source_id: str
+    source_sha256: str = Field(pattern=SHA256_PATTERN)
+    current_id: str
+    current_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_validator(mode="after")
+    def _exact(self) -> Self:
+        prefixes = {
+            "workload": ("impactwork:", "revisionwork:"),
+            "input-shard": ("impactin:", "revisionin:"),
+            "impact-workload": ("impactwork:",),
+            "impact-result": ("impactresult:",),
+            "analysis-set": ("manalysis:",),
+            "impact-input-shard": ("impactin:",),
+            "impact-output-shard": ("impactout:",),
+            "validated-output": ("impactout:", "revisionout:"),
+            "input-envelope": ("inference-input:",),
+        }
+        if self.kind == "run-id":
+            if (
+                _bytes_sha256(self.source_id.encode("utf-8")) != self.source_sha256
+                or _bytes_sha256(self.current_id.encode("utf-8")) != self.current_sha256
+            ):
+                raise ValueError("replay run-ID mapping hashes differ from exact IDs")
+            return self
+        allowed = prefixes[self.kind]
+        if not any(self.source_id == f"{prefix}{self.source_sha256}" for prefix in allowed) or (
+            not any(self.current_id == f"{prefix}{self.current_sha256}" for prefix in allowed)
+        ):
+            raise ValueError("replay authority mapping ID differs from its exact SHA")
+        return self
+
+
+class ReplayRebaseAttestationV1(_StrictFrozenModel):
+    """Canonical proof that only enumerated mode-derived authorities were rebased."""
+
+    schema_version: Literal[1] = 1
+    task: RecordedInferenceTask
+    source_receipt_artifact: ManagedArtifactRef
+    source_raw_output_artifact: ManagedArtifactRef
+    source_validated_output_artifact: ManagedArtifactRef
+    current_validated_output_artifact: ManagedArtifactRef
+    source_semantic_sha256: str = Field(pattern=SHA256_PATTERN)
+    current_semantic_sha256: str = Field(pattern=SHA256_PATTERN)
+    mappings: tuple[ReplayRebaseAuthorityMappingV1, ...] = Field(min_length=3, max_length=10)
+    attestation_id: str = Field(pattern=r"^inference-rebase:[0-9a-f]{64}$")
+    attestation_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"attestation_id", "attestation_sha256"})
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_json_bytes(self.model_dump(mode="json"))
+
+    @model_validator(mode="after")
+    def _integrity(self) -> Self:
+        receipt = self.source_receipt_artifact
+        if self.task not in {
+            RecordedInferenceTask.IMPACT,
+            RecordedInferenceTask.REVISION_PLANNING,
+        }:
+            raise ValueError("only impact and revision planning permit replay rebasing")
+        if (
+            receipt.kind != ManagedArtifactKind.INFERENCE_RECEIPT
+            or receipt.path != f"receipts/inference/{receipt.sha256}.json"
+        ):
+            raise ValueError("rebase attestation requires the exact source receipt locator")
+        _require_inference_output_locator(self.source_raw_output_artifact, root="raw")
+        _require_inference_output_locator(self.source_validated_output_artifact, root="outputs")
+        _require_inference_output_locator(self.current_validated_output_artifact, root="outputs")
+        if self.source_semantic_sha256 != self.current_semantic_sha256:
+            raise ValueError("rebase attestation semantic hashes differ")
+        keys = tuple((item.kind, item.source_id, item.current_id) for item in self.mappings)
+        if keys != tuple(sorted(set(keys))):
+            raise ValueError("rebase authority mappings must be unique and canonical")
+        kinds = tuple(item.kind for item in self.mappings)
+        required = {"workload", "input-shard", "validated-output", "input-envelope"}
+        if not required.issubset(kinds):
+            raise ValueError("rebase attestation omits a required authority mapping")
+        digest = _sha256(self._payload())
+        if self.attestation_sha256 != digest or self.attestation_id != f"inference-rebase:{digest}":
+            raise ValueError("rebase attestation ID/SHA differs from its canonical proof")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        task: RecordedInferenceTask,
+        source_receipt_artifact: ManagedArtifactRef,
+        source_raw_output_artifact: ManagedArtifactRef,
+        source_validated_output_artifact: ManagedArtifactRef,
+        current_validated_output_artifact: ManagedArtifactRef,
+        source_semantic_sha256: str,
+        current_semantic_sha256: str,
+        mappings: tuple[ReplayRebaseAuthorityMappingV1, ...],
+    ) -> Self:
+        if task not in {
+            RecordedInferenceTask.IMPACT,
+            RecordedInferenceTask.REVISION_PLANNING,
+        }:
+            raise ValueError("only impact and revision planning permit replay rebasing")
+        ordered = tuple(
+            sorted(mappings, key=lambda item: (item.kind, item.source_id, item.current_id))
+        )
+        values = {
+            "schema_version": 1,
+            "task": task.value,
+            "source_receipt_artifact": source_receipt_artifact.model_dump(mode="json"),
+            "source_raw_output_artifact": source_raw_output_artifact.model_dump(mode="json"),
+            "source_validated_output_artifact": source_validated_output_artifact.model_dump(
+                mode="json"
+            ),
+            "current_validated_output_artifact": current_validated_output_artifact.model_dump(
+                mode="json"
+            ),
+            "source_semantic_sha256": source_semantic_sha256,
+            "current_semantic_sha256": current_semantic_sha256,
+            "mappings": [item.model_dump(mode="json") for item in ordered],
+        }
+        digest = _sha256(values)
+        return cls(
+            task=task,
+            source_receipt_artifact=source_receipt_artifact,
+            source_raw_output_artifact=source_raw_output_artifact,
+            source_validated_output_artifact=source_validated_output_artifact,
+            current_validated_output_artifact=current_validated_output_artifact,
+            source_semantic_sha256=source_semantic_sha256,
+            current_semantic_sha256=current_semantic_sha256,
+            mappings=ordered,
+            attestation_id=f"inference-rebase:{digest}",
+            attestation_sha256=digest,
+        )
 
 
 class InferenceAttemptEvidence(_StrictFrozenModel):
@@ -391,8 +540,19 @@ class RecordedInferenceExecution(_StrictFrozenModel):
     receipt: ContentAddressedInferenceReceipt
     receipt_artifact: ManagedArtifactRef
     replay_source_execution_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    replay_rebase_attestation: ReplayRebaseAttestationV1 | None = None
+    replay_rebase_attestation_artifact: ManagedArtifactRef | None = None
     execution_id: str = Field(pattern=_EXECUTION_ID)
     execution_sha256: str = Field(pattern=SHA256_PATTERN)
+
+    @model_serializer(mode="wrap")
+    def _omit_additive_rebase_nulls(self, handler: Any) -> Any:
+        data = handler(self)
+        if self.replay_rebase_attestation is None:
+            data.pop("replay_rebase_attestation", None)
+        if self.replay_rebase_attestation_artifact is None:
+            data.pop("replay_rebase_attestation_artifact", None)
+        return data
 
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"execution_id", "execution_sha256"})
@@ -467,6 +627,33 @@ class RecordedInferenceExecution(_StrictFrozenModel):
                 raise ValueError("live receipt does not equal final successful call evidence")
         elif self.attempts or self.replay_source_execution_sha256 is None:
             raise ValueError("replay execution requires no provider attempts and one live source")
+        rebase = self.replay_rebase_attestation
+        rebase_artifact = self.replay_rebase_attestation_artifact
+        if (rebase is None) != (rebase_artifact is None):
+            raise ValueError("replay rebase requires one typed proof and exact artifact")
+        if rebase is not None:
+            content = rebase.canonical_bytes()
+            if (
+                self.contract.mode != InferenceExecutionMode.REPLAY
+                or self.task
+                not in {RecordedInferenceTask.IMPACT, RecordedInferenceTask.REVISION_PLANNING}
+                or rebase.task != self.task
+                or rebase.source_receipt_artifact != self.receipt.replay_source_receipt_artifact
+                or rebase_artifact is None
+                or rebase_artifact.kind != ManagedArtifactKind.INFERENCE_INPUT
+                or rebase_artifact.path
+                != f"inference/rebase-attestations/{rebase_artifact.sha256}.json"
+                or rebase_artifact.sha256 != _bytes_sha256(content)
+                or rebase_artifact.byte_count != len(content)
+                or self.receipt.replay_rebase_attestation_sha256 != rebase_artifact.sha256
+                or self.receipt.replay_rebase_attestation_artifact != rebase_artifact
+            ):
+                raise ValueError("execution replay rebase proof is not bound exactly")
+        elif (
+            self.receipt.replay_rebase_attestation_sha256 is not None
+            or self.receipt.replay_rebase_attestation_artifact is not None
+        ):
+            raise ValueError("receipt cannot carry an unowned replay rebase proof")
         digest = _sha256(self._payload())
         if self.execution_sha256 != digest or self.execution_id != f"inference-exec:{digest}":
             raise ValueError("execution ID/SHA does not match its exact content")
@@ -568,6 +755,18 @@ class RecordedInferenceOutcome(_StrictFrozenModel):
         replay_source = self.execution.receipt.replay_source_receipt_artifact
         if replay_source is not None:
             required.add(replay_source.artifact_id)
+        rebase = self.execution.replay_rebase_attestation_artifact
+        if rebase is not None:
+            required.add(rebase.artifact_id)
+            proof = self.execution.replay_rebase_attestation
+            assert proof is not None
+            required.update(
+                {
+                    proof.source_raw_output_artifact.artifact_id,
+                    proof.source_validated_output_artifact.artifact_id,
+                    proof.current_validated_output_artifact.artifact_id,
+                }
+            )
         if set(by_id) != required:
             raise ValueError("outcome artifacts must be exactly the required inference evidence")
         artifact_payload = [item.model_dump(mode="json") for item in self.artifacts]
@@ -645,9 +844,7 @@ def _outcome_output_fields(
     if type(output) is not expected_type:
         raise TypeError("recorded inference task produced the wrong typed output shard")
     return {
-        "classification_output": (
-            output if task == RecordedInferenceTask.CLASSIFICATION else None
-        ),
+        "classification_output": (output if task == RecordedInferenceTask.CLASSIFICATION else None),
         "dependency_output": output if task == RecordedInferenceTask.DEPENDENCY else None,
         "impact_output": output if task == RecordedInferenceTask.IMPACT else None,
         "revision_planning_output": (
@@ -688,6 +885,311 @@ def _artifact(
     )
 
 
+def _authority_mapping(
+    kind: ReplayRebaseMappingKindV1,
+    *,
+    source_id: str,
+    source_sha256: str,
+    current_id: str,
+    current_sha256: str,
+) -> ReplayRebaseAuthorityMappingV1:
+    return ReplayRebaseAuthorityMappingV1(
+        kind=kind,
+        source_id=source_id,
+        source_sha256=source_sha256,
+        current_id=current_id,
+        current_sha256=current_sha256,
+    )
+
+
+def _source_input_payload(source: RecordedInferenceOutcome) -> dict[str, Any]:
+    envelope = source.execution.input_envelope
+    expected_path = f"inference/inputs/{envelope.input_shard_sha256}.json"
+    matches = tuple(
+        item
+        for item in source.artifacts
+        if item.artifact.path == expected_path
+        and item.artifact.kind == ManagedArtifactKind.INFERENCE_INPUT
+    )
+    if len(matches) != 1:
+        raise ValueError("replay source omits its exact typed input artifact")
+    content = matches[0].content_utf8.encode("utf-8")
+    if (
+        _bytes_sha256(content) != envelope.input_shard_sha256
+        or canonical_json_bytes(json.loads(content)) != content
+    ):
+        raise ValueError("replay source input artifact is not exact canonical JSON")
+    decoded: Any = json.loads(content)
+    if not isinstance(decoded, dict):
+        raise ValueError("replay source input artifact has the wrong shape")
+    return decoded
+
+
+def replay_source_input_shard(
+    source: RecordedInferenceOutcome,
+) -> ImpactInferenceShard | RevisionPlanningInferenceShard:
+    """Parse and revalidate the task-specific source input from trusted evidence bytes."""
+
+    envelope = source.execution.input_envelope
+    payload = _source_input_payload(source)
+    if source.execution.task == RecordedInferenceTask.IMPACT:
+        if payload.pop("namespace", None) != "mastervault.impact-input-shard.v1":
+            raise ValueError("impact replay source input has the wrong namespace")
+        return ImpactInferenceShard.model_validate_json(
+            canonical_json_bytes(
+                {
+                    **payload,
+                    "shard_id": envelope.input_shard_id,
+                    "shard_sha256": envelope.input_shard_sha256,
+                }
+            )
+        )
+    if source.execution.task == RecordedInferenceTask.REVISION_PLANNING:
+        if payload.pop("namespace", None) != ("mastervault.recorded-revision-planning-input.v1"):
+            raise ValueError("revision replay source input has the wrong namespace")
+        return RevisionPlanningInferenceShard.model_validate_json(
+            canonical_json_bytes(
+                {
+                    **payload,
+                    "shard_id": envelope.input_shard_id,
+                    "shard_sha256": envelope.input_shard_sha256,
+                }
+            )
+        )
+    raise ValueError("strict replay task has no semantic rebase input parser")
+
+
+def _revision_semantic_payload(shard: RevisionPlanningInferenceShard) -> dict[str, Any]:
+    payload = shard.model_dump(
+        mode="json",
+        exclude={
+            "run_id",
+            "impact_workload_id",
+            "impact_workload_sha256",
+            "impact_result_id",
+            "impact_result_sha256",
+            "analysis_set_id",
+            "analysis_set_sha256",
+            "shard_id",
+            "shard_sha256",
+        },
+    )
+    target = payload.get("target")
+    if not isinstance(target, dict):
+        raise ValueError("revision replay semantic target has the wrong shape")
+    for field in (
+        "input_shard_id",
+        "input_shard_sha256",
+        "output_shard_id",
+        "output_shard_sha256",
+    ):
+        target.pop(field, None)
+    return {
+        "namespace": "mastervault.recorded-revision-planning-semantic-input.v1",
+        **payload,
+    }
+
+
+def replay_rebase_semantic_sha256(
+    shard: ImpactInferenceShard | RevisionPlanningInferenceShard,
+) -> str:
+    """Hash every substantive task input while excluding only enumerated authorities."""
+
+    if type(shard) is ImpactInferenceShard:
+        return _bytes_sha256(shard.canonical_bytes())
+    if type(shard) is RevisionPlanningInferenceShard:
+        return _sha256(_revision_semantic_payload(shard))
+    raise TypeError("semantic replay rebasing supports only impact and revision planning")
+
+
+def resolve_replay_source_input(
+    *,
+    resolver: ReplayEvidenceResolver,
+    receipt_artifact: ManagedArtifactRef,
+    task: RecordedInferenceTask,
+    input_shard_id: str,
+    input_shard_sha256: str,
+) -> ImpactInferenceShard | RevisionPlanningInferenceShard:
+    """Freshly resolve a claimed source binding and return its typed input authority."""
+
+    source = resolver.resolve_replay_evidence(receipt_artifact=receipt_artifact)
+    if (
+        source.execution.task != task
+        or source.execution.contract.mode != InferenceExecutionMode.LIVE
+        or source.execution.receipt_artifact != receipt_artifact
+        or source.execution.input_envelope.input_shard_id != input_shard_id
+        or source.execution.input_envelope.input_shard_sha256 != input_shard_sha256
+    ):
+        raise ValueError("replay task/input differs from prior LIVE execution")
+    return replay_source_input_shard(source)
+
+
+def verify_replay_rebase_attestation(
+    *,
+    source: RecordedInferenceOutcome,
+    current: RecordedInferenceOutcome,
+) -> None:
+    """Freshly verify one persisted task-specific rebase against both typed outcomes."""
+
+    proof = current.execution.replay_rebase_attestation
+    if proof is None:
+        raise ValueError("replay rebase outcome omits its typed attestation")
+    source_execution = source.execution
+    current_execution = current.execution
+    if (
+        source_execution.contract.mode != InferenceExecutionMode.LIVE
+        or current_execution.contract.mode != InferenceExecutionMode.REPLAY
+        or proof.task != current_execution.task
+        or proof.source_receipt_artifact != source_execution.receipt_artifact
+        or proof.source_raw_output_artifact != source_execution.raw_output_artifact
+        or proof.source_validated_output_artifact != source_execution.validated_output_artifact
+        or proof.current_validated_output_artifact != current_execution.validated_output_artifact
+    ):
+        raise ValueError("replay rebase proof differs from source/current artifact authority")
+    source_shard = replay_source_input_shard(source)
+    current_shard = replay_source_input_shard(current)
+    source_semantic = replay_rebase_semantic_sha256(source_shard)
+    current_semantic = replay_rebase_semantic_sha256(current_shard)
+    if (
+        source_semantic != current_semantic
+        or proof.source_semantic_sha256 != source_semantic
+        or proof.current_semantic_sha256 != current_semantic
+    ):
+        raise ValueError("replay rebase proof differs from freshly parsed semantic inputs")
+    source_output = _task_output(
+        task=source_execution.task,
+        classification_output=source.classification_output,
+        dependency_output=source.dependency_output,
+        impact_output=source.impact_output,
+        revision_planning_output=source.revision_planning_output,
+    )
+    current_output = _task_output(
+        task=current_execution.task,
+        classification_output=current.classification_output,
+        dependency_output=current.dependency_output,
+        impact_output=current.impact_output,
+        revision_planning_output=current.revision_planning_output,
+    )
+    common = [
+        _authority_mapping(
+            "workload",
+            source_id=source_execution.input_envelope.workload_id,
+            source_sha256=source_execution.input_envelope.workload_sha256,
+            current_id=current_execution.input_envelope.workload_id,
+            current_sha256=current_execution.input_envelope.workload_sha256,
+        ),
+        _authority_mapping(
+            "input-shard",
+            source_id=source_execution.input_envelope.input_shard_id,
+            source_sha256=source_execution.input_envelope.input_shard_sha256,
+            current_id=current_execution.input_envelope.input_shard_id,
+            current_sha256=current_execution.input_envelope.input_shard_sha256,
+        ),
+        _authority_mapping(
+            "input-envelope",
+            source_id=source_execution.input_envelope.envelope_id,
+            source_sha256=source_execution.input_envelope.envelope_sha256,
+            current_id=current_execution.input_envelope.envelope_id,
+            current_sha256=current_execution.input_envelope.envelope_sha256,
+        ),
+    ]
+    if (
+        type(source_shard) is ImpactInferenceShard
+        and type(current_shard) is ImpactInferenceShard
+        and type(source_output) is ImpactOutputShard
+        and type(current_output) is ImpactOutputShard
+    ):
+        if source_shard != current_shard or (
+            source_output.model_dump(
+                mode="json",
+                exclude={
+                    "workload_id",
+                    "workload_sha256",
+                    "output_shard_id",
+                    "output_shard_sha256",
+                },
+            )
+            != current_output.model_dump(
+                mode="json",
+                exclude={
+                    "workload_id",
+                    "workload_sha256",
+                    "output_shard_id",
+                    "output_shard_sha256",
+                },
+            )
+        ):
+            raise ValueError("impact replay rebase changes substantive input or decision semantics")
+    elif (
+        type(source_shard) is RevisionPlanningInferenceShard
+        and type(current_shard) is RevisionPlanningInferenceShard
+        and type(source_output) is RevisionPlanningOutputShard
+        and type(current_output) is RevisionPlanningOutputShard
+    ):
+        if source_output.validated_response != current_output.validated_response:
+            raise ValueError("revision replay rebase changes the validated provider decision")
+        common.extend(
+            (
+                _authority_mapping(
+                    "run-id",
+                    source_id=source_shard.run_id,
+                    source_sha256=_bytes_sha256(source_shard.run_id.encode("utf-8")),
+                    current_id=current_shard.run_id,
+                    current_sha256=_bytes_sha256(current_shard.run_id.encode("utf-8")),
+                ),
+                _authority_mapping(
+                    "impact-workload",
+                    source_id=source_shard.impact_workload_id,
+                    source_sha256=source_shard.impact_workload_sha256,
+                    current_id=current_shard.impact_workload_id,
+                    current_sha256=current_shard.impact_workload_sha256,
+                ),
+                _authority_mapping(
+                    "impact-result",
+                    source_id=source_shard.impact_result_id,
+                    source_sha256=source_shard.impact_result_sha256,
+                    current_id=current_shard.impact_result_id,
+                    current_sha256=current_shard.impact_result_sha256,
+                ),
+                _authority_mapping(
+                    "analysis-set",
+                    source_id=source_shard.analysis_set_id,
+                    source_sha256=source_shard.analysis_set_sha256,
+                    current_id=current_shard.analysis_set_id,
+                    current_sha256=current_shard.analysis_set_sha256,
+                ),
+                _authority_mapping(
+                    "impact-input-shard",
+                    source_id=source_shard.target.input_shard_id,
+                    source_sha256=source_shard.target.input_shard_sha256,
+                    current_id=current_shard.target.input_shard_id,
+                    current_sha256=current_shard.target.input_shard_sha256,
+                ),
+                _authority_mapping(
+                    "impact-output-shard",
+                    source_id=source_shard.target.output_shard_id,
+                    source_sha256=source_shard.target.output_shard_sha256,
+                    current_id=current_shard.target.output_shard_id,
+                    current_sha256=current_shard.target.output_shard_sha256,
+                ),
+            )
+        )
+    else:
+        raise ValueError("replay rebase proof has unsupported or inconsistent typed evidence")
+    common.append(
+        _authority_mapping(
+            "validated-output",
+            source_id=source_output.output_shard_id,
+            source_sha256=source_output.output_shard_sha256,
+            current_id=current_output.output_shard_id,
+            current_sha256=current_output.output_shard_sha256,
+        )
+    )
+    expected = tuple(sorted(common, key=lambda item: (item.kind, item.source_id, item.current_id)))
+    if proof.mappings != expected:
+        raise ValueError("replay rebase proof mapping is missing, surplus, or substituted")
+
+
 def _revision_citation_payloads(
     shard: RevisionPlanningInferenceShard,
 ) -> tuple[InferenceArtifactPayload, ...]:
@@ -701,9 +1203,7 @@ def _revision_citation_payloads(
             sha256=digest,
             byte_count=len(content),
         )
-        payloads.append(
-            InferenceArtifactPayload(artifact=artifact, content_utf8=item.text_utf8)
-        )
+        payloads.append(InferenceArtifactPayload(artifact=artifact, content_utf8=item.text_utf8))
     return tuple(sorted(payloads, key=lambda value: value.artifact.artifact_id))
 
 
@@ -1417,6 +1917,8 @@ def _execute_replay(
     resolver: ReplayEvidenceResolver,
     source_receipt_artifact: ManagedArtifactRef,
     validate_output: Any,
+    build_rebase_attestation: Callable[[RecordedInferenceOutcome, Any], ReplayRebaseAttestationV1]
+    | None = None,
 ) -> RecordedInferenceOutcome:
     source = RecordedInferenceOutcome.model_validate_json(
         canonical_json_bytes(
@@ -1445,8 +1947,15 @@ def _execute_replay(
         getattr(prior.contract, item) != getattr(contract, item) for item in comparable_contract
     ):
         raise ValueError("replay contract differs from prior LIVE execution")
-    if prior.task != task or prior.input_envelope != envelope:
+    if prior.task != task:
         raise ValueError("replay task/input differs from prior LIVE execution")
+    if build_rebase_attestation is None and prior.input_envelope != envelope:
+        raise ValueError("replay task/input differs from prior LIVE execution")
+    if build_rebase_attestation is not None and task not in {
+        RecordedInferenceTask.IMPACT,
+        RecordedInferenceTask.REVISION_PLANNING,
+    }:
+        raise ValueError("strict replay task cannot use semantic rebasing")
     source_payloads = {item.artifact.artifact_id: item for item in source.artifacts}
     required_source_refs = (
         prior.raw_output_artifact,
@@ -1466,7 +1975,9 @@ def _execute_replay(
         revision_planning_output=source.revision_planning_output,
     )
     output = validate_output(output_payload.content_utf8, source_output)
-    if output.canonical_bytes() != output_payload.content_utf8.encode("utf-8"):
+    if build_rebase_attestation is None and (
+        output.canonical_bytes() != output_payload.content_utf8.encode("utf-8")
+    ):
         raise ValueError("replay validated bytes do not exactly rehydrate current output contract")
     output_ref = _artifact(
         kind=ManagedArtifactKind.INFERENCE_OUTPUT,
@@ -1480,8 +1991,29 @@ def _execute_replay(
         suffix="json",
         content=raw_payload.content_utf8.encode("utf-8"),
     )
-    if output_ref != prior.validated_output_artifact or raw_ref != prior.raw_output_artifact:
+    if raw_ref != prior.raw_output_artifact or (
+        build_rebase_attestation is None and output_ref != prior.validated_output_artifact
+    ):
         raise ValueError("replay bytes differ from prior LIVE artifacts")
+    attestation = (
+        build_rebase_attestation(source, output) if build_rebase_attestation is not None else None
+    )
+    attestation_payload: InferenceArtifactPayload | None = None
+    if attestation is not None:
+        attestation_bytes = attestation.canonical_bytes()
+        attestation_artifact_sha256 = _bytes_sha256(attestation_bytes)
+        attestation_ref = ManagedArtifactRef.create(
+            kind=ManagedArtifactKind.INFERENCE_INPUT,
+            path=(f"inference/rebase-attestations/{attestation_artifact_sha256}.json"),
+            sha256=attestation_artifact_sha256,
+            byte_count=len(attestation_bytes),
+        )
+        attestation_payload = InferenceArtifactPayload(
+            artifact=attestation_ref,
+            content_utf8=attestation_bytes.decode("utf-8"),
+        )
+    else:
+        attestation_ref = None
     replay_receipt = ContentAddressedInferenceReceipt.create(
         contract_id=contract.contract_id,
         contract_version=contract.contract_version,
@@ -1504,11 +2036,27 @@ def _execute_replay(
             cost_usd_micros=0,
             latency_ms=0,
         ),
+        replay_rebase_attestation_sha256=(
+            attestation_ref.sha256 if attestation_ref is not None else None
+        ),
+        replay_rebase_attestation_artifact=attestation_ref,
     )
     replay_receipt.verify_replay_source(prior.receipt)
     receipt_ref = _receipt_artifact(replay_receipt)
     receipt_bytes = canonical_json_bytes(replay_receipt.model_dump(mode="json"))
-    artifacts = [*base_artifacts, raw_payload, output_payload, source_receipt_payload]
+    current_output_payload = InferenceArtifactPayload(
+        artifact=output_ref,
+        content_utf8=output.canonical_bytes().decode("utf-8"),
+    )
+    artifacts = [
+        *base_artifacts,
+        raw_payload,
+        output_payload,
+        current_output_payload,
+        source_receipt_payload,
+    ]
+    if attestation_payload is not None:
+        artifacts.append(attestation_payload)
     artifacts.append(
         InferenceArtifactPayload(
             artifact=receipt_ref,
@@ -1527,6 +2075,10 @@ def _execute_replay(
         "receipt_artifact": receipt_ref.model_dump(mode="json"),
         "replay_source_execution_sha256": prior.execution_sha256,
     }
+    if attestation is not None:
+        values["replay_rebase_attestation"] = attestation.model_dump(mode="json")
+        assert attestation_ref is not None
+        values["replay_rebase_attestation_artifact"] = attestation_ref.model_dump(mode="json")
     digest = _sha256(values)
     execution = RecordedInferenceExecution(
         task=task,
@@ -1538,6 +2090,8 @@ def _execute_replay(
         receipt=replay_receipt,
         receipt_artifact=receipt_ref,
         replay_source_execution_sha256=prior.execution_sha256,
+        replay_rebase_attestation=attestation,
+        replay_rebase_attestation_artifact=attestation_ref,
         execution_id=f"inference-exec:{digest}",
         execution_sha256=digest,
     )
@@ -1737,6 +2291,88 @@ def run_impact_inference(
         )
     if provider is not None or replay_resolver is None or replay_source_receipt_artifact is None:
         raise ValueError("REPLAY execution requires only resolver and exact source receipt")
+
+    def rehydrate_rebased_impact(
+        _value: str,
+        source_output: (
+            ClassificationOutputShard
+            | DependencyOutputShard
+            | ImpactOutputShard
+            | RevisionPlanningOutputShard
+        ),
+    ) -> ImpactOutputShard:
+        if type(source_output) is not ImpactOutputShard:
+            raise ValueError("impact replay source omits its typed output")
+        return ImpactOutputShard.create(
+            workload=workload,
+            input_shard=input_shard,
+            decisions=source_output.decisions,
+        )
+
+    def attest_impact_rebase(
+        source: RecordedInferenceOutcome,
+        output: Any,
+    ) -> ReplayRebaseAttestationV1:
+        if type(output) is not ImpactOutputShard:
+            raise TypeError("impact replay produced the wrong current output type")
+        source_shard = replay_source_input_shard(source)
+        if type(source_shard) is not ImpactInferenceShard:
+            raise ValueError("impact replay source has the wrong typed input")
+        source_semantic = replay_rebase_semantic_sha256(source_shard)
+        current_semantic = replay_rebase_semantic_sha256(input_shard)
+        if source_semantic != current_semantic or source_shard != input_shard:
+            raise ValueError("impact replay source differs in substantive input semantics")
+        prior = source.execution
+        source_output = source.impact_output
+        if source_output is None:
+            raise ValueError("impact replay source omits its typed output")
+        output_ref = _artifact(
+            kind=ManagedArtifactKind.INFERENCE_OUTPUT,
+            root="outputs",
+            suffix="json",
+            content=output.canonical_bytes(),
+        )
+        mappings = (
+            _authority_mapping(
+                "workload",
+                source_id=prior.input_envelope.workload_id,
+                source_sha256=prior.input_envelope.workload_sha256,
+                current_id=envelope.workload_id,
+                current_sha256=envelope.workload_sha256,
+            ),
+            _authority_mapping(
+                "input-shard",
+                source_id=prior.input_envelope.input_shard_id,
+                source_sha256=prior.input_envelope.input_shard_sha256,
+                current_id=envelope.input_shard_id,
+                current_sha256=envelope.input_shard_sha256,
+            ),
+            _authority_mapping(
+                "validated-output",
+                source_id=source_output.output_shard_id,
+                source_sha256=source_output.output_shard_sha256,
+                current_id=output.output_shard_id,
+                current_sha256=output.output_shard_sha256,
+            ),
+            _authority_mapping(
+                "input-envelope",
+                source_id=prior.input_envelope.envelope_id,
+                source_sha256=prior.input_envelope.envelope_sha256,
+                current_id=envelope.envelope_id,
+                current_sha256=envelope.envelope_sha256,
+            ),
+        )
+        return ReplayRebaseAttestationV1.create(
+            task=RecordedInferenceTask.IMPACT,
+            source_receipt_artifact=prior.receipt_artifact,
+            source_raw_output_artifact=prior.raw_output_artifact,
+            source_validated_output_artifact=prior.validated_output_artifact,
+            current_validated_output_artifact=output_ref,
+            source_semantic_sha256=source_semantic,
+            current_semantic_sha256=current_semantic,
+            mappings=mappings,
+        )
+
     return _execute_replay(
         task=RecordedInferenceTask.IMPACT,
         contract=contract,
@@ -1744,11 +2380,8 @@ def run_impact_inference(
         base_artifacts=artifacts,
         resolver=replay_resolver,
         source_receipt_artifact=replay_source_receipt_artifact,
-        validate_output=lambda value, _source: _rehydrate_impact_output(
-            value,
-            workload=workload,
-            shard=input_shard,
-        ),
+        validate_output=rehydrate_rebased_impact,
+        build_rebase_attestation=attest_impact_rebase,
     )
 
 
@@ -1824,8 +2457,10 @@ def run_revision_planning_inference(
         return materialize(response)
 
     if contract.mode == InferenceExecutionMode.LIVE:
-        if provider is None or replay_resolver is not None or (
-            replay_source_receipt_artifact is not None
+        if (
+            provider is None
+            or replay_resolver is not None
+            or (replay_source_receipt_artifact is not None)
         ):
             raise ValueError("LIVE execution requires only one provider")
         return _execute_live(
@@ -1860,10 +2495,118 @@ def run_revision_planning_inference(
             citation_inputs=input_shard.citation_inputs,
             existing_claim_statements=existing,
         )
+        if source_output.validated_response != response:
+            raise ValueError("revision replay changes the exact validated provider decision")
         rebuilt = materialize(response)
-        if rebuilt != source_output or rebuilt.canonical_bytes() != value.encode("utf-8"):
-            raise ValueError("revision replay differs from deterministic local materialization")
+        if source_output.canonical_bytes() != value.encode("utf-8"):
+            raise ValueError("revision replay source validated artifact differs from typed output")
         return rebuilt
+
+    def attest_revision_rebase(
+        source: RecordedInferenceOutcome,
+        output: Any,
+    ) -> ReplayRebaseAttestationV1:
+        if type(output) is not RevisionPlanningOutputShard:
+            raise TypeError("revision replay produced the wrong current output type")
+        source_shard = replay_source_input_shard(source)
+        if type(source_shard) is not RevisionPlanningInferenceShard:
+            raise ValueError("revision replay source has the wrong typed input")
+        source_semantic = replay_rebase_semantic_sha256(source_shard)
+        current_semantic = replay_rebase_semantic_sha256(input_shard)
+        if source_semantic != current_semantic:
+            raise ValueError("revision replay source differs in substantive input semantics")
+        prior = source.execution
+        source_output = source.revision_planning_output
+        if source_output is None:
+            raise ValueError("revision replay source omits its typed output")
+        output_ref = _artifact(
+            kind=ManagedArtifactKind.INFERENCE_OUTPUT,
+            root="outputs",
+            suffix="json",
+            content=output.canonical_bytes(),
+        )
+        mappings = (
+            _authority_mapping(
+                "run-id",
+                source_id=source_shard.run_id,
+                source_sha256=_bytes_sha256(source_shard.run_id.encode("utf-8")),
+                current_id=input_shard.run_id,
+                current_sha256=_bytes_sha256(input_shard.run_id.encode("utf-8")),
+            ),
+            _authority_mapping(
+                "workload",
+                source_id=prior.input_envelope.workload_id,
+                source_sha256=prior.input_envelope.workload_sha256,
+                current_id=envelope.workload_id,
+                current_sha256=envelope.workload_sha256,
+            ),
+            _authority_mapping(
+                "input-shard",
+                source_id=prior.input_envelope.input_shard_id,
+                source_sha256=prior.input_envelope.input_shard_sha256,
+                current_id=envelope.input_shard_id,
+                current_sha256=envelope.input_shard_sha256,
+            ),
+            _authority_mapping(
+                "impact-workload",
+                source_id=source_shard.impact_workload_id,
+                source_sha256=source_shard.impact_workload_sha256,
+                current_id=input_shard.impact_workload_id,
+                current_sha256=input_shard.impact_workload_sha256,
+            ),
+            _authority_mapping(
+                "impact-result",
+                source_id=source_shard.impact_result_id,
+                source_sha256=source_shard.impact_result_sha256,
+                current_id=input_shard.impact_result_id,
+                current_sha256=input_shard.impact_result_sha256,
+            ),
+            _authority_mapping(
+                "analysis-set",
+                source_id=source_shard.analysis_set_id,
+                source_sha256=source_shard.analysis_set_sha256,
+                current_id=input_shard.analysis_set_id,
+                current_sha256=input_shard.analysis_set_sha256,
+            ),
+            _authority_mapping(
+                "impact-input-shard",
+                source_id=source_shard.target.input_shard_id,
+                source_sha256=source_shard.target.input_shard_sha256,
+                current_id=input_shard.target.input_shard_id,
+                current_sha256=input_shard.target.input_shard_sha256,
+            ),
+            _authority_mapping(
+                "impact-output-shard",
+                source_id=source_shard.target.output_shard_id,
+                source_sha256=source_shard.target.output_shard_sha256,
+                current_id=input_shard.target.output_shard_id,
+                current_sha256=input_shard.target.output_shard_sha256,
+            ),
+            _authority_mapping(
+                "validated-output",
+                source_id=source_output.output_shard_id,
+                source_sha256=source_output.output_shard_sha256,
+                current_id=output.output_shard_id,
+                current_sha256=output.output_shard_sha256,
+            ),
+            _authority_mapping(
+                "input-envelope",
+                source_id=prior.input_envelope.envelope_id,
+                source_sha256=prior.input_envelope.envelope_sha256,
+                current_id=envelope.envelope_id,
+                current_sha256=envelope.envelope_sha256,
+            ),
+        )
+        return ReplayRebaseAttestationV1.create(
+            task=RecordedInferenceTask.REVISION_PLANNING,
+            source_receipt_artifact=prior.receipt_artifact,
+            source_raw_output_artifact=prior.raw_output_artifact,
+            source_validated_output_artifact=prior.validated_output_artifact,
+            current_validated_output_artifact=output_ref,
+            source_semantic_sha256=source_semantic,
+            current_semantic_sha256=current_semantic,
+            mappings=mappings,
+        )
 
     return _execute_replay(
         task=RecordedInferenceTask.REVISION_PLANNING,
@@ -1873,6 +2616,7 @@ def run_revision_planning_inference(
         resolver=replay_resolver,
         source_receipt_artifact=replay_source_receipt_artifact,
         validate_output=rehydrate,
+        build_rebase_attestation=attest_revision_rebase,
     )
 
 
@@ -1902,6 +2646,11 @@ __all__ = [
     "RecordedInferenceProvider",
     "RecordedInferenceTask",
     "ReplayEvidenceResolver",
+    "ReplayRebaseAttestationV1",
+    "ReplayRebaseAuthorityMappingV1",
+    "replay_rebase_semantic_sha256",
+    "resolve_replay_source_input",
+    "verify_replay_rebase_attestation",
     "run_classification_inference",
     "run_dependency_inference",
     "run_impact_inference",

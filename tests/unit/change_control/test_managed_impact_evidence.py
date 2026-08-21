@@ -139,7 +139,7 @@ def test_v1_bundle_is_readable_but_cannot_cross_new_store_authority_boundary() -
         )
 
     assert isinstance(exc_info.value.__cause__, ValueError)
-    assert "requires v2 impact evidence" in str(exc_info.value.__cause__)
+    assert "requires exact impact evidence" in str(exc_info.value.__cause__)
 
 
 def test_v2_factory_requires_exact_evidence_and_changes_identity() -> None:

@@ -310,7 +310,7 @@ class TemporalProposalBinding(_StrictFrozenModel):
     replacement_candidate_id: str = Field(pattern=_REPLACEMENT_CANDIDATE_ID)
     replacement_candidate_sha256: str = Field(pattern=SHA256_PATTERN)
     classification_executions: tuple[InferenceExecutionRef, ...] = Field(min_length=1)
-    dependency_executions: tuple[InferenceExecutionRef, ...] = Field(min_length=1)
+    dependency_executions: tuple[InferenceExecutionRef, ...] = ()
     relation_assessment_sha256s: tuple[str, ...]
     dependency_assessment_sha256s: tuple[str, ...]
     replacement_subject_sha256s: tuple[str, ...] = Field(min_length=1, max_length=1)
@@ -508,6 +508,10 @@ def _validated_execution_refs(
         raise ValueError("recorded inference outcomes do not exactly cover result shards")
     if any(actual_by_id[key] != expected_by_id[key] for key in expected_by_id):
         raise ValueError("recorded inference outcome substitutes a result shard")
+    if not validated:
+        if expected_outputs:
+            raise ValueError("empty inference evidence cannot cover non-empty output shards")
+        return ()
     refs = tuple(
         sorted(
             (InferenceExecutionRef.create(item) for item in validated),

@@ -501,6 +501,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
     provider_request_id: str | None = Field(default=None, pattern=_OPERATION_ID_RE.pattern)
     replay_source_receipt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     replay_source_receipt_artifact: ManagedArtifactRef | None = None
+    replay_rebase_attestation_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    replay_rebase_attestation_artifact: ManagedArtifactRef | None = None
     authoritative_replay_source_resolution_required: bool
     prompt_sha256: str = Field(pattern=SHA256_PATTERN)
     response_schema_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -512,6 +514,15 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
     raw_output_sha256: str = Field(pattern=SHA256_PATTERN)
     validated_output_sha256: str = Field(pattern=SHA256_PATTERN)
     usage: InferenceUsage
+
+    @model_serializer(mode="wrap")
+    def _omit_additive_rebase_nulls(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.replay_rebase_attestation_sha256 is None:
+            values.pop("replay_rebase_attestation_sha256", None)
+        if self.replay_rebase_attestation_artifact is None:
+            values.pop("replay_rebase_attestation_artifact", None)
+        return values
 
     @field_validator("contract_id")
     @classmethod
@@ -577,6 +588,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
                 self.provider_request_id is None
                 or self.replay_source_receipt_sha256 is not None
                 or self.replay_source_receipt_artifact is not None
+                or self.replay_rebase_attestation_sha256 is not None
+                or self.replay_rebase_attestation_artifact is not None
                 or self.authoritative_replay_source_resolution_required
             ):
                 raise ValueError("live inference requires only provider request evidence")
@@ -608,6 +621,16 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             item.path == self.replay_source_receipt_artifact.path for item in self.input_artifacts
         ):
             raise ValueError("replay receipt locator cannot collide with an inference input")
+        rebase = self.replay_rebase_attestation_artifact
+        if (rebase is None) != (self.replay_rebase_attestation_sha256 is None):
+            raise ValueError("replay rebase attestation requires one exact artifact and SHA")
+        if rebase is not None and (
+            self.mode != InferenceExecutionMode.REPLAY
+            or rebase.kind != ManagedArtifactKind.INFERENCE_INPUT
+            or rebase.sha256 != self.replay_rebase_attestation_sha256
+            or rebase.path != f"inference/rebase-attestations/{rebase.sha256}.json"
+        ):
+            raise ValueError("replay rebase attestation has the wrong exact locator")
         if self.receipt_id != _content_id("minference", self._payload()):
             raise ValueError("inference receipt ID does not match its exact content")
         return self
@@ -641,14 +664,19 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             "model",
             "prompt_sha256",
             "response_schema_sha256",
-            "input_artifacts",
-            "input_envelope_sha256",
-            "canonical_input_sha256",
             "raw_output_sha256",
-            "validated_output_sha256",
         )
         if any(getattr(self, field) != getattr(source_receipt, field) for field in comparable):
             raise ValueError("replay receipt does not exactly match resolved LIVE inference")
+        if self.replay_rebase_attestation_artifact is None:
+            strict = (
+                "input_artifacts",
+                "input_envelope_sha256",
+                "canonical_input_sha256",
+                "validated_output_sha256",
+            )
+            if any(getattr(self, field) != getattr(source_receipt, field) for field in strict):
+                raise ValueError("replay receipt does not exactly match resolved LIVE inference")
 
     @classmethod
     def create(
@@ -669,6 +697,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
         raw_output_sha256: str,
         validated_output_sha256: str,
         usage: InferenceUsage,
+        replay_rebase_attestation_sha256: str | None = None,
+        replay_rebase_attestation_artifact: ManagedArtifactRef | None = None,
     ) -> Self:
         _preflight_collection(
             input_artifacts,
@@ -711,6 +741,12 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             "validated_output_sha256": validated_output_sha256,
             "usage": usage.model_dump(mode="json"),
         }
+        if replay_rebase_attestation_sha256 is not None:
+            values["replay_rebase_attestation_sha256"] = replay_rebase_attestation_sha256
+        if replay_rebase_attestation_artifact is not None:
+            values["replay_rebase_attestation_artifact"] = (
+                replay_rebase_attestation_artifact.model_dump(mode="json")
+            )
         return _validate_canonical_json(
             cls, {"receipt_id": _content_id("minference", values), **values}
         )
@@ -2414,9 +2450,7 @@ class ManagedNoWorkAnalysisSetBindingV4(_StrictFrozenModel):
     impact_result_sha256: str = Field(pattern=SHA256_PATTERN)
     no_work_evidence_id: str = Field(pattern=r"^no-work-planning:[0-9a-f]{64}$")
     no_work_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
-    changed_claim_revision_ids: tuple[str, ...] = Field(
-        max_length=MAX_MANAGED_CHANGED_CLAIMS_V1
-    )
+    changed_claim_revision_ids: tuple[str, ...] = Field(max_length=MAX_MANAGED_CHANGED_CLAIMS_V1)
     global_relevant_claim_revision_ids: tuple[str, ...] = Field(
         max_length=MAX_MANAGED_GLOBAL_RELEVANT_CLAIMS_V1
     )
@@ -2472,9 +2506,7 @@ class ManagedNoWorkAnalysisSetBindingV4(_StrictFrozenModel):
             "no_work_evidence_id": no_work_evidence_id,
             "no_work_evidence_sha256": no_work_evidence_sha256,
             "changed_claim_revision_ids": analysis_bootstrap.changed_claim_revision_ids,
-            "global_relevant_claim_revision_ids": tuple(
-                sorted(global_relevant_claim_revision_ids)
-            ),
+            "global_relevant_claim_revision_ids": tuple(sorted(global_relevant_claim_revision_ids)),
         }
         digest = _sha256(values)
         return _validate_canonical_json(
@@ -3978,9 +4010,7 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
     run_binding: ManagedRun
     review_base: ManagedReviewBaseBinding
     temporal_prerequisite: TemporalDecisionPrerequisite
-    targets: tuple[ManagedRevisionReviewTarget, ...] = Field(
-        max_length=MAX_MANAGED_TARGETS_V1
-    )
+    targets: tuple[ManagedRevisionReviewTarget, ...] = Field(max_length=MAX_MANAGED_TARGETS_V1)
 
     @field_validator("targets")
     @classmethod
@@ -4814,9 +4844,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
     adoption_choice: ManagedAdoptionChoice | None = None
     reviewer_id: str
     rationale: str = Field(min_length=1, max_length=4000)
-    items: tuple[ManagedRevisionReviewOutcome, ...] = Field(
-        max_length=MAX_MANAGED_TARGETS_V1
-    )
+    items: tuple[ManagedRevisionReviewOutcome, ...] = Field(max_length=MAX_MANAGED_TARGETS_V1)
     generation_manifest: ManagedGenerationManifest
     expected_authority: AuthorityRevisionBinding
     activation_plan: PlannedAuthorityActivation | None = None
@@ -4888,10 +4916,13 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             else None
         )
         if adoption_only:
-            if not isinstance(
-                getattr(bundle.run_binding, "revision_planning_admission", None),
-                ManagedNoWorkPlanningAdmissionBinding,
-            ) or expected_adoption_outcome != self.bundle_outcome:
+            if (
+                not isinstance(
+                    getattr(bundle.run_binding, "revision_planning_admission", None),
+                    ManagedNoWorkPlanningAdmissionBinding,
+                )
+                or expected_adoption_outcome != self.bundle_outcome
+            ):
                 raise ValueError(
                     "zero-target decision requires an explicit matching adoption choice"
                 )
@@ -4947,8 +4978,13 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
                 raise ValueError("rejected bundle requires every target rejected")
             if final_plans:
                 raise ValueError("rejected bundle cannot publish plans")
-        elif not adoption_only and not final_plans and not any(
-            item.disposition == ManagedRevisionDisposition.CONFIRM_NO_CHANGE for item in self.items
+        elif (
+            not adoption_only
+            and not final_plans
+            and not any(
+                item.disposition == ManagedRevisionDisposition.CONFIRM_NO_CHANGE
+                for item in self.items
+            )
         ):
             raise ValueError("accepted bundle requires an approved/edit/no-change confirmation")
         if (
@@ -5198,11 +5234,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "schema_version": 1,
             "request_record": request_record.model_dump(mode="json"),
             "bundle_outcome": bundle_outcome.value,
-            **(
-                {"adoption_choice": adoption_choice.value}
-                if adoption_choice is not None
-                else {}
-            ),
+            **({"adoption_choice": adoption_choice.value} if adoption_choice is not None else {}),
             "reviewer_id": reviewer_id,
             "rationale": rationale,
             "items": [item.model_dump(mode="json") for item in ordered],
@@ -5274,11 +5306,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "schema_version": 1,
             "request_record": request_record.model_dump(mode="json"),
             "bundle_outcome": bundle_outcome.value,
-            **(
-                {"adoption_choice": adoption_choice.value}
-                if adoption_choice is not None
-                else {}
-            ),
+            **({"adoption_choice": adoption_choice.value} if adoption_choice is not None else {}),
             "reviewer_id": reviewer_id,
             "rationale": rationale,
             "items": [item.model_dump(mode="json") for item in ordered],
