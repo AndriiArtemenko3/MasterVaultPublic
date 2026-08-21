@@ -8,6 +8,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- PR20A's synchronous SQLite/POSIX library lifecycle for one generic Markdown
+  event and one generation-zero-to-one successor. Strict admission binds exact
+  grounded quotations, a workload-only regression suite, path-free baseline
+  evidence, and the existing generic bootstrap authority; receipt-derived
+  status then advances through separate temporal and managed human reviews,
+  true rejection no-ops, adoption-only or mixed publication, activation, and
+  fresh verification. Frozen schema-v1 DTOs and a stable five-code error
+  taxonomy form the public Python boundary. LIVE results are locally validated
+  and recorded; exact REPLAY is offline and cannot conceal an indeterminate
+  uncommitted provider call. The `mvault change` command group, CLI rendering
+  and exit contracts, and subprocess acceptance tests are explicitly deferred
+  to PR20B. This is an Unreleased entry and makes no version, tag, publication,
+  deployment, or release claim.
 - Recorded actual-impact inference for reviewed Step 10a workloads. Providers
   return only semantic decisions and character offsets; exact SourceNote spans,
   provenance, and content identities are derived locally. Non-empty LIVE or

@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import hashlib
 
+from mastervault.change_control.generic_governing_source import (
+    ResolvedGenericGenerationSourceV2,
+)
 from mastervault.change_control.managed_generation import (
     GoverningSourceBinding,
     PublishedSourceBinding,
@@ -21,7 +24,12 @@ from mastervault.change_control.managed_generation_repository import (
     ManagedGenerationRepository,
     ResolvedGenerationSourceNote,
 )
-from mastervault.change_control.managed_review import ManagedRevisionDecisionRecord
+from mastervault.change_control.managed_review import (
+    GenericGoverningSourceAdoptionBindingV2,
+    GoverningSourceAdoptionAuthority,
+    ManagedGoverningSourceAdoptionBinding,
+    ManagedRevisionDecisionRecord,
+)
 from mastervault.change_control.managed_review_repository import (
     ResolvedReviewedGenerationSource,
 )
@@ -29,16 +37,44 @@ from mastervault.change_control.managed_store import (
     ManagedGenerationActivationError,
     ManagedGenerationActivationState,
 )
+from mastervault.sync.indexer import ExactVaultNoteInput
 
 
 class ManagedActivationServiceError(ManagedGenerationActivationError):
     """A managed generation could not be safely reconstructed or reconciled."""
 
 
+ResolvedManagedGenerationSource = (
+    ResolvedReviewedGenerationSource | ResolvedGenericGenerationSourceV2
+)
+
+
+def require_exact_generation_source(
+    *,
+    binding: GoverningSourceAdoptionAuthority,
+    source: ResolvedManagedGenerationSource,
+) -> ResolvedManagedGenerationSource:
+    """Fail closed unless a resolver returned the exact source kind and adoption."""
+
+    if type(binding) is ManagedGoverningSourceAdoptionBinding:
+        if type(source) is ResolvedReviewedGenerationSource and source.adoption == binding:
+            return source
+    elif type(binding) is GenericGoverningSourceAdoptionBindingV2:
+        if type(source) is ResolvedGenericGenerationSourceV2 and source.adoption == binding:
+            return source
+    else:  # pragma: no cover - defensive against a widened authority union
+        raise ManagedActivationServiceError(
+            "generation source uses an unsupported governing-source authority"
+        )
+    raise ManagedActivationServiceError(
+        "generation resolver returned the wrong exact governing-source authority"
+    )
+
+
 def derive_generation_projection(
     *,
     decision: ManagedRevisionDecisionRecord,
-    source: ResolvedReviewedGenerationSource,
+    source: ResolvedManagedGenerationSource,
 ) -> ResolvedManagedGenerationProjection:
     """Reproduce the exact managed projection from reviewed source authority."""
 
@@ -51,10 +87,11 @@ def derive_generation_projection(
 
 def resolve_generation_notes(
     *,
-    source: ResolvedReviewedGenerationSource,
+    source: ResolvedManagedGenerationSource,
     projection: ResolvedManagedGenerationProjection,
     state: ManagedGenerationActivationState,
     repository: ManagedGenerationRepository,
+    base_notes: tuple[ExactVaultNoteInput, ...] = (),
 ) -> tuple[ResolvedGenerationSourceNote, ...]:
     """Resolve and revalidate every exact SourceNote in a managed projection."""
 
@@ -67,6 +104,13 @@ def resolve_generation_notes(
             "managed publication events contain duplicate destinations"
         )
     generation_workspace = repository.root / "generations" / projection.generation_id / "canonical"
+    base_by_path: dict[str, ExactVaultNoteInput] = {}
+    for base_note in base_notes:
+        if base_note.rel_path in base_by_path:
+            raise ManagedActivationServiceError(
+                "generation base notes contain a duplicate logical path"
+            )
+        base_by_path[base_note.rel_path] = base_note
     resolved: list[ResolvedGenerationSourceNote] = []
     for entry in projection.entries:
         binding = entry.source
@@ -94,7 +138,20 @@ def resolve_generation_notes(
                     "reviewed generation SourceNote differs from exact projection"
                 )
             content = note.source_note_utf8.encode("utf-8")
-            workspace = source.workspace_root
+            matched_base_note = base_by_path.get(entry.logical_path)
+            if matched_base_note is None:
+                workspace = source.workspace_root
+            elif not (
+                matched_base_note.content == content
+                and len(matched_base_note.content) == entry.source_note_byte_count
+                and hashlib.sha256(matched_base_note.content).hexdigest()
+                == entry.source_note_sha256
+            ):
+                raise ManagedActivationServiceError(
+                    "generation base-note workspace mapping differs from exact SourceNote bytes"
+                )
+            else:
+                workspace = matched_base_note.workspace
         else:  # pragma: no cover - exhaustive discriminated-union guard
             raise ManagedActivationServiceError(
                 "generation SourceNote has an unsupported source binding"
@@ -116,6 +173,8 @@ def resolve_generation_notes(
 
 
 __all__ = [
+    "ResolvedManagedGenerationSource",
     "derive_generation_projection",
+    "require_exact_generation_source",
     "resolve_generation_notes",
 ]

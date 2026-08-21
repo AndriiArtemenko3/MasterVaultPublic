@@ -12,9 +12,12 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generic_governing_source import CompositeManagedReviewResolverV2
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
+    ManagedAdoptionChoice,
     ManagedBundleOutcome,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedReviewBaseBinding,
     ManagedRevisionDecisionCommand,
     ManagedRevisionDecisionReceipt,
@@ -34,6 +37,7 @@ from mastervault.change_control.managed_review_repository import (
     RepositoryBackedManagedReviewResolver,
 )
 from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
     ManagedReviewStaleError,
     ManagedRevisionEditDeferredError,
     ManagedRevisionReviewStoreView,
@@ -82,8 +86,10 @@ def _exact_run(run_binding: ManagedRunBindingV2) -> ManagedRunBindingV2:
 
 def _exact_subjects(
     subjects: tuple[ManagedRevisionPlan | NoChangeImpactCard, ...],
+    *,
+    allow_empty: bool = False,
 ) -> tuple[ManagedRevisionPlan | NoChangeImpactCard, ...]:
-    if type(subjects) is not tuple or not subjects:
+    if type(subjects) is not tuple or (not subjects and not allow_empty):
         raise ValueError("managed review requires the complete non-empty admitted subject set")
     exact: list[ManagedRevisionPlan | NoChangeImpactCard] = []
     for subject in subjects:
@@ -109,11 +115,34 @@ def _exact_subjects(
 
 
 def _require_production_resolver(
-    resolver: RepositoryBackedManagedReviewResolver,
-) -> RepositoryBackedManagedReviewResolver:
-    if type(resolver) is not RepositoryBackedManagedReviewResolver:
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+) -> RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2:
+    if type(resolver) not in {
+        RepositoryBackedManagedReviewResolver,
+        CompositeManagedReviewResolverV2,
+    }:
         raise TypeError("managed review service requires the production repository resolver")
     return resolver
+
+
+def _store_authority_context(
+    *,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None,
+    prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None,
+) -> AuthorityVerificationContext:
+    if authority_context is not None:
+        if type(authority_context) is not AuthorityVerificationContext:
+            raise TypeError("managed review authority context type was substituted")
+        if verified_bootstrap is not None:
+            raise TypeError("workspace authority context cannot mix with legacy bootstrap")
+        return authority_context
+    if type(verified_bootstrap) is not VerifiedAnalysisBootstrapCapability:
+        raise TypeError("legacy managed review requires exact sealed bootstrap authority")
+    return AuthorityVerificationContext.legacy(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=prechange_head,
+    )
 
 
 def _delivery_matches_request(
@@ -138,15 +167,13 @@ def _read_review(
     *,
     store: SqliteManagedChangeControlStore,
     request_id: str,
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
-    prechange_head: AggregateHeadBinding,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    authority_context: AuthorityVerificationContext,
 ) -> ManagedRevisionReviewStoreView:
     return store.get_managed_review(
         request_id,
         resolver=resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=prechange_head,
+        authority_context=authority_context,
     )
 
 
@@ -156,27 +183,39 @@ def open_managed_revision_review(
     run_binding: ManagedRunBindingV2,
     admitted_subjects: tuple[ManagedRevisionPlan | NoChangeImpactCard, ...],
     reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
     prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None = None,
     operation_id: str,
     requester_id: str,
     rationale: str,
 ) -> ManagedRevisionReviewStoreView:
     """Open exactly one V2-admitted review and verify the authoritative reread.
 
-    Upstream ``NO_WORK`` has no V2 admission and therefore never calls this
-    service.  An empty subject set fails before any store or repository access.
+    Mechanical ``NO_WORK`` may use an empty subject set only through an exact
+    no-work admission.  Every other empty subject set fails before store access.
     """
 
     exact_run = _exact_run(run_binding)
-    subjects = _exact_subjects(admitted_subjects)
+    subjects = _exact_subjects(
+        admitted_subjects,
+        allow_empty=isinstance(
+            exact_run.revision_planning_admission,
+            ManagedNoWorkPlanningAdmissionBinding,
+        ),
+    )
     production_resolver = _require_production_resolver(resolver)
     if type(reviewed_snapshot) is not ReviewedTemporalSnapshotAuthority:
         raise TypeError("managed review requires exact reviewed temporal authority")
     reviewed = reviewed_snapshot.verify()
     exact_prechange = AggregateHeadBinding.model_validate_json(
         canonical_json_bytes(prechange_head.model_dump(mode="json"))
+    )
+    store_authority = _store_authority_context(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=exact_prechange,
+        authority_context=authority_context,
     )
     requester_id = normalize_actor_id(requester_id)
     rationale = normalize_review_rationale(rationale)
@@ -238,16 +277,14 @@ def open_managed_revision_review(
     existing_record = store.find_managed_review_request_by_operation_id(
         operation_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     opening_authority = (
         existing_record.committed_authority
         if existing_record is not None
         else store.get_active_generation(
             exact_run.prechange_head.aggregate_id,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     )
     review_base = ManagedReviewBaseBinding.create(
@@ -278,8 +315,7 @@ def open_managed_revision_review(
         delivery = store.create_managed_review_request(
             command,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as exc:  # lost acknowledgement is reconciled from SQLite below
         write_error = exc
@@ -287,8 +323,7 @@ def open_managed_revision_review(
         committed = store.find_managed_review_request_by_operation_id(
             operation_id,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as read_error:
         if write_error is not None:
@@ -304,8 +339,7 @@ def open_managed_revision_review(
         store=store,
         request_id=committed.command.request_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     if view.request_record != committed:
         raise ManagedReviewServiceError(
@@ -321,8 +355,10 @@ def open_managed_revision_review(
 def _exact_selections(
     selections: tuple[ManagedRevisionReviewSelection, ...],
 ) -> tuple[ManagedRevisionReviewSelection, ...]:
-    if type(selections) is not tuple or not selections:
-        raise ManagedReviewSelectionError("managed decision requires a non-empty selection set")
+    """Normalize authority-independent selection structure before any store access."""
+
+    if type(selections) is not tuple:
+        raise ManagedReviewSelectionError("managed decision selections must be an exact tuple")
     exact = tuple(
         ManagedRevisionReviewSelection.model_validate_json(
             canonical_json_bytes(item.model_dump(mode="json"))
@@ -349,33 +385,53 @@ def decide_managed_revision_review(
     store: SqliteManagedChangeControlStore,
     request_id: str,
     selections: tuple[ManagedRevisionReviewSelection, ...],
-    resolver: RepositoryBackedManagedReviewResolver,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    adoption_choice: ManagedAdoptionChoice | None = None,
+    resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+    verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
     prechange_head: AggregateHeadBinding,
+    authority_context: AuthorityVerificationContext | None = None,
     operation_id: str,
     reviewer_id: str,
     rationale: str,
 ) -> ManagedRevisionReviewStoreView:
     """Decide from SQLite-owned targets; caller input contains only target choices."""
 
-    exact_selections = _exact_selections(selections)
     production_resolver = _require_production_resolver(resolver)
     exact_prechange = AggregateHeadBinding.model_validate_json(
         canonical_json_bytes(prechange_head.model_dump(mode="json"))
     )
+    store_authority = _store_authority_context(
+        verified_bootstrap=verified_bootstrap,
+        prechange_head=exact_prechange,
+        authority_context=authority_context,
+    )
     reviewer_id = normalize_actor_id(reviewer_id)
     rationale = normalize_review_rationale(rationale)
+    exact_selections = _exact_selections(selections)
 
     before = _read_review(
         store=store,
         request_id=request_id,
         resolver=production_resolver,
-        verified_bootstrap=verified_bootstrap,
-        prechange_head=exact_prechange,
+        authority_context=store_authority,
     )
     if before.lifecycle == ManagedRevisionStoreLifecycle.STALE:
         raise ManagedReviewStaleError("stale managed review cannot accept a new decision")
     targets = {item.target_id: item for item in before.request_record.command.bundle.targets}
+    admission = getattr(
+        before.request_record.command.bundle.run_binding,
+        "revision_planning_admission",
+        None,
+    )
+    adoption_only = (
+        not targets and type(admission) is ManagedNoWorkPlanningAdmissionBinding
+    )
+    if not exact_selections and not adoption_only:
+        raise ManagedReviewSelectionError("managed decision requires a non-empty selection set")
+    if adoption_only != (adoption_choice is not None):
+        raise ManagedReviewSelectionError(
+            "adoption choice is required only for an exact zero-target review"
+        )
     if tuple(item.target_id for item in exact_selections) != tuple(sorted(targets)):
         raise ManagedReviewSelectionError(
             "managed decision requires exactly one selection for every stored target"
@@ -407,14 +463,18 @@ def decide_managed_revision_review(
             )
         )
     bundle_outcome = (
-        ManagedBundleOutcome.REJECTED
-        if all(item.disposition == ManagedRevisionDisposition.REJECT for item in outcomes)
+        ManagedBundleOutcome.ACCEPTED
+        if adoption_choice == ManagedAdoptionChoice.ADOPT
+        else ManagedBundleOutcome.REJECTED
+        if adoption_choice == ManagedAdoptionChoice.REJECT
+        or all(item.disposition == ManagedRevisionDisposition.REJECT for item in outcomes)
         else ManagedBundleOutcome.ACCEPTED
     )
     command = ManagedRevisionDecisionCommand.create(
         operation_id=operation_id,
         request_record=before.request_record,
         bundle_outcome=bundle_outcome,
+        adoption_choice=adoption_choice,
         reviewer_id=reviewer_id,
         rationale=rationale,
         items=tuple(outcomes),
@@ -432,8 +492,7 @@ def decide_managed_revision_review(
         delivery = store.decide_managed_review(
             command,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as exc:  # reconcile a commit whose acknowledgement was lost
         write_error = exc
@@ -442,8 +501,7 @@ def decide_managed_revision_review(
             store=store,
             request_id=request_id,
             resolver=production_resolver,
-            verified_bootstrap=verified_bootstrap,
-            prechange_head=exact_prechange,
+            authority_context=store_authority,
         )
     except Exception as read_error:
         if write_error is not None:

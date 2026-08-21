@@ -14,6 +14,7 @@ from mastervault.change_control.generation_corpus import (
 )
 from mastervault.change_control.generation_resolution import (
     derive_generation_projection,
+    require_exact_generation_source,
     resolve_generation_notes,
 )
 from mastervault.change_control.managed_activation_service import (
@@ -87,24 +88,23 @@ class ManagedServingResolution:
                 or self.repository.repository_id != command.generation_repository_id
                 or not self.repository.read_only
             ):
-                raise ManagedServingError(
-                    "active command names another generation repository"
-                )
+                raise ManagedServingError("active command names another generation repository")
             self.repository.verify_open_read_only_index(
                 backend=self.backend,
                 receipt=self.index_receipt,
             )
-            source = self.resolver.resolve_reviewed_generation_source(
-                manifest.governing_source_adoption
+            source = require_exact_generation_source(
+                binding=manifest.governing_source_adoption,
+                source=self.resolver.resolve_reviewed_generation_source(
+                    manifest.governing_source_adoption
+                ),
             )
             projection = derive_generation_projection(
                 decision=self.decision,
                 source=source,
             )
             if projection != command.projection:
-                raise ManagedServingError(
-                    "active generation projection is no longer reproducible"
-                )
+                raise ManagedServingError("active generation projection is no longer reproducible")
             for event in self.activation_state.publication_events:
                 self.repository.open_publication(event)
             notes = resolve_generation_notes(
@@ -112,11 +112,10 @@ class ManagedServingResolution:
                 projection=projection,
                 state=self.activation_state,
                 repository=self.repository,
+                base_notes=self.workspace_base_notes or (),
             )
             if notes != self.resolved_notes:
-                raise ManagedServingError(
-                    "active generation SourceNotes changed while serving"
-                )
+                raise ManagedServingError("active generation SourceNotes changed while serving")
             base_notes = verify_generation_base_inventory(
                 expected_authority=command.expected_authority,
                 verified_workspace_bootstrap=self.verified_workspace_bootstrap,
@@ -128,9 +127,7 @@ class ManagedServingResolution:
                 base_notes=base_notes,
             )
             if base_notes != self.workspace_base_notes or index_notes != self.index_notes:
-                raise ManagedServingError(
-                    "active generation complete corpus changed while serving"
-                )
+                raise ManagedServingError("active generation complete corpus changed while serving")
             self.repository.verify_index(
                 receipt=self.index_receipt,
                 command=command,
@@ -146,9 +143,7 @@ class ManagedServingResolution:
             TypeError,
             ValueError,
         ) as exc:
-            raise ManagedServingError(
-                "active managed generation changed while serving"
-            ) from exc
+            raise ManagedServingError("active managed generation changed while serving") from exc
 
     def close(self) -> None:
         """Verify once more, then close the read-only backend and its guards."""
@@ -183,9 +178,7 @@ def open_active_managed_sqlite_generation(
 
     if authority_context is not None:
         if verified_bootstrap is not None or prechange_head is not None:
-            raise TypeError(
-                "authority_context cannot be mixed with legacy bootstrap arguments"
-            )
+            raise TypeError("authority_context cannot be mixed with legacy bootstrap arguments")
         context = authority_context
     else:
         if verified_bootstrap is None or prechange_head is None:
@@ -266,7 +259,10 @@ def open_active_managed_sqlite_generation(
     manifest = decision.command.generation_manifest
     if not isinstance(manifest, ManagedGenerationManifestBindingV2):
         raise ManagedServingError("active managed generation does not have a v2 manifest")
-    source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
+    source = require_exact_generation_source(
+        binding=manifest.governing_source_adoption,
+        source=resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption),
+    )
     projection = derive_generation_projection(decision=decision, source=source)
     if projection != command.projection:
         raise ManagedServingError("active generation projection is no longer reproducible")
@@ -278,6 +274,7 @@ def open_active_managed_sqlite_generation(
             projection=projection,
             state=state,
             repository=repository,
+            base_notes=verified_base_notes or (),
         )
         index_notes = complete_generation_index_notes(
             command=command,

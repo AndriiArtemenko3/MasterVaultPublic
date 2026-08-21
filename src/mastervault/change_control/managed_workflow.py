@@ -25,8 +25,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from mastervault.change_control.bootstrap import VerifiedAnalysisBootstrapCapability
+from mastervault.change_control.generic_governing_source import CompositeManagedReviewResolverV2
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
+    GenericGoverningSourceAdoptionBindingV2,
+    ManagedGoverningSourceAdoptionBinding,
     ManagedRevisionDecisionRecord,
     ManagedRunBindingV2,
 )
@@ -34,6 +37,7 @@ from mastervault.change_control.managed_review_repository import (
     RepositoryBackedManagedReviewResolver,
 )
 from mastervault.change_control.managed_store import (
+    AuthorityVerificationContext,
     ManagedRevisionReviewStoreView,
     ManagedRevisionStoreLifecycle,
     SqliteManagedChangeControlStore,
@@ -231,24 +235,40 @@ class ManagedReviewWorkflow:
         *,
         authority_path: Path | str,
         checkpoint_path: Path | str,
-        resolver: RepositoryBackedManagedReviewResolver,
-        verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+        resolver: RepositoryBackedManagedReviewResolver | CompositeManagedReviewResolverV2,
+        verified_bootstrap: VerifiedAnalysisBootstrapCapability | None = None,
         prechange_head: AggregateHeadBinding,
+        authority_context: AuthorityVerificationContext | None = None,
         timeout_seconds: float = 30.0,
     ) -> None:
         if timeout_seconds < 0:
             raise ValueError("timeout_seconds must be non-negative")
-        if type(resolver) is not RepositoryBackedManagedReviewResolver:
+        if type(resolver) not in {
+            RepositoryBackedManagedReviewResolver,
+            CompositeManagedReviewResolverV2,
+        }:
             raise TypeError("managed workflow requires the production repository resolver")
         self.request_id = request_id
         self.workflow_id = managed_review_workflow_id(request_id)
         self.authority_path = Path(authority_path)
         self.checkpoint_path = Path(checkpoint_path)
         self._resolver = resolver
-        self._verified_bootstrap = verified_bootstrap
         self._prechange_head = AggregateHeadBinding.model_validate_json(
             prechange_head.model_dump_json()
         )
+        if authority_context is not None:
+            if type(authority_context) is not AuthorityVerificationContext:
+                raise TypeError("managed workflow authority context type was substituted")
+            if verified_bootstrap is not None:
+                raise TypeError("workspace authority context cannot mix with legacy bootstrap")
+            self._authority_context = authority_context
+        else:
+            if type(verified_bootstrap) is not VerifiedAnalysisBootstrapCapability:
+                raise TypeError("legacy managed workflow requires exact sealed bootstrap authority")
+            self._authority_context = AuthorityVerificationContext.legacy(
+                verified_bootstrap=verified_bootstrap,
+                prechange_head=self._prechange_head,
+            )
         self._timeout_seconds = timeout_seconds
         if _same_target(self.authority_path, self.checkpoint_path):
             raise ManagedReviewWorkflowPathConflictError(
@@ -300,6 +320,14 @@ class ManagedReviewWorkflow:
             )
         admission = run.revision_planning_admission
         adoption = run.governing_source_adoption
+        if type(adoption) is ManagedGoverningSourceAdoptionBinding:
+            repository_binding_sha256 = adoption.source_repository_binding_sha256
+        elif type(adoption) is GenericGoverningSourceAdoptionBindingV2:
+            repository_binding_sha256 = adoption.analysis_bootstrap_binding_sha256
+        else:  # pragma: no cover - discriminated exact-type guard
+            raise ManagedReviewWorkflowAuthorityError(
+                "managed workflow governing-source type was substituted"
+            )
         base = bundle.review_base
         return {
             "workflow_schema_version": _WORKFLOW_SCHEMA_VERSION,
@@ -316,16 +344,12 @@ class ManagedReviewWorkflow:
             "revision_admission_sha256": admission.admission_sha256,
             "governing_source_adoption_id": adoption.adoption_id,
             "governing_source_adoption_sha256": adoption.adoption_sha256,
-            "governing_source_repository_binding_sha256": (
-                adoption.source_repository_binding_sha256
-            ),
+            "governing_source_repository_binding_sha256": repository_binding_sha256,
             "governing_reviewed_snapshot_binding_id": adoption.reviewed_snapshot_binding_id,
             "governing_reviewed_snapshot_binding_sha256": (
                 adoption.reviewed_snapshot_binding_sha256
             ),
-            "governing_temporal_decision_record_sha256": (
-                adoption.temporal_decision_record_sha256
-            ),
+            "governing_temporal_decision_record_sha256": (adoption.temporal_decision_record_sha256),
             "aggregate_id": base.review_open_head.aggregate_id,
             "review_open_revision": base.review_open_head.revision,
             "review_open_aggregate_sha256": base.review_open_head.aggregate_sha256,
@@ -347,8 +371,7 @@ class ManagedReviewWorkflow:
             view = store.get_managed_review(
                 self.request_id,
                 resolver=self._resolver,
-                verified_bootstrap=self._verified_bootstrap,
-                prechange_head=self._prechange_head,
+                authority_context=self._authority_context,
             )
         except ChangeControlBusyError as exc:
             raise ManagedReviewWorkflowAuthorityError(
@@ -758,17 +781,17 @@ class ManagedReviewWorkflow:
     ) -> bool:
         """Match immutable request lifecycle evidence; live heads remain informational."""
 
-        return (
-            state["authority_lifecycle"] == authority.lifecycle.value
-            and state["authority_decision_record_sha256"]
-            == (
-                authority.decision_record.record_sha256
-                if authority.decision_record is not None
-                else None
-            )
+        return state["authority_lifecycle"] == authority.lifecycle.value and state[
+            "authority_decision_record_sha256"
+        ] == (
+            authority.decision_record.record_sha256
+            if authority.decision_record is not None
+            else None
         )
 
-    def _status_from(self, authority: ManagedRevisionReviewStoreView, snapshot) -> ManagedReviewWorkflowStatus:
+    def _status_from(
+        self, authority: ManagedRevisionReviewStoreView, snapshot
+    ) -> ManagedReviewWorkflowStatus:
         if snapshot is None:
             phase = ManagedReviewOrchestrationPhase.NOT_STARTED
         elif snapshot.interrupts or any(task.interrupts for task in snapshot.tasks):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -14,8 +15,13 @@ from mastervault.change_control.generation_corpus import (
 )
 from mastervault.change_control.generation_resolution import (
     ManagedActivationServiceError,
+    ResolvedManagedGenerationSource,
     derive_generation_projection,
+    require_exact_generation_source,
     resolve_generation_notes,
+)
+from mastervault.change_control.generic_governing_source import (
+    ResolvedGenericGenerationSourceV2,
 )
 from mastervault.change_control.managed_generation import (
     ManagedActivationCommand,
@@ -28,9 +34,11 @@ from mastervault.change_control.managed_generation_repository import (
 )
 from mastervault.change_control.managed_review import (
     AggregateHeadBinding,
+    AuthorityRevisionBinding,
     GenerationZeroOriginBasis,
+    GenericGoverningSourceAdoptionBindingV2,
+    GoverningSourceAdoptionAuthority,
     ManagedGenerationManifestBindingV2,
-    ManagedGoverningSourceAdoptionBinding,
     WorkspaceGenerationZeroOriginBasis,
 )
 from mastervault.change_control.managed_review_repository import (
@@ -41,9 +49,17 @@ from mastervault.change_control.managed_store import (
     ManagedGenerationActivationState,
     ManagedReviewRepositoryResolver,
     ManagedRevisionStoreLifecycle,
+    OperatorRunAuthorityResolver,
     SqliteManagedChangeControlStore,
 )
+from mastervault.change_control.regression_baseline import (
+    GenerationZeroBaselineRepository,
+    VerifiedGenerationZeroBaselineCapability,
+)
 from mastervault.change_control.store import ChangeControlIdempotencyError
+from mastervault.change_control.synchronous_lifecycle_store_models import (
+    GenerationZeroBaselineStoreRecordV1,
+)
 from mastervault.providers import EmbeddingProvider
 from mastervault.sync.indexer import ExactVaultNoteInput
 
@@ -52,8 +68,8 @@ class ManagedGenerationSourceResolver(ManagedReviewRepositoryResolver, Protocol)
     """Repository capabilities needed by the generation effect service."""
 
     def resolve_reviewed_generation_source(
-        self, binding: ManagedGoverningSourceAdoptionBinding
-    ) -> ResolvedReviewedGenerationSource: ...
+        self, binding: GoverningSourceAdoptionAuthority
+    ) -> ResolvedReviewedGenerationSource | ResolvedGenericGenerationSourceV2: ...
 
     def protected_generation_roots(self) -> tuple[Path, ...]: ...
 
@@ -85,6 +101,87 @@ def _notify(hook: FailureHook | None, boundary: str) -> None:
         hook(boundary)
 
 
+def _resolve_generation_source(
+    resolver: ManagedGenerationSourceResolver,
+    binding: GoverningSourceAdoptionAuthority,
+) -> ResolvedManagedGenerationSource:
+    try:
+        source = resolver.resolve_reviewed_generation_source(binding)
+    except (TypeError, ValueError) as exc:
+        raise ManagedActivationServiceError(
+            "governing generation source cannot be freshly reopened"
+        ) from exc
+    return require_exact_generation_source(binding=binding, source=source)
+
+
+def _require_baseline_command_authority(
+    *,
+    record: GenerationZeroBaselineStoreRecordV1,
+    expected_authority: AuthorityRevisionBinding,
+    embedding_model_version: str,
+    embedding_dimensions: int,
+) -> None:
+    """Bind external baseline evidence to this exact generation-zero command."""
+
+    baseline = record.baseline_receipt
+    authority = baseline.authority
+    generation = authority.query_generation
+    origin = expected_authority.origin_basis
+    if type(origin) is not WorkspaceGenerationZeroOriginBasis:
+        raise ManagedActivationServiceError(
+            "operator-run activation requires exact workspace generation-zero authority"
+        )
+    matches_origin = (
+        authority.workspace_inventory_receipt_id == origin.inventory_receipt_id
+        and authority.workspace_inventory_receipt_sha256 == origin.inventory_receipt_sha256
+        and authority.legacy_readiness_receipt_id == origin.index_receipt_id
+        and authority.legacy_readiness_receipt_sha256 == origin.index_receipt_sha256
+    )
+    if not (
+        record.incoming_admission_receipt_id == authority.incoming_admission_receipt_id
+        and record.incoming_admission_receipt_sha256 == authority.incoming_admission_receipt_sha256
+        and authority.run_id == record.incoming_admission.intent.run_id
+        and generation.backend == "sqlite"
+        and generation.generation_id == expected_authority.active_generation.generation_id
+        and generation.generation_number
+        == expected_authority.active_generation.generation_number
+        == 0
+        and generation.active_generation_id == expected_authority.active_generation.generation_id
+        and generation.active_authority_revision == expected_authority.authority_revision == 0
+        and generation.manifest_sha256 == expected_authority.active_generation.manifest_sha256
+        and generation.embedding_model == embedding_model_version
+        and generation.embedding_dimensions == embedding_dimensions
+        and generation.index_logical_fingerprint is not None
+        and generation.index_file_sha256 is not None
+        and generation.index_file_byte_count is not None
+        and generation.storage_schema_version is not None
+        and matches_origin
+    ):
+        raise ManagedActivationServiceError(
+            "generation-zero baseline differs from exact activation authority and index identity"
+        )
+
+
+def _require_operator_generic_source(
+    binding: GoverningSourceAdoptionAuthority, *, operator_run_present: bool = True
+) -> None:
+    if type(binding) is GenericGoverningSourceAdoptionBindingV2:
+        if not operator_run_present:
+            raise ManagedActivationServiceError(
+                "generic-v2 activation requires its exact operator-run authority"
+            )
+        return
+    if operator_run_present:
+        raise ManagedActivationServiceError(
+            "operator-run activation requires exact generic-v2 governing source authority"
+        )
+
+
+def _baseline_binding_operation_id(command: ManagedActivationCommand) -> str:
+    digest = hashlib.sha256(command.activation_id.encode("utf-8")).hexdigest()
+    return f"activation-baseline:{digest}"
+
+
 def activate_reviewed_managed_generation(
     *,
     request_id: str,
@@ -99,6 +196,10 @@ def activate_reviewed_managed_generation(
     backend_kind: str = "sqlite",
     protected_paths: tuple[Path, ...] = (),
     workspace_base_notes: tuple[ExactVaultNoteInput, ...] | None = None,
+    baseline_record: GenerationZeroBaselineStoreRecordV1 | None = None,
+    baseline_capability: VerifiedGenerationZeroBaselineCapability | None = None,
+    baseline_repository: GenerationZeroBaselineRepository | None = None,
+    operator_run_resolver: OperatorRunAuthorityResolver | None = None,
     failure_hook: FailureHook | None = None,
 ) -> ManagedActivationServiceResult:
     """Publish, index, and activate one exact managed decision synchronously.
@@ -119,9 +220,7 @@ def activate_reviewed_managed_generation(
         )
     if authority_context is not None:
         if verified_bootstrap is not None or prechange_head is not None:
-            raise TypeError(
-                "authority_context cannot be mixed with legacy bootstrap arguments"
-            )
+            raise TypeError("authority_context cannot be mixed with legacy bootstrap arguments")
         context = authority_context
     else:
         if verified_bootstrap is None or prechange_head is None:
@@ -168,6 +267,68 @@ def activate_reviewed_managed_generation(
         raise ManagedActivationServiceError(
             "PR15 activation supports exactly one managed successor from generation zero"
         )
+    run_id = decision.command.request_record.command.bundle.run_binding.run_id
+    try:
+        operator_run = store.get_operator_run(run_id, resolver=operator_run_resolver)
+    except (TypeError, ValueError) as exc:
+        raise ManagedActivationServiceError(
+            "operator-run authority cannot be freshly reopened before activation"
+        ) from exc
+    _require_operator_generic_source(
+        manifest.governing_source_adoption,
+        operator_run_present=operator_run is not None,
+    )
+    baseline_required = operator_run is not None
+    if operator_run is not None:
+        if not (
+            type(baseline_record) is GenerationZeroBaselineStoreRecordV1
+            and type(baseline_capability) is VerifiedGenerationZeroBaselineCapability
+            and type(baseline_repository) is GenerationZeroBaselineRepository
+            and baseline_repository.read_only
+            and operator_run_resolver is not None
+        ):
+            raise ManagedActivationServiceError(
+                "operator-run activation requires exact SQLite and read-only baseline authority"
+            )
+        if not (
+            operator_run.record.command.run_id == run_id
+            and operator_run.record.command.aggregate_id == expected_authority.aggregate_id
+            and operator_run.record.command.base_authority_id == expected_authority.authority_id
+            and operator_run.record.command.base_authority_revision
+            == expected_authority.authority_revision
+            and operator_run.record.command.base_active_pointer_sha256
+            == expected_authority.active_pointer_sha256
+        ):
+            raise ManagedActivationServiceError(
+                "operator run differs from the activation's exact prior authority"
+            )
+        try:
+            reopened_capability = baseline_repository.reopen(run_id)
+            reopened_receipt = baseline_repository.verify_capability(reopened_capability)
+            supplied_receipt = baseline_repository.verify_capability(baseline_capability)
+            sqlite_baseline = store.get_generation_zero_baseline(
+                baseline_record.baseline_receipt.receipt_id
+            )
+        except (TypeError, ValueError) as exc:
+            raise ManagedActivationServiceError(
+                "generation-zero baseline cannot be freshly reopened before activation"
+            ) from exc
+        if not (
+            reopened_capability == baseline_capability
+            and reopened_receipt == supplied_receipt == baseline_record.baseline_receipt
+            and sqlite_baseline == baseline_record
+            and operator_run_resolver.resolve_generation_zero_baseline(baseline_record)
+            == baseline_record.baseline_receipt
+        ):
+            raise ManagedActivationServiceError(
+                "generation-zero baseline authorities do not reopen exactly"
+            )
+        _require_baseline_command_authority(
+            record=baseline_record,
+            expected_authority=expected_authority,
+            embedding_model_version=embedder.model_version,
+            embedding_dimensions=embedder.dimensions,
+        )
     try:
         verified_base_notes = verify_generation_base_inventory(
             expected_authority=expected_authority,
@@ -203,7 +364,7 @@ def activate_reviewed_managed_generation(
         raise ManagedActivationServiceError(
             "PR15 activation base is no longer the exact generation-zero authority"
         )
-    source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
+    source = _resolve_generation_source(resolver, manifest.governing_source_adoption)
     projection = derive_generation_projection(decision=decision, source=source)
 
     # The repository constructor creates its root, so every backend, decision,
@@ -235,11 +396,81 @@ def activate_reviewed_managed_generation(
         embedding_model_version=embedder.model_version,
         embedding_dimensions=embedder.dimensions,
     )
+    baseline_guard: Callable[[], None] | None
+    if baseline_required:
+        assert operator_run is not None
+        assert baseline_record is not None
+        assert baseline_capability is not None
+        assert baseline_repository is not None
+        assert operator_run_resolver is not None
+
+        def baseline_guard() -> None:
+            reopened = baseline_repository.reopen(run_id)
+            reopened_receipt = baseline_repository.verify_capability(reopened)
+            supplied_receipt = baseline_repository.verify_capability(baseline_capability)
+            resolver_receipt = operator_run_resolver.resolve_generation_zero_baseline(
+                baseline_record
+            )
+            incoming = baseline_record.incoming_admission.intent
+            reopened_incoming = operator_run_resolver.resolve_incoming_source(incoming)
+            if not (
+                reopened == baseline_capability
+                and reopened_receipt
+                == supplied_receipt
+                == resolver_receipt
+                == baseline_record.baseline_receipt
+                and reopened_incoming.bundle_id == incoming.bundle_id
+                and reopened_incoming.bundle_sha256 == incoming.bundle_sha256
+                and reopened_incoming.admission_sha256 == incoming.admission_sha256
+                and reopened_incoming.source_receipt_sha256 == incoming.source_receipt_sha256
+                and reopened_incoming.projection_sha256 == incoming.projection_sha256
+                and reopened_incoming.inference_sha256 == incoming.inference_sha256
+            ):
+                raise ManagedActivationServiceError(
+                    "generation-zero baseline or operator source authority changed"
+                )
+            _require_baseline_command_authority(
+                record=baseline_record,
+                expected_authority=command.expected_authority,
+                embedding_model_version=command.embedding_model_version,
+                embedding_dimensions=command.embedding_dimensions,
+            )
+            fresh_source = _resolve_generation_source(resolver, manifest.governing_source_adoption)
+            if derive_generation_projection(decision=decision, source=fresh_source) != (
+                command.projection
+            ):
+                raise ManagedActivationServiceError(
+                    "governing generation source changed from the activation command"
+                )
+            adoption = manifest.governing_source_adoption
+            if type(adoption) is not GenericGoverningSourceAdoptionBindingV2 or not (
+                incoming.bundle_id == adoption.incoming_bundle_id
+                and incoming.bundle_sha256 == adoption.incoming_bundle_sha256
+                and incoming.admission_sha256 == adoption.incoming_admission_sha256
+                and incoming.source_receipt_sha256 == adoption.incoming_source_receipt_sha256
+                and incoming.projection_sha256 == adoption.incoming_projection_sha256
+                and incoming.inference_sha256 == adoption.incoming_inference_sha256
+            ):
+                raise ManagedActivationServiceError(
+                    "generation-zero baseline incoming authority differs from governing source"
+                )
+
+        baseline_guard()
+    else:
+        baseline_guard = None
     store.claim_managed_activation(
         command,
         resolver=resolver,
         authority_context=context,
     )
+    if baseline_required:
+        assert baseline_record is not None
+        store.bind_activation_to_generation_zero_baseline(
+            operation_id=_baseline_binding_operation_id(command),
+            activation_id=command.activation_id,
+            run_id=run_id,
+            baseline_receipt_id=baseline_record.baseline_receipt.receipt_id,
+        )
     _notify(failure_hook, "intent-committed")
 
     state = store.get_managed_generation_activation(
@@ -286,6 +517,7 @@ def activate_reviewed_managed_generation(
         projection=projection,
         state=state,
         repository=repository,
+        base_notes=verified_base_notes or (),
     )
     if state.index_receipt is None:
         built = repository.build_index(
@@ -330,7 +562,7 @@ def activate_reviewed_managed_generation(
         raise ManagedActivationServiceError(
             "managed decision changed between effect preparation and CAS"
         )
-    fresh_source = resolver.resolve_reviewed_generation_source(manifest.governing_source_adoption)
+    fresh_source = _resolve_generation_source(resolver, manifest.governing_source_adoption)
     fresh_projection = derive_generation_projection(decision=decision, source=fresh_source)
     if fresh_projection != projection:
         raise ManagedActivationServiceError(
@@ -342,12 +574,6 @@ def activate_reviewed_managed_generation(
         authority_context=context,
     )
     assert state is not None and state.index_receipt is not None
-    fresh_notes = resolve_generation_notes(
-        source=fresh_source,
-        projection=fresh_projection,
-        state=state,
-        repository=repository,
-    )
     try:
         fresh_base_notes = verify_generation_base_inventory(
             expected_authority=expected_authority,
@@ -357,9 +583,14 @@ def activate_reviewed_managed_generation(
     except ValueError as exc:
         raise ManagedActivationServiceError(str(exc)) from exc
     if fresh_base_notes != verified_base_notes:
-        raise ManagedActivationServiceError(
-            "workspace base inventory changed before authority CAS"
-        )
+        raise ManagedActivationServiceError("workspace base inventory changed before authority CAS")
+    fresh_notes = resolve_generation_notes(
+        source=fresh_source,
+        projection=fresh_projection,
+        state=state,
+        repository=repository,
+        base_notes=fresh_base_notes or (),
+    )
     repository.verify_index(
         receipt=state.index_receipt,
         command=command,
@@ -381,8 +612,10 @@ def activate_reviewed_managed_generation(
         capability=effects_capability,
         resolver=resolver,
         authority_context=context,
+        baseline_guard=baseline_guard,
         failure_hook=failure_hook,
     )
+    _notify(failure_hook, "activation-receipt-owned")
     # Lost acknowledgement and post-commit workspace/repository drift must not
     # return a successful activation result from this bounded service call.
     RepositoryVerifiedManagedGenerationEffects.verify(

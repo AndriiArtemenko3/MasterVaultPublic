@@ -675,7 +675,9 @@ class DependencyWorkload(_StrictFrozenModel):
         return self
 
 
-def _governing_ref(classification: ClaimPairClassification) -> GoverningSupersessionRef:
+def _governing_ref(
+    classification: ClaimPairClassification,
+) -> GoverningSupersessionRef | None:
     assessment = classification.relation_assessment
     if (
         classification.disposition != PairDisposition.SUPERSEDES
@@ -685,8 +687,8 @@ def _governing_ref(classification: ClaimPairClassification) -> GoverningSuperses
         or assessment.relation_id is None
         or assessment.endpoint_ids is None
     ):
-        raise ValueError("governing result must be a graph-valid SUPERSEDES classification")
-    return GoverningSupersessionRef(
+        return None
+    result = GoverningSupersessionRef(
         pair_id=classification.candidate.pair_id,
         candidate_sha256=classification.candidate_sha256,
         classification_id=classification.classification_id,
@@ -695,6 +697,37 @@ def _governing_ref(classification: ClaimPairClassification) -> GoverningSuperses
         changed_claim_revision_id=assessment.endpoint_ids[0],
         upstream_claim_revision_id=assessment.endpoint_ids[1],
     )
+    if result.changed_claim_revision_id != classification.candidate.changed_claim_revision_id:
+        return None
+    return result
+
+
+def derive_governing_supersessions(
+    classification_results: ClassificationResultSet,
+) -> tuple[GoverningSupersessionRef, ...]:
+    """Derive the complete canonical changed-to-older governing edge set."""
+
+    results = ClassificationResultSet.model_validate(classification_results.model_dump(mode="json"))
+    governing_refs = tuple(
+        sorted(
+            (
+                governing
+                for item in results.classifications
+                for governing in (_governing_ref(item),)
+                if governing is not None
+            ),
+            key=lambda item: (
+                item.changed_claim_revision_id,
+                item.upstream_claim_revision_id,
+            ),
+        )
+    )
+    governing_keys = tuple(
+        (item.changed_claim_revision_id, item.upstream_claim_revision_id) for item in governing_refs
+    )
+    if governing_keys != tuple(sorted(set(governing_keys))):
+        raise ValueError("classification result has duplicate governing supersessions")
+    return governing_refs
 
 
 def _validate_inventory(
@@ -743,27 +776,10 @@ def generate_dependency_workload(
         snapshot, candidates=candidates, results=classification_results
     )
     revisions = {item.claim_revision_id: item for item in snapshot.aggregate.claims.revisions}
-    governing_refs: list[GoverningSupersessionRef] = []
-    for result in results.classifications:
-        try:
-            governing = _governing_ref(result)
-        except ValueError:
-            continue
-        if governing.changed_claim_revision_id != result.candidate.changed_claim_revision_id:
-            continue
-        governing_refs.append(governing)
-    governing_refs = sorted(
-        governing_refs,
-        key=lambda item: (item.changed_claim_revision_id, item.upstream_claim_revision_id),
-    )
+    governing_refs = derive_governing_supersessions(results)
     if not governing_refs:
         raise ValueError("classification result has no graph-valid changed-to-older supersession")
-    governing_keys = tuple(
-        (item.changed_claim_revision_id, item.upstream_claim_revision_id) for item in governing_refs
-    )
-    if governing_keys != tuple(sorted(set(governing_keys))):
-        raise ValueError("classification result has duplicate governing supersessions")
-    governing_supersessions = tuple(governing_refs)
+    governing_supersessions = governing_refs
     changed_document_ids = {
         revisions[item.changed_claim_revision_id].document.document_version_id
         for item in governing_supersessions
@@ -1440,6 +1456,7 @@ __all__ = [
     "SourceNoteInventory",
     "SelectedNeighbourRef",
     "VerifiedSourceNoteInventoryCapability",
+    "derive_governing_supersessions",
     "generate_dependency_workload",
     "materialize_dependencies",
     "validate_dependency_results",

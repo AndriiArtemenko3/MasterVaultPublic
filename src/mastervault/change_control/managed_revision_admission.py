@@ -7,20 +7,26 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
+from mastervault.change_control.application_no_work import (
+    NoWorkPlanningEvidenceRepository,
+    NoWorkPlanningEvidenceV1,
+)
 from mastervault.change_control.impact_analysis import (
     ImpactInferenceShard,
     build_impact_workload,
 )
-from mastervault.change_control.impact_results import ImpactOutputShard
+from mastervault.change_control.impact_results import ImpactOutputShard, ImpactResultSet
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
     RepositoryVerifiedInferenceEvidenceBatch,
 )
 from mastervault.change_control.managed_review import (
-    ManagedAnalysisSetBinding,
+    ManagedAnalysisSetAuthority,
     ManagedArtifactKind,
     ManagedArtifactRef,
     ManagedImpactOutputRefBinding,
+    ManagedNoWorkAnalysisSetBindingV4,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedRevisionPlan,
     ManagedRevisionPlanningAdmissionBinding,
     ManagedRevisionPlanningBatchMemberBinding,
@@ -191,11 +197,11 @@ def _planning_input_artifact(
 
 def _reopen_impact_evidence(
     *,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     evidence_repository: FilesystemInferenceEvidenceRepository,
 ) -> _ReopenedImpactEvidence:
-    binding = analysis_set.impact_evidence
-    if binding is None or analysis_set.schema_version != 2:
+    binding = getattr(analysis_set, "impact_evidence", None)
+    if binding is None or analysis_set.schema_version not in {2, 3}:
         raise ValueError("revision admission requires exact durable impact evidence")
     outcomes, batch = evidence_repository.resolve_verified_batch(
         batch_id=binding.batch_id,
@@ -302,7 +308,7 @@ def _reopen_impact_evidence(
 def _require_exact_reviewed_impact_lineage(
     *,
     binding: ManagedRevisionPlanningAdmissionBinding | None,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     repository_id: str,
     reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
     impact: _ReopenedImpactEvidence,
@@ -314,24 +320,22 @@ def _require_exact_reviewed_impact_lineage(
     reviewed = reviewed_snapshot.verify()
     reviewed_binding = reviewed.binding
     bootstrap = analysis_set.analysis_bootstrap
-    evidence = analysis_set.impact_evidence
-    if evidence is None or analysis_set.schema_version != 2:
+    evidence = getattr(analysis_set, "impact_evidence", None)
+    if evidence is None or analysis_set.schema_version not in {2, 3}:
         raise ValueError("revision admission requires durable Step-10 evidence")
     expected = build_impact_workload(reviewed)
     checks = {
         "reviewed repository": reviewed_binding.evidence_repository_id == repository_id,
         "impact repository": evidence.repository_id == repository_id,
         "analysis bootstrap": (
-            bootstrap
-            == reviewed.temporal_analysis.proposal.binding.analysis_bootstrap
+            bootstrap == reviewed.temporal_analysis.proposal.binding.analysis_bootstrap
         ),
         "analysis aggregate": (
             reviewed_binding.analysis_head.aggregate_id == bootstrap.aggregate_id
         ),
         "analysis revision": reviewed_binding.analysis_head.revision == bootstrap.analysis_revision,
         "analysis SHA": (
-            reviewed_binding.analysis_head.aggregate_sha256
-            == bootstrap.analysis_aggregate_sha256
+            reviewed_binding.analysis_head.aggregate_sha256 == bootstrap.analysis_aggregate_sha256
         ),
         "impact workload ID": expected.index.workload_id == evidence.workload_id,
         "impact workload SHA": expected.index.workload_sha256 == evidence.workload_sha256,
@@ -344,8 +348,7 @@ def _require_exact_reviewed_impact_lineage(
             == analysis_set.classification_result_sha256
         ),
         "attention result": (
-            expected.index.binding.attention_result_sha256
-            == analysis_set.attention_result_sha256
+            expected.index.binding.attention_result_sha256 == analysis_set.attention_result_sha256
         ),
         "mechanically relevant claims": (
             expected.index.binding.mechanically_relevant_claim_revision_ids
@@ -373,7 +376,7 @@ def _reconstruct_exact_planning_workload(
     *,
     run_id: str,
     planning_inputs: tuple[RevisionPlanningInferenceShard, ...],
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     impact: _ReopenedImpactEvidence,
     workload_id: str,
     workload_sha256: str,
@@ -440,7 +443,7 @@ def _require_target_output(
     workload_id: str,
     workload_sha256: str,
     contract_binding_id: str,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     planning_workload: RevisionPlanningWorkload,
     target_input: RevisionPlanningInferenceShard,
     predecessor_claims: tuple[VersionedClaimRevision, ...],
@@ -912,8 +915,118 @@ def bind_recorded_revision_planning_run(
     )
 
 
+def _derive_no_work_analysis_set(
+    *,
+    receipt: NoWorkPlanningEvidenceV1,
+    reviewed: ReviewedTemporalSnapshotAuthority,
+) -> ManagedNoWorkAnalysisSetBindingV4:
+    impact_workload = build_impact_workload(reviewed)
+    empty_result = ImpactResultSet.create(workload=impact_workload, decisions=())
+    eligibility = receipt.workload.eligibility
+    if (
+        impact_workload.questions
+        or impact_workload.input_shards
+        or not impact_workload.index.binding.governing_changes
+        or eligibility.workload_id != impact_workload.index.workload_id
+        or eligibility.workload_sha256 != impact_workload.index.workload_sha256
+        or eligibility.result_id != empty_result.result_id
+        or eligibility.result_sha256 != empty_result.result_sha256
+        or receipt.impact_input_shards
+        or receipt.impact_output_shards
+        or receipt.impact_evidence_binding_id is not None
+    ):
+        raise ValueError("adoption-only admission requires exact governing mechanical NO_WORK")
+    temporal = reviewed.temporal_analysis
+    bootstrap = temporal.proposal.binding.analysis_bootstrap
+    binding = impact_workload.index.binding
+    return ManagedNoWorkAnalysisSetBindingV4.create(
+        analysis_bootstrap=bootstrap,
+        candidate_result_sha256=binding.relationship_candidate_result_sha256,
+        classification_result_sha256=temporal.classification_result_index.result_sha256,
+        attention_result_sha256=binding.attention_result_sha256,
+        impact_result_sha256=empty_result.result_sha256,
+        no_work_evidence_id=receipt.evidence_id,
+        no_work_evidence_sha256=receipt.evidence_sha256,
+        global_relevant_claim_revision_ids=binding.mechanically_relevant_claim_revision_ids,
+    )
+
+
+def bind_no_work_planning_admission(
+    receipt: NoWorkPlanningEvidenceV1,
+    *,
+    reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+) -> ManagedNoWorkPlanningAdmissionBinding:
+    """Bind mechanical NO_WORK only when governing adoption still needs review."""
+
+    if type(receipt) is not NoWorkPlanningEvidenceV1:
+        raise TypeError("no-work admission requires the exact persisted evidence type")
+    reviewed = reviewed_snapshot.verify()
+    reopened = NoWorkPlanningEvidenceRepository(
+        evidence_repository.root, create=False, read_only=True
+    ).reopen(receipt.run_id, receipt.workload.workload_id, receipt.workload.workload_sha256)
+    if reopened != receipt or (
+        receipt.reviewed_snapshot_binding_id != reviewed.binding.binding_id
+        or receipt.reviewed_snapshot_binding_sha256 != reviewed.binding.binding_sha256
+    ):
+        raise ValueError("no-work evidence differs from exact reviewed authority")
+    analysis_set = _derive_no_work_analysis_set(receipt=receipt, reviewed=reviewed)
+    binding = ManagedNoWorkPlanningAdmissionBinding.create(
+        run_id=receipt.run_id,
+        repository_id=evidence_repository.repository_id,
+        workload_id=receipt.workload.workload_id,
+        workload_sha256=receipt.workload.workload_sha256,
+        analysis_set=analysis_set,
+        analysis_set_id=analysis_set.analysis_set_id,
+        analysis_set_sha256=analysis_set.analysis_set_sha256,
+        reviewed_snapshot_binding_id=reviewed.binding.binding_id,
+        reviewed_snapshot_binding_sha256=reviewed.binding.binding_sha256,
+        temporal_decision_record_sha256=reviewed.binding.temporal_decision_record_sha256,
+        no_work_evidence_id=receipt.evidence_id,
+        no_work_evidence_sha256=receipt.evidence_sha256,
+    )
+    return reopen_no_work_planning_admission(
+        binding,
+        reviewed_snapshot=reviewed,
+        evidence_repository=evidence_repository,
+    )
+
+
+def reopen_no_work_planning_admission(
+    binding: ManagedNoWorkPlanningAdmissionBinding,
+    *,
+    reviewed_snapshot: ReviewedTemporalSnapshotAuthority,
+    evidence_repository: FilesystemInferenceEvidenceRepository,
+) -> ManagedNoWorkPlanningAdmissionBinding:
+    if type(binding) is not ManagedNoWorkPlanningAdmissionBinding:
+        raise TypeError("no-work admission reopen requires its exact binding")
+    exact = ManagedNoWorkPlanningAdmissionBinding.model_validate_json(
+        canonical_json_bytes(binding.model_dump(mode="json"))
+    )
+    reviewed = reviewed_snapshot.verify()
+    if exact != binding or binding.repository_id != evidence_repository.repository_id:
+        raise ValueError("no-work admission is non-canonical or belongs to another repository")
+    receipt = NoWorkPlanningEvidenceRepository(
+        evidence_repository.root, create=False, read_only=True
+    ).reopen(binding.run_id, binding.workload_id, binding.workload_sha256)
+    analysis_set = _derive_no_work_analysis_set(receipt=receipt, reviewed=reviewed)
+    if (
+        receipt.evidence_id != binding.no_work_evidence_id
+        or receipt.evidence_sha256 != binding.no_work_evidence_sha256
+        or analysis_set != binding.analysis_set
+        or reviewed.binding.binding_id != binding.reviewed_snapshot_binding_id
+        or reviewed.binding.binding_sha256 != binding.reviewed_snapshot_binding_sha256
+        or reviewed.binding.temporal_decision_record_sha256
+        != binding.temporal_decision_record_sha256
+    ):
+        raise ValueError("no-work admission differs from freshly reopened authority")
+    return binding
+
+
 __all__ = [
+    "bind_no_work_planning_admission",
     "bind_recorded_revision_planning_run",
     "reopen_revision_planning_admission",
+    "reopen_no_work_planning_admission",
     "revision_planning_staging_completion",
 ]

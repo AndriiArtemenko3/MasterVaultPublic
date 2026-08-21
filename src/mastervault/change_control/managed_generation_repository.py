@@ -72,6 +72,50 @@ class ManagedGenerationIndexError(ManagedGenerationRepositoryError):
     """A generation index is incomplete, corrupt, or does not match authority."""
 
 
+def _protected_candidate(path: Path) -> tuple[Path, bool]:
+    """Normalize an existing protected path or exactly one absent leaf."""
+
+    requested = Path(path)
+    try:
+        if os.path.lexists(requested):
+            return requested.resolve(strict=True), True
+        if not requested.name or requested.name in {".", ".."} or ".." in requested.parts:
+            raise RepositoryFileBoundaryError("protected path leaf is unsafe")
+        parent = requested.parent
+        resolved_parent = parent.resolve(strict=True)
+        if parent.absolute() != resolved_parent:
+            raise RepositoryFileBoundaryError(
+                "absent protected path parent contains a symlink or substitution"
+            )
+        parent_info = resolved_parent.stat()
+        parent_identity = (parent_info.st_dev, parent_info.st_ino, parent_info.st_mode)
+        if not stat.S_ISDIR(parent_info.st_mode):
+            raise RepositoryFileIntegrityError("absent protected path parent is not a directory")
+        names = os.listdir(resolved_parent)
+        if requested.name in names or any(
+            name.casefold() == requested.name.casefold() for name in names
+        ):
+            raise RepositoryFileBoundaryError(
+                "absent protected path leaf has an unexpected filesystem alias"
+            )
+        if os.path.lexists(resolved_parent / requested.name):
+            raise RepositoryFileIntegrityError(
+                "absent protected path leaf changed during preflight"
+            )
+        final_parent_info = resolved_parent.stat()
+        if (
+            final_parent_info.st_dev,
+            final_parent_info.st_ino,
+            final_parent_info.st_mode,
+        ) != parent_identity:
+            raise RepositoryFileIntegrityError(
+                "absent protected path parent changed during preflight"
+            )
+        return resolved_parent / requested.name, False
+    except (OSError, RepositoryFileBoundaryError, RepositoryFileIntegrityError):
+        raise
+
+
 @dataclass(frozen=True)
 class ResolvedGenerationSourceNote:
     entry: GenerationSourceNoteEntry
@@ -661,7 +705,7 @@ class ManagedGenerationRepository:
             raise ValueError("a read-only generation repository cannot create its root")
         requested = Path(root)
         try:
-            forbidden = tuple(item.resolve(strict=True) for item in forbidden_roots)
+            forbidden = tuple(_protected_candidate(item) for item in forbidden_roots)
             parent = requested.parent.resolve(strict=True)
             existing_candidate = (
                 (parent / requested.name).resolve(strict=True)
@@ -690,17 +734,22 @@ class ManagedGenerationRepository:
                 existing_candidate.stat().st_ino,
             )
         )
-        overlaps_forbidden = any(
-            candidate == item
-            or candidate.is_relative_to(item)
-            or item.is_relative_to(candidate)
-            or (item.stat().st_dev, item.stat().st_ino) in candidate_ancestors
-            or (
-                existing_candidate_identity is not None
-                and existing_candidate_identity in inode_chain(item)
-            )
-            for item in forbidden
-        )
+        overlaps_forbidden = False
+        for item, item_exists in forbidden:
+            item_chain = inode_chain(item if item_exists else item.parent)
+            item_identity = (item.stat().st_dev, item.stat().st_ino) if item_exists else None
+            if (
+                candidate == item
+                or candidate.is_relative_to(item)
+                or item.is_relative_to(candidate)
+                or (item_identity is not None and item_identity in candidate_ancestors)
+                or (
+                    existing_candidate_identity is not None
+                    and existing_candidate_identity in item_chain
+                )
+            ):
+                overlaps_forbidden = True
+                break
         if overlaps_forbidden:
             raise ManagedGenerationRepositoryError(
                 "generation repository must be disjoint from every protected root"

@@ -90,6 +90,8 @@ jobs:
             pytest_args: tests/unit/change_control/test_managed_review_service.py
           - id: managed-workflow
             pytest_args: tests/unit/change_control/test_managed_workflow.py
+          - id: change-lifecycle
+            pytest_args: tests/unit/change_control/test_application*.py
           - id: remainder
             pytest_args: >-
               tests/unit
@@ -97,6 +99,7 @@ jobs:
               --ignore=tests/unit/change_control/test_managed_revision_admission.py
               --ignore=tests/unit/change_control/test_managed_review_service.py
               --ignore=tests/unit/change_control/test_managed_workflow.py
+              --ignore-glob=tests/unit/change_control/test_application*.py
     steps:
       - uses: actions/checkout@v4
 
@@ -217,12 +220,12 @@ jobs:
           test "${UNIT_RESULT}" = "success"
           test "${INTEGRATION_RESULT}" = "success"
 
-      - name: Require all nine evidence shards
+      - name: Require all ten evidence shards
         run: |
           coverage_count="$(find sqlite-evidence -maxdepth 1 -type f -name '.coverage.*' | wc -l)"
           junit_count="$(find sqlite-evidence -maxdepth 1 -type f -name 'junit-*.xml' | wc -l)"
-          test "${coverage_count}" -eq 9
-          test "${junit_count}" -eq 9
+          test "${coverage_count}" -eq 10
+          test "${junit_count}" -eq 10
 
       - name: Combine coverage
         run: uv run coverage combine sqlite-evidence

@@ -9,6 +9,7 @@ an aggregate revision is never authorized by absent or unverified evidence.
 
 from __future__ import annotations
 
+from mastervault.change_control.generic_analysis import GenericSourceNoteInventoryResolverV2
 from mastervault.change_control.inference_repository import (
     FilesystemInferenceEvidenceRepository,
     RepositoryVerifiedInferenceEvidenceBatch,
@@ -54,7 +55,9 @@ def commit_temporal_proposal(
     evidence_repository: FilesystemInferenceEvidenceRepository,
     classification_batch: RepositoryVerifiedInferenceEvidenceBatch,
     dependency_batch: RepositoryVerifiedInferenceEvidenceBatch,
-    source_note_resolver: RepositorySourceNoteInventoryResolver,
+    source_note_resolver: (
+        RepositorySourceNoteInventoryResolver | GenericSourceNoteInventoryResolverV2
+    ),
 ) -> TemporalProposalCommit:
     """Commit one exactly reproduced proposal after durable evidence verification.
 
@@ -62,7 +65,9 @@ def commit_temporal_proposal(
     cannot choose a second idempotency identity for the same analysis evidence.
     """
 
-    if type(store) is not SqliteChangeControlStore:
+    from mastervault.change_control.managed_store import SqliteManagedChangeControlStore
+
+    if type(store) not in {SqliteChangeControlStore, SqliteManagedChangeControlStore}:
         raise TemporalProposalAuthorityError(
             "temporal proposal authority requires the SQLite aggregate store"
         )
@@ -70,7 +75,10 @@ def commit_temporal_proposal(
         raise TemporalProposalAuthorityError(
             "temporal proposal authority requires the filesystem evidence repository"
         )
-    if type(source_note_resolver) is not RepositorySourceNoteInventoryResolver:
+    if type(source_note_resolver) not in {
+        RepositorySourceNoteInventoryResolver,
+        GenericSourceNoteInventoryResolverV2,
+    }:
         raise TemporalProposalAuthorityError(
             "SourceNote inventory resolver is not repository backed"
         )

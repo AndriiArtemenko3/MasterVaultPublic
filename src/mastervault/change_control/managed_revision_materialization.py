@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from mastervault.change_control.managed_review import (
     ClaimReconciliationAction,
     ClaimReconciliationBinding,
     ClaimReconciliationEntry,
+    GenericManagedAnalysisSetBindingV3,
     GroundedArtifactCitation,
+    ManagedAnalysisSetAuthority,
     ManagedAnalysisSetBinding,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -130,7 +132,7 @@ def _grounded_citation(
 def _analysis(
     *,
     shard: RevisionPlanningInferenceShard,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     envelope: InferenceInputEnvelope,
 ) -> TargetAnalysisBinding:
     staged = next(
@@ -173,13 +175,22 @@ def materialize_revision_planning_response(
     workload: RevisionPlanningWorkload,
     shard: RevisionPlanningInferenceShard,
     response: RevisionPlanningWireResponse,
-    analysis_set: ManagedAnalysisSetBinding,
+    analysis_set: ManagedAnalysisSetAuthority,
     predecessor_claims: tuple[VersionedClaimRevision, ...],
     envelope: InferenceInputEnvelope,
     inference_artifacts: tuple[InferenceArtifactPayload, ...],
 ) -> MaterializedRevisionTarget:
     """Derive every path/hash/projection locally from one validated C0 response."""
 
+    if type(analysis_set) not in (
+        ManagedAnalysisSetBinding,
+        GenericManagedAnalysisSetBindingV3,
+    ):
+        raise ValueError("revision materialization requires non-empty impact authority")
+    analysis_set = cast(
+        ManagedAnalysisSetBinding | GenericManagedAnalysisSetBindingV3,
+        analysis_set,
+    )
     impact_evidence = analysis_set.impact_evidence
     if (
         analysis_set.analysis_set_id != shard.analysis_set_id
@@ -242,12 +253,8 @@ def materialize_revision_planning_response(
         for item in ordered_predecessor_claims
     ):
         raise ValueError("predecessor claims differ from exact Markdown SourceNote authority")
-    predecessor_by_key = {
-        item.source.source_claim_id: item for item in ordered_predecessor_claims
-    }
-    if set(predecessor_by_key) != {
-        item.source_claim_id for item in shard.existing_claims
-    }:
+    predecessor_by_key = {item.source.source_claim_id: item for item in ordered_predecessor_claims}
+    if set(predecessor_by_key) != {item.source_claim_id for item in shard.existing_claims}:
         raise ValueError("predecessor claims differ from the recorded planning input")
     for recorded in shard.existing_claims:
         actual = predecessor_by_key[recorded.source_claim_id]
@@ -316,10 +323,7 @@ def materialize_revision_planning_response(
     raw_sha = hashlib.sha256(successor_raw_bytes).hexdigest()
     proposed_raw = _artifact(
         ManagedArtifactKind.RAW_SOURCE,
-        (
-            f"staging/managed-review/{shard.run_id}/{shard.target.target_key}/"
-            f"raw-{raw_sha}.md"
-        ),
+        (f"staging/managed-review/{shard.run_id}/{shard.target.target_key}/raw-{raw_sha}.md"),
         successor_raw_bytes,
     )
     raw_destination = PublicationDestination.create(
@@ -342,10 +346,7 @@ def materialize_revision_planning_response(
     note_sha = hashlib.sha256(rendered.note_bytes).hexdigest()
     proposed_note = _artifact(
         ManagedArtifactKind.SOURCE_NOTE,
-        (
-            f"staging/managed-review/{shard.run_id}/{shard.target.target_key}/"
-            f"note-{note_sha}.md"
-        ),
+        (f"staging/managed-review/{shard.run_id}/{shard.target.target_key}/note-{note_sha}.md"),
         rendered.note_bytes,
     )
     note_destination = PublicationDestination.create(

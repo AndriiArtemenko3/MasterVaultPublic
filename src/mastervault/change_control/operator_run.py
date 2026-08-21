@@ -7,7 +7,10 @@ payload authoritative and callers must verify every referenced receipt again.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import json
 import re
 from enum import StrEnum
 from typing import Any, Literal, Self
@@ -66,8 +69,21 @@ class OperatorRunLinkKind(StrEnum):
     MANAGED_REVIEW_REQUEST = "managed-review-request"
     MANAGED_REVIEW_DECISION = "managed-review-decision"
     ACTIVATION_OPERATION = "activation-operation"
+    REGRESSION_SUITE = "regression-suite"
+    GENERATION_ZERO_BASELINE = "generation-zero-baseline"
+    MECHANICAL_NO_CHANGE = "mechanical-no-change"
     REGRESSION = "regression"
     REPORT = "report"
+
+
+class OperatorRunPhase(StrEnum):
+    BOOTSTRAPPED = "bootstrapped"
+    AWAITING_TEMPORAL_REVIEW = "awaiting-temporal-review"
+    AWAITING_MANAGED_REVIEW = "awaiting-managed-review"
+    READY_TO_ACTIVATE = "ready-to-activate"
+    ACTIVATED = "activated"
+    REJECTED_NO_OP = "rejected-no-op"
+    COMPLETED_NO_OP = "completed-no-op"
 
 
 class OperatorRunCommand(_StrictFrozenModel):
@@ -228,11 +244,58 @@ class OperatorRunView(_StrictFrozenModel):
         return self
 
 
+class OperatorRunListItem(_StrictFrozenModel):
+    run: OperatorRunView
+    phase: OperatorRunPhase
+
+
+class OperatorRunPage(_StrictFrozenModel):
+    items: tuple[OperatorRunListItem, ...]
+    next_cursor: str | None = None
+
+
+def encode_operator_run_cursor(created_at: str, run_id: str) -> str:
+    payload = canonical_json_bytes(
+        {"schema_version": 1, "created_at": _canonical_utc(created_at), "run_id": run_id}
+    )
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def decode_operator_run_cursor(value: str) -> tuple[str, str]:
+    if not value or len(value) > 2048 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise ValueError("operator run cursor is invalid")
+    try:
+        padding = "=" * (-len(value) % 4)
+        payload = base64.urlsafe_b64decode(value + padding)
+        raw = json.loads(payload)
+    except (binascii.Error, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("operator run cursor is invalid") from exc
+    if not isinstance(raw, dict) or set(raw) != {"schema_version", "created_at", "run_id"}:
+        raise ValueError("operator run cursor has an invalid shape")
+    if (
+        raw["schema_version"] != 1
+        or not isinstance(raw["created_at"], str)
+        or not isinstance(raw["run_id"], str)
+    ):
+        raise ValueError("operator run cursor has invalid values")
+    created_at = _canonical_utc(raw["created_at"])
+    if re.fullmatch(r"operatorrun:[0-9a-f]{64}", raw["run_id"]) is None:
+        raise ValueError("operator run cursor has an invalid run ID")
+    if encode_operator_run_cursor(created_at, raw["run_id"]) != value:
+        raise ValueError("operator run cursor is not canonical")
+    return created_at, raw["run_id"]
+
+
 __all__ = [
     "OperatorRunCommand",
+    "OperatorRunListItem",
     "OperatorRunLinkCommand",
     "OperatorRunLinkKind",
     "OperatorRunLinkRecord",
+    "OperatorRunPage",
+    "OperatorRunPhase",
     "OperatorRunRecord",
     "OperatorRunView",
+    "decode_operator_run_cursor",
+    "encode_operator_run_cursor",
 ]

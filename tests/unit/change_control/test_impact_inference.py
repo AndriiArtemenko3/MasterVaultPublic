@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from test_impact_analysis import _AuthorityVariants
 from test_recorded_inference import (
     ALGORITHM,
@@ -35,16 +36,24 @@ from mastervault.change_control.impact_results import (
     ImpactDisposition,
     ImpactResultSet,
 )
-from mastervault.change_control.inference_repository import FilesystemInferenceEvidenceRepository
+from mastervault.change_control.inference_repository import (
+    FilesystemInferenceEvidenceRepository,
+    InferenceEvidenceResolutionError,
+)
 from mastervault.change_control.managed_impact_evidence import (
     bind_recorded_impact_inference_run,
 )
-from mastervault.change_control.managed_review import InferenceExecutionMode
+from mastervault.change_control.managed_review import (
+    InferenceExecutionMode,
+    ManagedArtifactKind,
+    ManagedArtifactRef,
+)
 from mastervault.change_control.models import canonical_json_bytes
 from mastervault.change_control.recorded_inference import (
     InferenceExecutionFailed,
     RecordedInferenceOutcome,
     RecordedInferenceTask,
+    ReplayRebaseAttestationV1,
     run_impact_inference,
 )
 from mastervault.change_control.reviewed_snapshot import ReviewedTemporalSnapshotAuthority
@@ -133,9 +142,7 @@ def _workload_with_replacement_shard(
     values = {
         "binding": workload.index.binding.model_dump(mode="json"),
         "question_refs": [item.model_dump(mode="json") for item in refs],
-        "exclusion_refs": [
-            item.model_dump(mode="json") for item in workload.index.exclusion_refs
-        ],
+        "exclusion_refs": [item.model_dump(mode="json") for item in workload.index.exclusion_refs],
     }
     digest = hashlib.sha256(
         canonical_json_bytes(
@@ -425,6 +432,37 @@ def test_impact_replay_is_provider_free_and_rehydrates_local_authority(
     assert replay.impact_output == live.impact_output
     assert replay.execution.attempts == ()
     assert replay.execution.receipt.mode == InferenceExecutionMode.REPLAY
+    proof = replay.execution.replay_rebase_attestation
+    assert proof is not None
+    assert {item.kind for item in proof.mappings} == {
+        "workload",
+        "input-shard",
+        "validated-output",
+        "input-envelope",
+    }
+    artifact_ids = {item.artifact.artifact_id for item in replay.artifacts}
+    assert proof.source_raw_output_artifact.artifact_id in artifact_ids
+    assert proof.source_validated_output_artifact.artifact_id in artifact_ids
+    assert proof.current_validated_output_artifact.artifact_id in artifact_ids
+    for index, mapping in enumerate(proof.mappings):
+        for field in (
+            "kind",
+            "source_id",
+            "source_sha256",
+            "current_id",
+            "current_sha256",
+        ):
+            values = proof.model_dump(mode="json")
+            replacement = (
+                "analysis-set"
+                if field == "kind"
+                else "f" * 64
+                if field.endswith("sha256")
+                else f"{mapping.source_id}x"
+            )
+            values["mappings"][index][field] = replacement
+            with pytest.raises(ValidationError):
+                ReplayRebaseAttestationV1.model_validate_json(canonical_json_bytes(values))
 
 
 def test_impact_replay_rejects_cross_task_live_evidence(
@@ -654,3 +692,15 @@ def test_replay_workload_requires_exact_source_coverage_and_commits_new_batch(
         outcome.execution.receipt.mode == InferenceExecutionMode.REPLAY
         for outcome in replay.outcomes
     )
+    proof = replay.outcomes[0].execution.replay_rebase_attestation
+    proof_ref = replay.outcomes[0].execution.replay_rebase_attestation_artifact
+    assert proof is not None and proof_ref is not None
+    assert repository.open_artifact(proof_ref) == proof.canonical_bytes()
+    wrong_locator = ManagedArtifactRef.create(
+        kind=ManagedArtifactKind.INFERENCE_INPUT,
+        path="inference/rebase-attestations/not-the-content-sha.json",
+        sha256=proof_ref.sha256,
+        byte_count=proof_ref.byte_count,
+    )
+    with pytest.raises(InferenceEvidenceResolutionError, match="non-evidence"):
+        repository.open_artifact(wrong_locator)

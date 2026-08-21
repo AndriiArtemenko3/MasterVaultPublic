@@ -67,6 +67,7 @@ from mastervault.change_control.dependency_analysis import (
     SelectedNeighbourRef,
     SourceNoteInventory,
     VerifiedSourceNoteInventoryCapability,
+    derive_governing_supersessions,
     generate_dependency_workload,
     materialize_dependencies,
     validate_dependency_results,
@@ -208,6 +209,102 @@ if TYPE_CHECKING:
     )
     from mastervault.change_control.bootstrap import (
         verify_generation_zero_authority as verify_generation_zero_authority,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ActivateChangeRequestV1 as ActivateChangeRequestV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        AuthoritySummaryV1 as AuthoritySummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeActivationEvidenceSummaryV1 as ChangeActivationEvidenceSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeActivationResultV1 as ChangeActivationResultV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeEvidenceCompletenessV1 as ChangeEvidenceCompletenessV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeExecutionModeV1 as ChangeExecutionModeV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewCitationV1 as ChangeReviewCitationV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewEvidenceSummaryV1 as ChangeReviewEvidenceSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewPacketV1 as ChangeReviewPacketV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewStageV1 as ChangeReviewStageV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewSubjectKindV1 as ChangeReviewSubjectKindV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeReviewSubjectV1 as ChangeReviewSubjectV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunNextActionV1 as ChangeRunNextActionV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunOutcomeV1 as ChangeRunOutcomeV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunPageV1 as ChangeRunPageV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunPhaseV1 as ChangeRunPhaseV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunStatusV1 as ChangeRunStatusV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeRunSummaryV1 as ChangeRunSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ChangeVerificationResultV1 as ChangeVerificationResultV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        GenerationZeroBaselineSummaryV1 as GenerationZeroBaselineSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        IncomingEvidenceSummaryV1 as IncomingEvidenceSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ManagedAdoptionChoiceV1 as ManagedAdoptionChoiceV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ManagedReviewChoiceV1 as ManagedReviewChoiceV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ManagedReviewDecisionDocumentV1 as ManagedReviewDecisionDocumentV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ManagedReviewDecisionItemV1 as ManagedReviewDecisionItemV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        RegressionSuiteEvidenceSummaryV1 as RegressionSuiteEvidenceSummaryV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        ReviewDecisionDocumentV1 as ReviewDecisionDocumentV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        StartChangeRequestV1 as StartChangeRequestV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        TemporalReviewChoiceV1 as TemporalReviewChoiceV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        TemporalReviewDecisionDocumentV1 as TemporalReviewDecisionDocumentV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        TemporalReviewDecisionItemV1 as TemporalReviewDecisionItemV1,
+    )
+    from mastervault.change_control.change_application_contracts import (
+        parse_review_decision_document_v1 as parse_review_decision_document_v1,
     )
     from mastervault.change_control.impact_analysis import (
         MAX_IMPACT_DOCUMENT_SHARDS_V1,
@@ -483,10 +580,15 @@ if TYPE_CHECKING:
         RecordedInferenceProvider,
         RecordedInferenceTask,
         ReplayEvidenceResolver,
+        ReplayRebaseAttestationV1,
+        ReplayRebaseAuthorityMappingV1,
+        replay_rebase_semantic_sha256,
+        resolve_replay_source_input,
         run_classification_inference,
         run_dependency_inference,
         run_impact_inference,
         run_revision_planning_inference,
+        verify_replay_rebase_attestation,
     )
     from mastervault.change_control.reviewed_snapshot import (
         RepositoryVerifiedReviewedSourceNoteInventoryCapability,
@@ -632,6 +734,43 @@ if TYPE_CHECKING:
     )
 
 _LAZY_EXPORTS = {
+    **{
+        name: ("mastervault.change_control.change_application_contracts", name)
+        for name in (
+            "ActivateChangeRequestV1",
+            "AuthoritySummaryV1",
+            "ChangeActivationEvidenceSummaryV1",
+            "ChangeActivationResultV1",
+            "ChangeEvidenceCompletenessV1",
+            "ChangeExecutionModeV1",
+            "ChangeReviewCitationV1",
+            "ChangeReviewEvidenceSummaryV1",
+            "ChangeReviewPacketV1",
+            "ChangeReviewStageV1",
+            "ChangeReviewSubjectKindV1",
+            "ChangeReviewSubjectV1",
+            "ChangeRunNextActionV1",
+            "ChangeRunOutcomeV1",
+            "ChangeRunPageV1",
+            "ChangeRunPhaseV1",
+            "ChangeRunStatusV1",
+            "ChangeRunSummaryV1",
+            "ChangeVerificationResultV1",
+            "GenerationZeroBaselineSummaryV1",
+            "IncomingEvidenceSummaryV1",
+            "ManagedAdoptionChoiceV1",
+            "ManagedReviewChoiceV1",
+            "ManagedReviewDecisionDocumentV1",
+            "ManagedReviewDecisionItemV1",
+            "RegressionSuiteEvidenceSummaryV1",
+            "ReviewDecisionDocumentV1",
+            "StartChangeRequestV1",
+            "TemporalReviewChoiceV1",
+            "TemporalReviewDecisionDocumentV1",
+            "TemporalReviewDecisionItemV1",
+            "parse_review_decision_document_v1",
+        )
+    },
     **{
         name: ("mastervault.change_control.application", name)
         for name in (
@@ -846,10 +985,15 @@ _LAZY_EXPORTS = {
             "RecordedInferenceProvider",
             "RecordedInferenceTask",
             "ReplayEvidenceResolver",
+            "ReplayRebaseAttestationV1",
+            "ReplayRebaseAuthorityMappingV1",
+            "replay_rebase_semantic_sha256",
+            "resolve_replay_source_input",
             "run_classification_inference",
             "run_dependency_inference",
             "run_impact_inference",
             "run_revision_planning_inference",
+            "verify_replay_rebase_attestation",
         )
     },
     **{
@@ -1035,6 +1179,8 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "ActivateChangeRequestV1",
+    "AuthoritySummaryV1",
     "BootstrapSourceRoot",
     "BootstrapResult",
     "ChangeControlApplication",
@@ -1045,11 +1191,41 @@ __all__ = [
     "ChangeControlApplicationReviewRequiredError",
     "ChangeControlApplicationUnsupportedOperationError",
     "ChangeControlApplicationUsageError",
+    "ChangeActivationEvidenceSummaryV1",
+    "ChangeActivationResultV1",
+    "ChangeEvidenceCompletenessV1",
+    "ChangeExecutionModeV1",
+    "ChangeReviewCitationV1",
+    "ChangeReviewEvidenceSummaryV1",
+    "ChangeReviewPacketV1",
+    "ChangeReviewStageV1",
+    "ChangeReviewSubjectKindV1",
+    "ChangeReviewSubjectV1",
+    "ChangeRunNextActionV1",
+    "ChangeRunOutcomeV1",
+    "ChangeRunPageV1",
+    "ChangeRunPhaseV1",
+    "ChangeRunStatusV1",
+    "ChangeRunSummaryV1",
+    "ChangeVerificationResultV1",
+    "GenerationZeroBaselineSummaryV1",
+    "IncomingEvidenceSummaryV1",
+    "ManagedAdoptionChoiceV1",
+    "ManagedReviewChoiceV1",
+    "ManagedReviewDecisionDocumentV1",
+    "ManagedReviewDecisionItemV1",
     "QueryGenerationKind",
     "QueryGenerationMetadataV1",
     "QueryGenerationSelectionV1",
     "QueryGenerationSelector",
     "ResolvedQueryGeneration",
+    "RegressionSuiteEvidenceSummaryV1",
+    "ReviewDecisionDocumentV1",
+    "StartChangeRequestV1",
+    "TemporalReviewChoiceV1",
+    "TemporalReviewDecisionDocumentV1",
+    "TemporalReviewDecisionItemV1",
+    "parse_review_decision_document_v1",
     "ANALYSIS_AGGREGATE_ID",
     "CLAIM_SCOPE_POLICY_VERSION",
     "MAX_CLASSIFICATION_LEDGER_ENTRY_BYTES_V1",
@@ -1308,6 +1484,7 @@ __all__ = [
     "SelectedNeighbourRef",
     "SourceNoteInventory",
     "VerifiedSourceNoteInventoryCapability",
+    "derive_governing_supersessions",
     "generate_dependency_workload",
     "build_impact_workload",
     "decide_managed_revision_review",
@@ -1349,14 +1526,19 @@ __all__ = [
     "RecordedInferenceProvider",
     "RecordedInferenceTask",
     "ReplayEvidenceResolver",
+    "ReplayRebaseAttestationV1",
+    "ReplayRebaseAuthorityMappingV1",
     "RepositoryVerifiedReviewedSourceNoteInventoryCapability",
     "ReviewedTemporalSnapshotAuthority",
     "ReviewedTemporalSnapshotAuthorityError",
     "ReviewedTemporalSnapshotBinding",
+    "replay_rebase_semantic_sha256",
+    "resolve_replay_source_input",
     "run_classification_inference",
     "run_dependency_inference",
     "run_impact_inference",
     "run_revision_planning_inference",
+    "verify_replay_rebase_attestation",
     "RecordedRevisionPlanningInferenceRun",
     "RevisionPlanningPredecessorSnapshot",
     "RevisionPlanningReplaySourceBinding",

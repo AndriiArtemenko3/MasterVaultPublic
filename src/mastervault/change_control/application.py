@@ -13,12 +13,19 @@ import os
 import re
 import stat
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn, Protocol, cast
 
+from mastervault.change_control.application_activation_verifier import (
+    ReadOnlyActivatedEvidenceVerifier,
+)
+from mastervault.change_control.application_authority_resolver import (
+    ApplicationOperatorRunAuthorityResolver,
+)
 from mastervault.change_control.application_errors import (
     ChangeControlApplicationConflictError,
     ChangeControlApplicationError,
@@ -27,6 +34,46 @@ from mastervault.change_control.application_errors import (
     ChangeControlApplicationUsageError,
     raise_mapped_application_error,
 )
+from mastervault.change_control.application_read_models import (
+    ApplicationReadModelError,
+    ApplicationReadModels,
+    ApplicationReviewUnavailableError,
+    ApplicationRunNotFoundError,
+)
+from mastervault.change_control.application_replay import (
+    ChangeReplayBundleUsageError,
+    read_change_replay_bundle_v1,
+)
+from mastervault.change_control.application_runtime_identity import (
+    application_configuration_sha256,
+)
+from mastervault.change_control.application_source_note_resolver import (
+    GenericApplicationSourceNoteResolverLoader,
+)
+from mastervault.change_control.application_start_command import (
+    ApplicationStartCommandRepository,
+    ApplicationStartCommandV1,
+)
+from mastervault.change_control.application_start_lifecycle import (
+    StartLifecycleCompletedNoOpV1,
+    StartLifecycleTemporalReviewV1,
+    resume_completed_temporal_publication,
+    run_start_change_lifecycle,
+)
+from mastervault.change_control.change_application_contracts import (
+    ActivateChangeRequestV1,
+    ChangeActivationResultV1,
+    ChangeReviewPacketV1,
+    ChangeRunPageV1,
+    ChangeRunPhaseV1,
+    ChangeRunStatusV1,
+    ChangeVerificationResultV1,
+    ManagedReviewDecisionDocumentV1,
+    ReviewDecisionDocumentV1,
+    StartChangeRequestV1,
+    TemporalReviewDecisionDocumentV1,
+)
+from mastervault.change_control.generic_incoming import admit_generic_incoming_markdown_v2
 from mastervault.change_control.legacy_index import (
     LegacyIndexAttestation,
     LegacyIndexIntegrityError,
@@ -51,6 +98,7 @@ from mastervault.change_control.operator_run import (
     OperatorRunLinkCommand,
     OperatorRunLinkKind,
     OperatorRunView,
+    decode_operator_run_cursor,
 )
 from mastervault.change_control.query_generation import (
     QueryGenerationKind,
@@ -59,7 +107,15 @@ from mastervault.change_control.query_generation import (
     QueryGenerationSelector,
     ResolvedQueryGeneration,
 )
+from mastervault.change_control.regression_baseline import (
+    regression_configured_embedding_identity,
+)
+from mastervault.change_control.regression_suite import load_regression_suite
 from mastervault.change_control.store import ChangeControlBusyError, ChangeControlSnapshot
+from mastervault.change_control.synchronous_lifecycle_store_models import (
+    SynchronousApplicationOperationV1,
+    SynchronousRunLockAuthorityV1,
+)
 from mastervault.change_control.workspace_bootstrap import (
     LegacyIndexReadinessReceipt,
     WorkspaceBootstrapAggregateSnapshot,
@@ -83,7 +139,6 @@ from mastervault.evidence import EvidenceLocation
 from mastervault.providers import get_embedding_provider
 from mastervault.storage import get_backend
 from mastervault.storage.base import SCHEMA_VERSION
-from mastervault.sync.indexer import ExactVaultNoteInput
 
 FailureHook = Callable[[str], None]
 
@@ -91,7 +146,13 @@ FailureHook = Callable[[str], None]
 class _Closable(Protocol):
     def close(self) -> None: ...
 
+
+class _VerifiableClosable(_Closable, Protocol):
+    def verify(self) -> None: ...
+
+
 _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
+_INTERNAL_RUN_LOCK_OPERATION_PREFIX = "application-run-lock:"
 _RUN_ID_RE = re.compile(r"^operatorrun:[0-9a-f]{64}$")
 _DERIVATION_NAMESPACE = "mastervault.change-control-application.bootstrap.v1"
 
@@ -208,11 +269,11 @@ def _existing_identity(path: Path) -> tuple[int, int] | None:
         return None
     except OSError as exc:
         raise ChangeControlApplicationIntegrityError(
-            f"configured path cannot be inspected: {path}"
+            "configured authority path cannot be inspected"
         ) from exc
     if stat.S_ISLNK(info.st_mode):
         raise ChangeControlApplicationIntegrityError(
-            f"configured path cannot be a symbolic link: {path}"
+            "configured authority path cannot be a symbolic link"
         )
     return info.st_dev, info.st_ino
 
@@ -321,13 +382,13 @@ def _preflight_paths(settings: Settings) -> _ApplicationPaths:
 
     inode_paths = (vault, legacy_index, state_db, checkpoint_db, generation_root)
     identities = tuple((path, _existing_identity(path)) for path in inode_paths)
-    for index, (left, left_identity) in enumerate(identities):
+    for index, (_left, left_identity) in enumerate(identities):
         if left_identity is None:
             continue
-        for right, right_identity in identities[index + 1 :]:
+        for _right, right_identity in identities[index + 1 :]:
             if right_identity is not None and left_identity == right_identity:
                 raise ChangeControlApplicationIntegrityError(
-                    f"configured paths alias the same filesystem object: {left} and {right}"
+                    "configured authority paths must identify distinct filesystem objects"
                 )
 
     return _ApplicationPaths(
@@ -366,6 +427,10 @@ def _manifest_path(paths: _ApplicationPaths, manifest_path: Path) -> Path:
 def _validate_operation_id(operation_id: str) -> None:
     if not isinstance(operation_id, str) or _OPERATION_ID_RE.fullmatch(operation_id) is None:
         raise ChangeControlApplicationUsageError("operation_id is not canonical")
+    if operation_id.startswith(_INTERNAL_RUN_LOCK_OPERATION_PREFIX):
+        raise ChangeControlApplicationUsageError(
+            "operation_id uses the reserved application run-lock namespace"
+        )
 
 
 def _validate_run_id(run_id: str) -> None:
@@ -466,9 +531,7 @@ def _query_metadata(
         selection=selection,
         backend="sqlite",
         generation_kind=(
-            QueryGenerationKind.GENERATION_ZERO
-            if number == 0
-            else QueryGenerationKind.MANAGED
+            QueryGenerationKind.GENERATION_ZERO if number == 0 else QueryGenerationKind.MANAGED
         ),
         generation_id=selected.active_generation.generation_id,
         generation_number=number,
@@ -501,6 +564,14 @@ def _guard_query_verification(callback: Callable[[], None]) -> Callable[[], None
     return verified
 
 
+def _verify_managed_query_resources(
+    bootstrap: _VerifiableClosable,
+    serving: ManagedServingResolution,
+) -> None:
+    bootstrap.verify()
+    serving.verify()
+
+
 def _fresh_active_query_authority(
     *,
     state_path: Path,
@@ -528,6 +599,143 @@ class ChangeControlApplication:
 
     def __init__(self, settings: Settings):
         self._settings = settings
+
+    @contextmanager
+    def _read_models(self, *, paths: _ApplicationPaths) -> Iterator[ApplicationReadModels]:
+        """Retain exact workspace evidence while one read-only projection runs."""
+
+        configured_manifest = self._settings.query_generation.bootstrap_manifest
+        if configured_manifest is None:
+            raise ChangeControlApplicationUsageError(
+                "lifecycle reads require query_generation.bootstrap_manifest"
+            )
+        manifest_path = _manifest_path(paths, configured_manifest)
+        source_roots = _configured_source_roots(self._settings)
+
+        locator_store = SqliteManagedChangeControlStore(
+            paths.state_db,
+            secure_open=True,
+            read_only=True,
+        )
+        try:
+            rows = locator_store.conn.execute(
+                "SELECT bootstrap_id FROM change_control_workspace_bootstrap_intents "
+                "ORDER BY bootstrap_id"
+            ).fetchall()
+            if len(rows) != 1:
+                raise ChangeControlApplicationIntegrityError(
+                    "lifecycle authority requires one exact workspace bootstrap"
+                )
+            locator_state = locator_store.get_workspace_bootstrap(str(rows[0]["bootstrap_id"]))
+            if locator_state is None:
+                raise ChangeControlApplicationIntegrityError(
+                    "workspace bootstrap locator cannot be reopened"
+                )
+            _inventory_locator, readiness_locator = locator_state.require_complete()
+        finally:
+            locator_store.close()
+
+        workspace_guard = None
+        index_guard = None
+        authority_store = None
+        primary_error: BaseException | None = None
+        try:
+            workspace_guard = open_workspace_bootstrap_evidence_guard(
+                workspace_root=paths.workspace,
+                manifest_path=manifest_path,
+                source_roots=source_roots,
+                index_schema_version=readiness_locator.index_schema_version,
+                embedding_model=readiness_locator.embedding_model,
+                embedding_dimensions=readiness_locator.embedding_dimensions,
+            )
+            resolved = workspace_guard.resolved
+            expected = resolved.inventory.legacy_index
+            index_guard = open_legacy_sqlite_index_attestation_guard(
+                index_path=resolved.legacy_index_path,
+                notes=resolved.exact_vault_notes,
+                embedding_model_version=expected.embedding_model,
+                embedding_dimensions=expected.embedding_dimensions,
+                expected_index_file_sha256=expected.index_file_sha256,
+                expected_index_file_byte_count=expected.index_file_byte_count,
+            )
+            authority_store = SqliteManagedChangeControlStore(
+                paths.state_db,
+                secure_open=True,
+                read_only=True,
+            )
+            state = authority_store.get_workspace_bootstrap_by_inventory_id(
+                resolved.inventory.inventory_id
+            )
+            if state is None:
+                raise ChangeControlApplicationIntegrityError(
+                    "workspace inventory has no durable bootstrap owner"
+                )
+            inventory_receipt, _readiness = state.require_complete()
+            aggregate_commit = authority_store.get_operation_commit(
+                inventory_receipt.aggregate_operation_id
+            )
+            if aggregate_commit is None or not (
+                aggregate_commit.aggregate_id == resolved.aggregate.aggregate_id
+                and aggregate_commit.revision == inventory_receipt.aggregate_revision == 1
+                and aggregate_commit.aggregate_sha256
+                == inventory_receipt.aggregate_sha256
+                == aggregate_sha256(resolved.aggregate)
+                and aggregate_commit.changed
+            ):
+                raise ChangeControlApplicationIntegrityError(
+                    "workspace bootstrap aggregate receipt cannot be reopened exactly"
+                )
+            capability = verify_workspace_bootstrap_evidence(
+                state=state,
+                resolved_inventory=resolved.inventory,
+                resolved_aggregate=resolved.aggregate,
+                persisted_snapshot=ChangeControlSnapshot(
+                    aggregate=resolved.aggregate,
+                    revision=aggregate_commit.revision,
+                    aggregate_sha256=aggregate_commit.aggregate_sha256,
+                ),
+                legacy_attestation=index_guard.attestation,
+                evidence_verifier=create_workspace_bootstrap_evidence_verifier(
+                    workspace_guard,
+                    index_guard,
+                ),
+            )
+            source_loader = GenericApplicationSourceNoteResolverLoader(
+                evidence_root=self._settings.paths.change_control_evidence_root,
+                workspace_capability=capability,
+                workspace_source_notes=tuple(
+                    item.snapshot for item in resolved.managed_source_notes
+                ),
+            )
+            yield ApplicationReadModels(
+                paths.state_db,
+                self._settings.paths.change_control_evidence_root,
+                source_note_resolver=source_loader,
+                configuration_sha256=application_configuration_sha256(self._settings),
+                activation_evidence_verifier=ReadOnlyActivatedEvidenceVerifier(
+                    lambda: self.resolve_query_generation(QueryGenerationSelector.ACTIVE)
+                ),
+            )
+        except BaseException as exc:
+            primary_error = exc
+            raise
+        finally:
+            close_failure: BaseException | None = None
+            for resource in (authority_store, index_guard, workspace_guard):
+                if resource is None:
+                    continue
+                try:
+                    resource.close()
+                except BaseException as close_error:
+                    if primary_error is None:
+                        close_failure = close_failure or close_error
+                    else:
+                        primary_error.add_note(
+                            "lifecycle read also failed while closing retained resources: "
+                            f"{type(close_error).__name__}"
+                        )
+            if primary_error is None and close_failure is not None:
+                raise close_failure
 
     def _preflight_backend(self) -> None:
         backend = self._settings.storage.backend
@@ -668,25 +876,32 @@ class ChangeControlApplication:
         *,
         paths: _ApplicationPaths,
         selection: QueryGenerationSelectionV1,
+        embedding_identity: tuple[str, int] | None = None,
     ) -> ResolvedQueryGeneration:
         configured_manifest = self._settings.query_generation.bootstrap_manifest
         assert configured_manifest is not None
         manifest_path = _manifest_path(paths, configured_manifest)
         source_roots = _configured_source_roots(self._settings)
-        embedder = get_embedding_provider(self._settings)
+        if embedding_identity is None:
+            embedder = get_embedding_provider(self._settings)
+            embedding_model = embedder.model_version
+            embedding_dimensions = embedder.dimensions
+        else:
+            embedding_model, embedding_dimensions = embedding_identity
 
         workspace_guard = None
         index_guard = None
         store = None
         backend = None
+        managed_bootstrap: _VerifiableClosable | None = None
         try:
             workspace_guard = open_workspace_bootstrap_evidence_guard(
                 workspace_root=paths.workspace,
                 manifest_path=manifest_path,
                 source_roots=source_roots,
                 index_schema_version=SCHEMA_VERSION,
-                embedding_model=embedder.model_version,
-                embedding_dimensions=embedder.dimensions,
+                embedding_model=embedding_model,
+                embedding_dimensions=embedding_dimensions,
             )
             resolved = workspace_guard.resolved
             expected_index = resolved.inventory.legacy_index
@@ -703,17 +918,13 @@ class ChangeControlApplication:
                 secure_open=True,
                 read_only=True,
             )
-            state = store.get_workspace_bootstrap_by_inventory_id(
-                resolved.inventory.inventory_id
-            )
+            state = store.get_workspace_bootstrap_by_inventory_id(resolved.inventory.inventory_id)
             if state is None:
                 raise ChangeControlApplicationIntegrityError(
                     "fresh workspace inventory has no durable bootstrap owner"
                 )
             inventory_receipt, readiness = state.require_complete()
-            aggregate_commit = store.get_operation_commit(
-                inventory_receipt.aggregate_operation_id
-            )
+            aggregate_commit = store.get_operation_commit(inventory_receipt.aggregate_operation_id)
             if aggregate_commit is None or not (
                 aggregate_commit.aggregate_id == resolved.aggregate.aggregate_id
                 and aggregate_commit.revision == inventory_receipt.aggregate_revision == 1
@@ -797,13 +1008,13 @@ class ChangeControlApplication:
                     )
             else:
                 assert active_decision is not None
-                serving = self._open_managed_query_generation(
+                serving, managed_bootstrap = self._open_managed_query_generation(
                     paths=paths,
                     store=store,
                     context=context,
                     active=active,
                     active_decision=active_decision,
-                    workspace_base_notes=resolved.exact_vault_notes,
+                    resolved_workspace=resolved,
                 )
                 backend = serving.backend
                 receipt = serving.index_receipt
@@ -852,22 +1063,31 @@ class ChangeControlApplication:
                         "active authority changed while the query generation was open"
                     )
 
+            if serving is None:
+
+                def verify_backend() -> None:
+                    index_guard.verify_open_read_only_index(backend)
+            else:
+                opened_bootstrap = managed_bootstrap
+                if opened_bootstrap is None:
+                    raise ChangeControlApplicationIntegrityError(
+                        "managed query bootstrap was not retained"
+                    )
+
+                def verify_backend() -> None:
+                    _verify_managed_query_resources(opened_bootstrap, serving)
+
             return ResolvedQueryGeneration(
                 backend=backend,
                 metadata=metadata,
                 evidence_workspaces=evidence_workspaces,
                 _verify_callbacks=(_guard_query_verification(verify_live_authority),),
-                _verify_backend=_guard_query_verification(
-                    (
-                        lambda: index_guard.verify_open_read_only_index(backend)
-                    )
-                    if serving is None
-                    else serving.verify
-                ),
+                _verify_backend=_guard_query_verification(verify_backend),
                 _close_backend=_guard_query_verification(backend.close),
                 _close_callbacks=tuple(
                     _guard_query_verification(callback)
                     for callback in (
+                        *((managed_bootstrap.close,) if managed_bootstrap is not None else ()),
                         store.close,
                         index_guard.close,
                         workspace_guard.close,
@@ -878,6 +1098,7 @@ class ChangeControlApplication:
             _close_failed_query_resources(
                 exc,
                 backend,
+                managed_bootstrap,
                 store,
                 index_guard,
                 workspace_guard,
@@ -911,9 +1132,7 @@ class ChangeControlApplication:
             bootstrap = reopen_sealed_seed_query_bootstrap(
                 seed_repository_root=cfg.seed_repository_root,
                 evidence_repository_root=cfg.evidence_repository_root,
-                temporal_analysis_manifest_sha256=(
-                    cfg.temporal_analysis_manifest_sha256
-                ),
+                temporal_analysis_manifest_sha256=(cfg.temporal_analysis_manifest_sha256),
             )
             context = bootstrap.authority_context
             store = SqliteManagedChangeControlStore(
@@ -1030,15 +1249,23 @@ class ChangeControlApplication:
         context: AuthorityVerificationContext,
         active: AuthorityRevisionBinding,
         active_decision: object,
-        workspace_base_notes: tuple[ExactVaultNoteInput, ...],
-    ) -> ManagedServingResolution:
+        resolved_workspace: ResolvedWorkspaceBootstrap,
+    ) -> tuple[ManagedServingResolution, _VerifiableClosable | None]:
         """Rebuild the process-local resolver and open one active gen1 index."""
 
+        from mastervault.change_control.generic_analysis import (
+            GenericAnalysisBootstrapBindingV2,
+        )
         from mastervault.change_control.managed_query_resolver import (
+            ManagedQueryBootstrap,
             build_read_only_managed_query_resolver,
             reopen_sealed_seed_query_bootstrap,
+            reopen_workspace_query_bootstrap_v2,
         )
         from mastervault.change_control.managed_review import (
+            GenericGoverningSourceAdoptionBindingV2,
+            ManagedArtifactKind,
+            ManagedArtifactRef,
             ManagedRevisionDecisionRecord,
             ManagedRunBindingV2,
         )
@@ -1048,14 +1275,9 @@ class ChangeControlApplication:
                 "active managed generation decision type is invalid"
             )
         cfg = self._settings.query_generation
-        if (
-            cfg.seed_repository_root is None
-            or cfg.evidence_repository_root is None
-            or cfg.canonical_repository_root is None
-        ):
+        if cfg.canonical_repository_root is None:
             raise ChangeControlApplicationUsageError(
-                "active managed queries require seed, evidence, and canonical "
-                "runtime locators"
+                "active managed queries require the canonical runtime locator"
             )
         run_binding = active_decision.command.bundle.run_binding
         operation_prefix = "temporal-commit:"
@@ -1077,33 +1299,111 @@ class ChangeControlApplication:
             raise ChangeControlApplicationIntegrityError(
                 "active managed run differs from the configured temporal analysis"
             )
-        bootstrap = reopen_sealed_seed_query_bootstrap(
-            seed_repository_root=cfg.seed_repository_root,
-            evidence_repository_root=cfg.evidence_repository_root,
-            temporal_analysis_manifest_sha256=temporal_sha256,
-        )
-        restarted = build_read_only_managed_query_resolver(
-            store=store,
-            active_decision=active_decision,
-            bootstrap=bootstrap,
-            canonical_repository_root=cfg.canonical_repository_root,
-            authority_context=context,
-        )
-        serving = open_active_managed_sqlite_generation(
-            aggregate_id=active.aggregate_id,
-            store=store,
-            resolver=restarted.resolver,
-            authority_context=context,
-            generation_root=paths.generation_root,
-            protected_paths=_existing_query_protected_paths(paths),
-            workspace_base_notes=workspace_base_notes,
-        )
+        bootstrap: ManagedQueryBootstrap
+        retained_bootstrap: _VerifiableClosable | None = None
+        analysis_bootstrap = run_binding.analysis_set.analysis_bootstrap
+        if type(analysis_bootstrap) is GenericAnalysisBootstrapBindingV2:
+            if (
+                type(run_binding.governing_source_adoption)
+                is not GenericGoverningSourceAdoptionBindingV2
+            ):
+                raise ChangeControlApplicationIntegrityError(
+                    "generic managed run lacks its exact governing-source adoption"
+                )
+            generic_evidence_root = self._settings.paths.change_control_evidence_root
+            bootstrap = reopen_workspace_query_bootstrap_v2(
+                authority_context=context,
+                workspace_source_notes=tuple(
+                    item.snapshot for item in resolved_workspace.managed_source_notes
+                ),
+                evidence_repository_root=generic_evidence_root,
+                generic_evidence_repository_root=generic_evidence_root,
+                temporal_analysis_manifest_sha256=temporal_sha256,
+            )
+            retained_bootstrap = bootstrap
+        else:
+            if cfg.seed_repository_root is None or cfg.evidence_repository_root is None:
+                raise ChangeControlApplicationUsageError(
+                    "sealed-seed managed queries require seed and evidence runtime locators"
+                )
+            bootstrap = reopen_sealed_seed_query_bootstrap(
+                seed_repository_root=cfg.seed_repository_root,
+                evidence_repository_root=cfg.evidence_repository_root,
+                temporal_analysis_manifest_sha256=temporal_sha256,
+            )
+        try:
+            restarted = build_read_only_managed_query_resolver(
+                store=store,
+                active_decision=active_decision,
+                bootstrap=bootstrap,
+                canonical_repository_root=cfg.canonical_repository_root,
+                authority_context=context,
+            )
+            resolver = restarted.resolver
+            if type(analysis_bootstrap) is GenericAnalysisBootstrapBindingV2:
+                from mastervault.change_control.generic_governing_source import (
+                    CompositeManagedReviewResolverV2,
+                    WorkspaceSourceNoteProjectionAuthority,
+                )
+
+                if type(resolver) is not CompositeManagedReviewResolverV2:
+                    raise ChangeControlApplicationIntegrityError(
+                        "generic managed query resolver type is invalid"
+                    )
+                workspace_authorities = tuple(
+                    WorkspaceSourceNoteProjectionAuthority(
+                        metadata=item.metadata,
+                        snapshot=item.snapshot,
+                        raw_artifact=ManagedArtifactRef.create(
+                            kind=ManagedArtifactKind.RAW_SOURCE,
+                            path=item.snapshot.document.source_path,
+                            sha256=hashlib.sha256(item.raw_source_bytes).hexdigest(),
+                            byte_count=len(item.raw_source_bytes),
+                        ),
+                        raw_bytes=item.raw_source_bytes,
+                        note_artifact=ManagedArtifactRef.create(
+                            kind=ManagedArtifactKind.SOURCE_NOTE,
+                            path=item.snapshot.source_note_path,
+                            sha256=hashlib.sha256(
+                                item.snapshot.source_note_utf8.encode("utf-8")
+                            ).hexdigest(),
+                            byte_count=len(item.snapshot.source_note_utf8.encode("utf-8")),
+                        ),
+                        note_bytes=item.snapshot.source_note_utf8.encode("utf-8"),
+                        projected_claims=tuple(
+                            revision
+                            for revision in resolved_workspace.aggregate.claims.revisions
+                            if revision.document == item.snapshot.document
+                        ),
+                    )
+                    for item in resolved_workspace.managed_source_notes
+                )
+                resolver = CompositeManagedReviewResolverV2(
+                    sealed=resolver.sealed,
+                    generic=resolver.generic,
+                    workspace_projection_authorities=workspace_authorities,
+                )
+            serving = open_active_managed_sqlite_generation(
+                aggregate_id=active.aggregate_id,
+                store=store,
+                resolver=resolver,
+                authority_context=context,
+                generation_root=paths.generation_root,
+                protected_paths=_existing_query_protected_paths(paths),
+                workspace_base_notes=resolved_workspace.exact_vault_notes,
+            )
+        except BaseException:
+            if retained_bootstrap is not None:
+                retained_bootstrap.close()
+            raise
         if serving.authority != active:
             serving.close()
+            if retained_bootstrap is not None:
+                retained_bootstrap.close()
             raise ChangeControlApplicationConflictError(
                 "active authority changed during managed generation resolution"
             )
-        return serving
+        return serving, retained_bootstrap
 
     def bootstrap(
         self,
@@ -1275,20 +1575,25 @@ class ChangeControlApplication:
                         workspace_guard.verify()
                         index_guard.verify()
 
-                    capability = verify_workspace_bootstrap_evidence(
-                        state=fresh_state,
-                        resolved_inventory=fresh_resolved.inventory,
-                        resolved_aggregate=fresh_resolved.aggregate,
-                        persisted_snapshot=cast(
-                            WorkspaceBootstrapAggregateSnapshot,
-                            fresh_snapshot,
-                        ),
-                        legacy_attestation=fresh_attestation,
-                        evidence_verifier=create_workspace_bootstrap_evidence_verifier(
-                            workspace_guard,
-                            index_guard,
-                        ),
-                    )
+                    try:
+                        capability = verify_workspace_bootstrap_evidence(
+                            state=fresh_state,
+                            resolved_inventory=fresh_resolved.inventory,
+                            resolved_aggregate=fresh_resolved.aggregate,
+                            persisted_snapshot=cast(
+                                WorkspaceBootstrapAggregateSnapshot,
+                                fresh_snapshot,
+                            ),
+                            legacy_attestation=fresh_attestation,
+                            evidence_verifier=create_workspace_bootstrap_evidence_verifier(
+                                workspace_guard,
+                                index_guard,
+                            ),
+                        )
+                    except ValueError as exc:
+                        raise ChangeControlApplicationIntegrityError(
+                            "workspace bootstrap evidence could not be verified"
+                        ) from exc
                     _notify(failure_hook, AUTHORITY_HANDOFF_STARTED)
 
                     authority = store.initialize_workspace_generation_zero(
@@ -1366,6 +1671,9 @@ class ChangeControlApplication:
             self._preflight_backend()
             _validate_run_id(run_id)
             paths = _preflight_paths(self._settings)
+            if self._settings.query_generation.bootstrap_manifest is not None:
+                with self._read_models(paths=paths) as read_models:
+                    return read_models.get_operator_run(run_id)
             store = SqliteManagedChangeControlStore(
                 paths.state_db,
                 secure_open=True,
@@ -1382,6 +1690,492 @@ class ChangeControlApplication:
             raise
         except ChangeControlBusyError as exc:
             raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ApplicationRunNotFoundError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReadModelError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def start_change(
+        self,
+        request: StartChangeRequestV1,
+        *,
+        failure_hook: FailureHook | None = None,
+    ) -> ChangeRunStatusV1:
+        """Synchronously admit and analyze one change through temporal review."""
+
+        if type(request) is not StartChangeRequestV1:
+            raise TypeError("start_change requires the exact public request type")
+        _validate_operation_id(request.operation_id)
+        try:
+            self._preflight_backend()
+            paths = _preflight_paths(self._settings)
+            configured_manifest = self._settings.query_generation.bootstrap_manifest
+            if configured_manifest is None:
+                raise ChangeControlApplicationUsageError(
+                    "start_change requires query_generation.bootstrap_manifest"
+                )
+            manifest_path = _manifest_path(paths, configured_manifest)
+            source_roots = _configured_source_roots(self._settings)
+            admission = admit_generic_incoming_markdown_v2(
+                request.source, active_workspace=paths.workspace
+            )
+            if admission.metadata.domain != request.domain:
+                raise ChangeControlApplicationUsageError(
+                    "requested domain differs from incoming metadata"
+                )
+            suite = load_regression_suite(request.regression_suite)
+            configuration_sha256 = application_configuration_sha256(self._settings)
+            replay = (
+                read_change_replay_bundle_v1(request.replay_bundle)
+                if request.replay_bundle is not None
+                else None
+            )
+            if replay is not None and replay.configuration_sha256 != configuration_sha256:
+                raise ChangeControlApplicationConflictError(
+                    "replay bundle differs from the current runtime configuration"
+                )
+            source_metadata_sha256 = hashlib.sha256(
+                canonical_json_bytes(admission.metadata.model_dump(mode="json"))
+            ).hexdigest()
+            command_repository = ApplicationStartCommandRepository(
+                self._settings.paths.change_control_evidence_root
+            )
+            existing_command = command_repository.reopen_operation_optional(request.operation_id)
+            if existing_command is not None:
+                exact_request = (
+                    existing_command.source_sha256 == admission.source_sha256
+                    and existing_command.source_byte_count == admission.source_byte_count
+                    and existing_command.source_metadata_sha256 == source_metadata_sha256
+                    and existing_command.suite_id == suite.suite.suite_id
+                    and existing_command.suite_version == suite.suite.suite_version
+                    and existing_command.suite_original_sha256 == suite.original_sha256
+                    and existing_command.suite_original_byte_count == suite.original_byte_count
+                    and existing_command.suite_canonical_sha256 == suite.canonical_sha256
+                    and existing_command.domain == request.domain
+                    and existing_command.mode == request.mode
+                    and existing_command.configuration_sha256 == configuration_sha256
+                    and existing_command.replay_bundle_id
+                    == (replay.bundle_id if replay is not None else None)
+                    and existing_command.replay_bundle_sha256
+                    == (replay.bundle_sha256 if replay is not None else None)
+                    and (
+                        request.requested_run_id is None
+                        or request.requested_run_id == existing_command.run_id
+                    )
+                )
+                if not exact_request:
+                    raise ChangeControlApplicationConflictError(
+                        "start operation is already bound to different immutable inputs"
+                    )
+
+            embedding_model, embedding_dimensions = regression_configured_embedding_identity(
+                self._settings
+            )
+            with open_workspace_bootstrap_evidence_guard(
+                workspace_root=paths.workspace,
+                manifest_path=manifest_path,
+                source_roots=source_roots,
+                index_schema_version=SCHEMA_VERSION,
+                embedding_model=embedding_model,
+                embedding_dimensions=embedding_dimensions,
+            ) as workspace_guard:
+                resolved = workspace_guard.resolved
+                expected = resolved.inventory.legacy_index
+                with open_legacy_sqlite_index_attestation_guard(
+                    index_path=resolved.legacy_index_path,
+                    notes=resolved.exact_vault_notes,
+                    embedding_model_version=expected.embedding_model,
+                    embedding_dimensions=expected.embedding_dimensions,
+                    expected_index_file_sha256=expected.index_file_sha256,
+                    expected_index_file_byte_count=expected.index_file_byte_count,
+                ) as index_guard:
+                    store = SqliteManagedChangeControlStore(
+                        paths.state_db, secure_open=True, read_only=True
+                    )
+                    run_resolver = ApplicationOperatorRunAuthorityResolver(
+                        evidence_root=self._settings.paths.change_control_evidence_root,
+                        state_path=paths.state_db,
+                        configuration_sha256=configuration_sha256,
+                    )
+                    try:
+                        state = store.get_workspace_bootstrap_by_inventory_id(
+                            resolved.inventory.inventory_id
+                        )
+                        if state is None:
+                            raise ChangeControlApplicationIntegrityError(
+                                "workspace bootstrap authority is absent"
+                            )
+                        inventory_receipt, _readiness = state.require_complete()
+                        live_snapshot = store.load(state.intent.aggregate_id)
+                        if live_snapshot is None:
+                            raise ChangeControlApplicationIntegrityError(
+                                "workspace aggregate authority is absent"
+                            )
+                        bootstrap_snapshot = ChangeControlSnapshot(
+                            aggregate=resolved.aggregate,
+                            revision=inventory_receipt.aggregate_revision,
+                            aggregate_sha256=inventory_receipt.aggregate_sha256,
+                        )
+                        capability = verify_workspace_bootstrap_evidence(
+                            state=state,
+                            resolved_inventory=resolved.inventory,
+                            resolved_aggregate=resolved.aggregate,
+                            persisted_snapshot=cast(
+                                WorkspaceBootstrapAggregateSnapshot, bootstrap_snapshot
+                            ),
+                            legacy_attestation=index_guard.attestation,
+                            evidence_verifier=create_workspace_bootstrap_evidence_verifier(
+                                workspace_guard, index_guard
+                            ),
+                        )
+                        active = store.get_active_generation(
+                            state.intent.aggregate_id,
+                            authority_context=AuthorityVerificationContext.workspace(capability),
+                        )
+                        if not (
+                            active.authority_revision == 0
+                            and active.active_generation.generation_number == 0
+                            and inventory_receipt.aggregate_revision == 1
+                        ):
+                            raise ChangeControlApplicationConflictError(
+                                "start_change requires exact active generation zero"
+                            )
+                        rows = store.conn.execute(
+                            "SELECT run_id FROM change_control_operator_runs ORDER BY run_id"
+                        ).fetchall()
+                        candidate_ids = tuple(str(row["run_id"]) for row in rows)
+                        if request.requested_run_id is not None:
+                            candidate_ids = tuple(
+                                item for item in candidate_ids if item == request.requested_run_id
+                            )
+                        candidates = tuple(
+                            run
+                            for run_id in candidate_ids
+                            if (run := store.get_operator_run(run_id, resolver=run_resolver))
+                            is not None
+                            and run.record.command.aggregate_id == active.aggregate_id
+                            and run.record.command.base_authority_id == active.authority_id
+                            and run.record.command.base_authority_revision
+                            == active.authority_revision
+                            and run.record.command.base_active_pointer_sha256
+                            == active.active_pointer_sha256
+                        )
+                        if len(candidates) != 1:
+                            raise ChangeControlApplicationConflictError(
+                                "start_change requires one exact existing bootstrap run"
+                            )
+                        bootstrap_run = candidates[0]
+                    finally:
+                        store.close()
+
+                    command = ApplicationStartCommandV1.create(
+                        operation_id=request.operation_id,
+                        run_id=bootstrap_run.record.command.run_id,
+                        base_authority_id=active.authority_id,
+                        base_authority_revision=active.authority_revision,
+                        base_active_pointer_sha256=active.active_pointer_sha256,
+                        source_sha256=admission.source_sha256,
+                        source_byte_count=admission.source_byte_count,
+                        source_metadata_sha256=source_metadata_sha256,
+                        suite_id=suite.suite.suite_id,
+                        suite_version=suite.suite.suite_version,
+                        suite_original_sha256=suite.original_sha256,
+                        suite_original_byte_count=suite.original_byte_count,
+                        suite_canonical_sha256=suite.canonical_sha256,
+                        domain=request.domain,
+                        mode=request.mode,
+                        replay_bundle_id=(replay.bundle_id if replay is not None else None),
+                        replay_bundle_sha256=(replay.bundle_sha256 if replay is not None else None),
+                        configuration_sha256=configuration_sha256,
+                        claimed_at=_now(),
+                    )
+                    request_sha256 = hashlib.sha256(
+                        canonical_json_bytes(
+                            command.model_dump(
+                                mode="json",
+                                exclude={"command_id", "command_sha256", "claimed_at"},
+                            )
+                        )
+                    ).hexdigest()
+                    operation_store = SqliteManagedChangeControlStore(
+                        paths.state_db, secure_open=True
+                    )
+                    try:
+                        operation_claim = operation_store.claim_application_operation(
+                            SynchronousApplicationOperationV1.create(
+                                operation_id=request.operation_id,
+                                operation_kind="start",
+                                run_id=command.run_id,
+                                request_sha256=request_sha256,
+                                claimed_at=command.claimed_at,
+                            )
+                        )
+                    finally:
+                        operation_store.close()
+                    _notify(failure_hook, "application-operation-claimed")
+                    if operation_claim.claimed_at != command.claimed_at:
+                        command = ApplicationStartCommandV1.create(
+                            **command.model_dump(
+                                mode="python",
+                                exclude={"command_id", "command_sha256", "claimed_at"},
+                            ),
+                            claimed_at=operation_claim.claimed_at,
+                        )
+                    lock_store = SqliteManagedChangeControlStore(paths.state_db, secure_open=True)
+                    try:
+                        lock_authority = lock_store.get_run_lock_authority(command.run_id)
+                    finally:
+                        lock_store.close()
+                    if lock_authority is None:
+                        candidate_lock_authority = command_repository.prepare_run_lock_authority(
+                            command.run_id,
+                            claimed_at=command.claimed_at,
+                        )
+                        lock_store = SqliteManagedChangeControlStore(
+                            paths.state_db, secure_open=True
+                        )
+                        try:
+                            lock_authority = lock_store.claim_run_lock_authority(
+                                candidate_lock_authority
+                            )
+                        finally:
+                            lock_store.close()
+                    if type(lock_authority) is not SynchronousRunLockAuthorityV1:
+                        raise ChangeControlApplicationIntegrityError(
+                            "run-lock authority did not reopen exactly"
+                        )
+                    with command_repository.run_lifecycle_lock(
+                        command.run_id, lock_authority
+                    ):
+                        waited_owner = command_repository.reopen_operation_optional(
+                            command.operation_id
+                        )
+                        command = command_repository.claim(command)
+                        if waited_owner is not None:
+                            resume_completed_temporal_publication(
+                                settings=self._settings,
+                                state_path=paths.state_db,
+                                evidence_root=self._settings.paths.change_control_evidence_root,
+                                command=command,
+                            )
+                            waited_status = self.get_change_status(command.run_id)
+                            if waited_status.phase == ChangeRunPhaseV1.AWAITING_TEMPORAL_REVIEW:
+                                return waited_status
+                        lifecycle_result = run_start_change_lifecycle(
+                            settings=self._settings,
+                            state_path=paths.state_db,
+                            evidence_root=self._settings.paths.change_control_evidence_root,
+                            command=command,
+                            admission=admission,
+                            suite=suite,
+                            workspace_state=state,
+                            workspace_capability=capability,
+                            workspace_source_notes=tuple(
+                                item.snapshot for item in resolved.managed_source_notes
+                            ),
+                            resolve_generation_zero=lambda: (
+                                self._resolve_workspace_query_generation(
+                                    paths=paths,
+                                    selection=QueryGenerationSelectionV1(
+                                        selector=QueryGenerationSelector.LEGACY
+                                    ),
+                                    embedding_identity=(
+                                        (embedding_model, embedding_dimensions)
+                                        if replay is not None
+                                        else None
+                                    ),
+                                )
+                            ),
+                            replay_bundle=replay,
+                            failure_hook=failure_hook,
+                        )
+                        status = self.get_change_status(command.run_id)
+                        if type(lifecycle_result) is StartLifecycleCompletedNoOpV1:
+                            if status.phase != ChangeRunPhaseV1.COMPLETED_NO_OP:
+                                raise ChangeControlApplicationIntegrityError(
+                                    "start lifecycle did not reach completed no-op"
+                                )
+                            return status
+                        if type(lifecycle_result) is not StartLifecycleTemporalReviewV1:
+                            raise ChangeControlApplicationIntegrityError(
+                                "start lifecycle returned an unsupported typed outcome"
+                            )
+                        if (
+                            not lifecycle_result.request_id.startswith("reviewreq:")
+                            or status.phase != ChangeRunPhaseV1.AWAITING_TEMPORAL_REVIEW
+                        ):
+                            raise ChangeControlApplicationIntegrityError(
+                                "start lifecycle did not reach awaiting temporal review"
+                            )
+                        return status
+        except ChangeControlApplicationError:
+            raise
+        except ChangeReplayBundleUsageError as exc:
+            raise_mapped_application_error(exc)
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def list_changes(
+        self,
+        limit: int = 50,
+        cursor: str | None = None,
+        phase: ChangeRunPhaseV1 | None = None,
+    ) -> ChangeRunPageV1:
+        """List existing lifecycle runs without creating or repairing authority."""
+
+        try:
+            if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+                raise ChangeControlApplicationUsageError(
+                    "change list limit must be an integer from 1 to 100"
+                )
+            if cursor is not None:
+                if not isinstance(cursor, str):
+                    raise ChangeControlApplicationUsageError("change list cursor is invalid")
+                try:
+                    decode_operator_run_cursor(cursor)
+                except ValueError as exc:
+                    raise ChangeControlApplicationUsageError(
+                        "change list cursor is invalid"
+                    ) from exc
+            if phase is not None and type(phase) is not ChangeRunPhaseV1:
+                raise ChangeControlApplicationUsageError("change list phase is invalid")
+            self._preflight_backend()
+            paths = _preflight_paths(self._settings)
+            with self._read_models(paths=paths) as read_models:
+                return read_models.list_changes(
+                    limit=limit,
+                    cursor=cursor,
+                    phase=phase,
+                )
+        except ChangeControlApplicationError:
+            raise
+        except ChangeControlBusyError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ApplicationRunNotFoundError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReadModelError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def get_change_status(self, run_id: str) -> ChangeRunStatusV1:
+        """Project one existing lifecycle run into the stable public status DTO."""
+
+        try:
+            self._preflight_backend()
+            _validate_run_id(run_id)
+            paths = _preflight_paths(self._settings)
+            with self._read_models(paths=paths) as read_models:
+                return read_models.get_change_status(run_id)
+        except ChangeControlApplicationError:
+            raise
+        except ChangeControlBusyError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ApplicationRunNotFoundError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReadModelError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def record_change_review(
+        self,
+        document: ReviewDecisionDocumentV1,
+        *,
+        failure_hook: FailureHook | None = None,
+    ) -> ChangeRunStatusV1:
+        """Record one exact temporal or managed review decision."""
+
+        if type(document) not in {
+            TemporalReviewDecisionDocumentV1,
+            ManagedReviewDecisionDocumentV1,
+        }:
+            raise TypeError("record_change_review requires an exact public decision type")
+        _validate_operation_id(document.operation_id)
+
+        from mastervault.change_control.application_downstream import (  # noqa: PLC0415
+            record_change_review,
+        )
+
+        return record_change_review(
+            settings=self._settings,
+            document=document,
+            failure_hook=failure_hook,
+        )
+
+    def activate_change(
+        self,
+        request: ActivateChangeRequestV1,
+        *,
+        failure_hook: FailureHook | None = None,
+    ) -> ChangeActivationResultV1:
+        """Activate one exact reviewed managed generation."""
+
+        if type(request) is not ActivateChangeRequestV1:
+            raise TypeError("activate_change requires the exact public request type")
+        _validate_operation_id(request.operation_id)
+
+        from mastervault.change_control.application_downstream import (  # noqa: PLC0415
+            activate_change,
+        )
+
+        return activate_change(
+            settings=self._settings,
+            request=request,
+            failure_hook=failure_hook,
+        )
+
+    def get_change_review(self, run_id: str) -> ChangeReviewPacketV1:
+        """Render the current exact human-review request without side effects."""
+
+        try:
+            self._preflight_backend()
+            _validate_run_id(run_id)
+            paths = _preflight_paths(self._settings)
+            with self._read_models(paths=paths) as read_models:
+                return read_models.get_change_review(run_id)
+        except ChangeControlApplicationError:
+            raise
+        except ChangeControlBusyError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ApplicationRunNotFoundError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReviewUnavailableError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReadModelError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
+        except (TypeError, AssertionError):
+            raise
+        except Exception as exc:
+            raise_mapped_application_error(exc)
+
+    def verify_change(self, run_id: str) -> ChangeVerificationResultV1:
+        """Freshly verify every linked immutable authority for one run."""
+
+        try:
+            self._preflight_backend()
+            _validate_run_id(run_id)
+            paths = _preflight_paths(self._settings)
+            with self._read_models(paths=paths) as read_models:
+                return read_models.verify_change(run_id)
+        except ChangeControlApplicationError:
+            raise
+        except ChangeControlBusyError as exc:
+            raise ChangeControlApplicationConflictError(str(exc)) from exc
+        except ApplicationRunNotFoundError as exc:
+            raise ChangeControlApplicationUsageError(str(exc)) from exc
+        except ApplicationReadModelError as exc:
+            raise ChangeControlApplicationIntegrityError(str(exc)) from exc
         except (TypeError, AssertionError):
             raise
         except Exception as exc:

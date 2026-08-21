@@ -13,10 +13,10 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
-from mastervault.change_control.bootstrap import (
-    VerifiedAnalysisBootstrapCapability,
-    verify_analysis_bootstrap_snapshot,
+from mastervault.change_control.analysis_binding import AnalysisBootstrapAuthority
+from mastervault.change_control.analysis_capability import (
+    VerifiedAnalysisAuthorityCapability,
+    verify_analysis_authority_snapshot,
 )
 from mastervault.change_control.classification import (
     ClaimPairClassification,
@@ -294,7 +294,7 @@ class TemporalProposalBinding(_StrictFrozenModel):
     algorithm_version: Literal["temporal-proposal-v1"] = "temporal-proposal-v1"
     binding_id: str = Field(pattern=_PROPOSAL_BINDING_ID)
     binding_sha256: str = Field(pattern=SHA256_PATTERN)
-    analysis_bootstrap: AnalysisBootstrapBinding
+    analysis_bootstrap: AnalysisBootstrapAuthority
     analysis_head: AggregateHeadBinding
     candidate_result_sha256: str = Field(pattern=SHA256_PATTERN)
     classification_result_id: str = Field(pattern=r"^classresult:[0-9a-f]{64}$")
@@ -310,7 +310,7 @@ class TemporalProposalBinding(_StrictFrozenModel):
     replacement_candidate_id: str = Field(pattern=_REPLACEMENT_CANDIDATE_ID)
     replacement_candidate_sha256: str = Field(pattern=SHA256_PATTERN)
     classification_executions: tuple[InferenceExecutionRef, ...] = Field(min_length=1)
-    dependency_executions: tuple[InferenceExecutionRef, ...] = Field(min_length=1)
+    dependency_executions: tuple[InferenceExecutionRef, ...] = ()
     relation_assessment_sha256s: tuple[str, ...]
     dependency_assessment_sha256s: tuple[str, ...]
     replacement_subject_sha256s: tuple[str, ...] = Field(min_length=1, max_length=1)
@@ -508,6 +508,10 @@ def _validated_execution_refs(
         raise ValueError("recorded inference outcomes do not exactly cover result shards")
     if any(actual_by_id[key] != expected_by_id[key] for key in expected_by_id):
         raise ValueError("recorded inference outcome substitutes a result shard")
+    if not validated:
+        if expected_outputs:
+            raise ValueError("empty inference evidence cannot cover non-empty output shards")
+        return ()
     refs = tuple(
         sorted(
             (InferenceExecutionRef.create(item) for item in validated),
@@ -524,7 +528,7 @@ def _validated_execution_refs(
 
 def build_temporal_proposal(
     *,
-    verified_bootstrap: VerifiedAnalysisBootstrapCapability,
+    verified_bootstrap: VerifiedAnalysisAuthorityCapability,
     snapshot: ChangeControlSnapshot,
     candidates: RelationshipCandidateSet,
     classification_results: ClassificationResultSet,
@@ -541,7 +545,7 @@ def build_temporal_proposal(
 ) -> TemporalProposal:
     """Build the exact inert revision-3 payload from verified revision-2 evidence."""
 
-    bootstrap = verify_analysis_bootstrap_snapshot(verified_bootstrap, snapshot)
+    bootstrap = verify_analysis_authority_snapshot(verified_bootstrap, snapshot)
     validated_classifications = validate_classification_results(
         snapshot, candidates=candidates, results=classification_results
     )

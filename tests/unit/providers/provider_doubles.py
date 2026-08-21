@@ -32,9 +32,7 @@ class FakeOpenAIEmbeddingsClient:
         self.calls.append(list(input))
         if self._failures:
             raise self._failures.pop(0)
-        data = [
-            SimpleNamespace(embedding=[float(int(text.rsplit("-", 1)[-1]))]) for text in input
-        ]
+        data = [SimpleNamespace(embedding=[float(int(text.rsplit("-", 1)[-1]))]) for text in input]
         return SimpleNamespace(data=data)
 
 
@@ -42,6 +40,7 @@ def anthropic_tool_response(
     tool_input: dict[str, Any], *, usage_in: int = 100, usage_out: int = 20
 ) -> Any:
     return SimpleNamespace(
+        id="anthropic:test-tool-response",
         content=[SimpleNamespace(type="tool_use", input=tool_input)],
         usage=SimpleNamespace(input_tokens=usage_in, output_tokens=usage_out),
     )
@@ -49,6 +48,7 @@ def anthropic_tool_response(
 
 def anthropic_text_response(text: str, *, usage_in: int = 100, usage_out: int = 20) -> Any:
     return SimpleNamespace(
+        id="anthropic:test-text-response",
         content=[SimpleNamespace(type="text", text=text)],
         usage=SimpleNamespace(input_tokens=usage_in, output_tokens=usage_out),
     )
@@ -71,6 +71,7 @@ class FakeAnthropicClient:
 
 def openai_chat_response(text: str, *, usage_in: int = 80, usage_out: int = 15) -> Any:
     return SimpleNamespace(
+        id="openai:test-chat-response",
         choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
         usage=SimpleNamespace(prompt_tokens=usage_in, completion_tokens=usage_out),
     )

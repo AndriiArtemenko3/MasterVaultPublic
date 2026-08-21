@@ -6,6 +6,8 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from test_impact_inference import _impact_wire
@@ -28,6 +30,7 @@ from mastervault.change_control.managed_impact_evidence import (
     bind_recorded_impact_inference_run,
 )
 from mastervault.change_control.managed_review import (
+    GenericManagedAnalysisSetBindingV3,
     InferenceExecutionMode,
     ManagedAnalysisSetBinding,
     ManagedRevisionPlan,
@@ -58,6 +61,54 @@ pytest_plugins = ("test_impact_analysis",)
 
 _AFFECTED_TARGET = "sl2-faq-returns"
 _NO_CHANGE_TARGET = "process-showroom-demo-unit-rotation"
+
+
+class _SubstitutedManagedAnalysisSet(ManagedAnalysisSetBinding):
+    pass
+
+
+class _SubstitutedGenericAnalysisSet(GenericManagedAnalysisSetBindingV3):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("analysis_type", "substituted_type"),
+    (
+        (ManagedAnalysisSetBinding, _SubstitutedManagedAnalysisSet),
+        (GenericManagedAnalysisSetBindingV3, _SubstitutedGenericAnalysisSet),
+    ),
+)
+def test_recorded_run_dispatch_accepts_only_exact_analysis_set_variants(
+    analysis_type: Any,
+    substituted_type: Any,
+) -> None:
+    workload = SimpleNamespace(
+        eligibility=SimpleNamespace(status=RevisionPlanningEligibilityStatus.ELIGIBLE),
+        input_shards=(SimpleNamespace(),),
+    )
+    exact = analysis_type.model_construct()
+    with pytest.raises(ValueError, match="requires durable inference evidence"):
+        RecordedRevisionPlanningInferenceRun(
+            workload=workload,
+            analysis_set=exact,
+            subjects=(SimpleNamespace(),),
+            outcomes=(),
+            evidence_batch=None,
+            staging_completion=None,
+            staging_capability=None,
+        )
+
+    substituted = substituted_type.model_construct()
+    with pytest.raises(ValueError, match="requires its exact analysis set"):
+        RecordedRevisionPlanningInferenceRun(
+            workload=workload,
+            analysis_set=substituted,
+            subjects=(SimpleNamespace(),),
+            outcomes=(),
+            evidence_batch=None,
+            staging_completion=None,
+            staging_capability=None,
+        )
 
 
 def _digest(payload: object) -> str:
@@ -525,6 +576,22 @@ def test_replay_is_provider_free_and_reproduces_exact_live_proposals(
     )
 
     assert all(not item.execution.attempts for item in replay.outcomes)
+    expected_mapping_kinds = {
+        "run-id",
+        "workload",
+        "input-shard",
+        "impact-workload",
+        "impact-result",
+        "analysis-set",
+        "impact-input-shard",
+        "impact-output-shard",
+        "validated-output",
+        "input-envelope",
+    }
+    for outcome in replay.outcomes:
+        proof = outcome.execution.replay_rebase_attestation
+        assert proof is not None
+        assert {item.kind for item in proof.mappings} == expected_mapping_kinds
     live_outputs = {
         item.execution.input_envelope.input_shard_id: item.revision_planning_output
         for item in live.outcomes

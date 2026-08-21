@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any, SupportsIndex
 
 from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
 from mastervault.change_control.bootstrap import incoming_claim_evidence_sha256
@@ -23,6 +24,7 @@ from mastervault.change_control.inference_repository import (
 from mastervault.change_control.managed_review import (
     MAX_MANAGED_ARTIFACT_BYTES_V1,
     ClaimReconciliationAction,
+    GoverningSourceAdoptionAuthority,
     GroundedArtifactCitation,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -31,12 +33,15 @@ from mastervault.change_control.managed_review import (
     ManagedImpactBatchMemberBinding,
     ManagedImpactOutputRefBinding,
     ManagedInferenceContractBinding,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedRevisionPlan,
+    ManagedRevisionPlanningAdmissionAuthority,
     ManagedRevisionPlanningAdmissionBinding,
     PatchReconstructionAttestation,
     SourceNoteProjectionBinding,
 )
 from mastervault.change_control.managed_revision_admission import (
+    reopen_no_work_planning_admission,
     reopen_revision_planning_admission,
     revision_planning_staging_completion,
 )
@@ -244,6 +249,36 @@ class ApprovedManagedGoverningSourceAuthority:
 
 
 @dataclass(frozen=True)
+class ApprovedManagedRevisionPlanningAdmissionAuthority:
+    """Process-local reviewed authority for one exact planning admission."""
+
+    admission: ManagedRevisionPlanningAdmissionAuthority
+    reviewed_snapshot: ReviewedTemporalSnapshotAuthority
+
+    def __post_init__(self) -> None:
+        if type(self.admission) not in {
+            ManagedRevisionPlanningAdmissionBinding,
+            ManagedNoWorkPlanningAdmissionBinding,
+        }:
+            raise TypeError("approved revision admission requires an exact binding")
+        if type(self.reviewed_snapshot) is not ReviewedTemporalSnapshotAuthority:
+            raise TypeError("approved revision admission requires exact reviewed authority")
+        exact = type(self.admission).model_validate_json(
+            canonical_json_bytes(self.admission.model_dump(mode="json"))
+        )
+        if exact != self.admission:
+            raise ValueError("approved revision admission is not canonical")
+        self.reviewed_snapshot.verify()
+
+    def __reduce__(self) -> Any:
+        raise TypeError("approved revision admission authorities are process-local")
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> Any:
+        del protocol
+        raise TypeError("approved revision admission authorities are process-local")
+
+
+@dataclass(frozen=True)
 class ResolvedReviewedGenerationSource:
     """Freshly verified reviewed aggregate, SourceNotes, and provenance root."""
 
@@ -304,6 +339,9 @@ class RepositoryBackedManagedReviewResolver:
         canonical_root: Path,
         approved_contracts: tuple[ApprovedManagedInferenceContractAuthority, ...],
         revision_admissions: tuple[ManagedRevisionPlanningAdmissionBinding, ...] = (),
+        approved_revision_admissions: tuple[
+            ApprovedManagedRevisionPlanningAdmissionAuthority, ...
+        ] = (),
         governing_sources: tuple[ApprovedManagedGoverningSourceAuthority, ...] = (),
     ) -> None:
         if evidence_repository.root != staging_repository.root or (
@@ -337,8 +375,26 @@ class RepositoryBackedManagedReviewResolver:
         admissions = {item.admission_id: item for item in revision_admissions}
         if len(admissions) != len(revision_admissions):
             raise ValueError("managed revision admission identities must be unique")
-        self._admission_sources: dict[str, ApprovedManagedGoverningSourceAuthority] = {}
-        self._admissions: dict[str, ManagedRevisionPlanningAdmissionBinding] = {}
+        approved_admissions = {
+            item.admission.admission_id: item for item in approved_revision_admissions
+        }
+        if len(approved_admissions) != len(approved_revision_admissions):
+            raise ValueError("approved revision admission identities must be unique")
+        if set(admissions) & set(approved_admissions):
+            raise ValueError(
+                "revision admission cannot have both sealed and direct reviewed authority"
+            )
+        if any(
+            type(item) is not ApprovedManagedRevisionPlanningAdmissionAuthority
+            for item in approved_revision_admissions
+        ):
+            raise TypeError("approved revision admission authority type was substituted")
+        self._admission_sources: dict[
+            str,
+            ApprovedManagedGoverningSourceAuthority
+            | ApprovedManagedRevisionPlanningAdmissionAuthority,
+        ] = {}
+        self._admissions: dict[str, ManagedRevisionPlanningAdmissionAuthority] = {}
         for key, value in admissions.items():
             matching_sources = tuple(
                 authority
@@ -367,6 +423,26 @@ class RepositoryBackedManagedReviewResolver:
                 staging_repository=self._staging,
             )
             self._admission_sources[key] = authority
+        for direct_key, direct_authority in approved_admissions.items():
+            direct_value = direct_authority.admission
+            direct_reopened: ManagedRevisionPlanningAdmissionAuthority
+            if isinstance(direct_value, ManagedNoWorkPlanningAdmissionBinding):
+                direct_reopened = reopen_no_work_planning_admission(
+                    direct_value,
+                    reviewed_snapshot=direct_authority.reviewed_snapshot,
+                    evidence_repository=self._evidence,
+                )
+            else:
+                direct_reopened = reopen_revision_planning_admission(
+                    direct_value,
+                    reviewed_snapshot=direct_authority.reviewed_snapshot,
+                    evidence_repository=self._evidence,
+                    staging_repository=self._staging,
+                )
+            if direct_reopened != direct_value:
+                raise ValueError("approved revision admission changed on initial reopen")
+            self._admissions[direct_key] = direct_reopened
+            self._admission_sources[direct_key] = direct_authority
 
     def open_algorithm_manifest(self, binding: ManagedInferenceContractBinding) -> bytes:
         approved = self._approved_contracts.get(binding.contract_binding_id)
@@ -393,14 +469,20 @@ class RepositoryBackedManagedReviewResolver:
         return approved.contract
 
     def resolve_revision_planning_admission(
-        self, binding: ManagedRevisionPlanningAdmissionBinding
-    ) -> ManagedRevisionPlanningAdmissionBinding:
+        self, binding: ManagedRevisionPlanningAdmissionAuthority
+    ) -> ManagedRevisionPlanningAdmissionAuthority:
         configured = self._admissions.get(binding.admission_id)
         if configured != binding:
             raise ValueError("revision planning admission was not explicitly configured")
         source = self._admission_sources.get(binding.admission_id)
         if source is None:
             raise ValueError("revision planning admission lacks reviewed-source authority")
+        if isinstance(binding, ManagedNoWorkPlanningAdmissionBinding):
+            return reopen_no_work_planning_admission(
+                binding,
+                reviewed_snapshot=source.reviewed_snapshot,
+                evidence_repository=self._evidence,
+            )
         return reopen_revision_planning_admission(
             binding,
             reviewed_snapshot=source.reviewed_snapshot,
@@ -409,7 +491,7 @@ class RepositoryBackedManagedReviewResolver:
         )
 
     def resolve_governing_source_adoption(
-        self, binding: ManagedGoverningSourceAdoptionBinding
+        self, binding: GoverningSourceAdoptionAuthority
     ) -> ManagedGoverningSourceAdoptionBinding:
         if type(binding) is not ManagedGoverningSourceAdoptionBinding:
             raise TypeError("governing-source resolver requires the exact binding type")
@@ -425,10 +507,12 @@ class RepositoryBackedManagedReviewResolver:
         )
 
     def resolve_reviewed_generation_source(
-        self, binding: ManagedGoverningSourceAdoptionBinding
+        self, binding: GoverningSourceAdoptionAuthority
     ) -> ResolvedReviewedGenerationSource:
         """Reopen the exact complete rev4 inventory behind one adoption."""
 
+        if type(binding) is not ManagedGoverningSourceAdoptionBinding:
+            raise TypeError("sealed generation-source resolver requires the exact V1 binding")
         reopened = self.resolve_governing_source_adoption(binding)
         configured = self._governing_sources.get(binding.adoption_id)
         if configured is None or reopened != configured.adoption:
@@ -646,7 +730,9 @@ class RepositoryBackedManagedReviewResolver:
                 raise ValueError("managed staging artifact path omits run/target identity")
             run_id = parts[2]
             admissions = [item for item in self._admissions.values() if item.run_id == run_id]
-            if len(admissions) != 1:
+            if len(admissions) != 1 or not isinstance(
+                admissions[0], ManagedRevisionPlanningAdmissionBinding
+            ):
                 raise ValueError("managed staging artifact lacks one configured admission")
             return self._staging.open_member(
                 completion=revision_planning_staging_completion(admissions[0]),
@@ -664,7 +750,15 @@ class RepositoryBackedManagedReviewResolver:
             allowed = (
                 len(parts) >= 3
                 and parts[0] == "inference"
-                and parts[1] in {"algorithms", "prompts", "schemas", "inputs", "citations"}
+                and parts[1]
+                in {
+                    "algorithms",
+                    "prompts",
+                    "schemas",
+                    "inputs",
+                    "citations",
+                    "rebase-attestations",
+                }
             ) or parts[:3] == ("temporal", "evidence", "analyses")
             if not allowed:
                 raise ValueError("inference-input artifact uses an unsupported evidence root")
@@ -748,12 +842,13 @@ class RepositoryBackedManagedReviewResolver:
         if payload[citation.start_byte : citation.end_byte] != citation.quote.encode("utf-8"):
             raise ValueError("managed citation differs from reopened exact evidence bytes")
 
-    def verify_source_note_projection(
+    def _verify_source_note_projection(
         self,
         projection: SourceNoteProjectionBinding,
         *,
         raw_bytes: bytes,
         note_bytes: bytes,
+        expected_provenance: str,
     ) -> SourceNoteProjectionBinding:
         if (
             projection.validator_version != MANAGED_SOURCE_NOTE_VALIDATOR_VERSION
@@ -773,9 +868,7 @@ class RepositoryBackedManagedReviewResolver:
         except UnicodeDecodeError as exc:
             raise ValueError("managed projection raw source must be UTF-8") from exc
         note = parse_managed_source_note(note_bytes)
-        if note.provenance != projection.canonical_raw_path or note.provenance_hash != content_hash(
-            raw_text
-        ):
+        if note.provenance != expected_provenance or note.provenance_hash != content_hash(raw_text):
             raise ValueError("SourceNote provenance differs from exact projected raw bytes")
         note_claims = {item.id: item for item in note.key_claims}
         projected_claims = {
@@ -812,6 +905,20 @@ class RepositoryBackedManagedReviewResolver:
             source_note_schema_sha256=projection.source_note_schema_sha256,
             validator_result_sha256=result_sha256,
             projected_claims=projection.projected_claims,
+        )
+
+    def verify_source_note_projection(
+        self,
+        projection: SourceNoteProjectionBinding,
+        *,
+        raw_bytes: bytes,
+        note_bytes: bytes,
+    ) -> SourceNoteProjectionBinding:
+        return self._verify_source_note_projection(
+            projection,
+            raw_bytes=raw_bytes,
+            note_bytes=note_bytes,
+            expected_provenance=projection.canonical_raw_path,
         )
 
     def verify_revision_plan_source_note(
@@ -892,6 +999,7 @@ class RepositoryBackedManagedReviewResolver:
 __all__ = [
     "ApprovedManagedGoverningSourceAuthority",
     "ApprovedManagedInferenceContractAuthority",
+    "ApprovedManagedRevisionPlanningAdmissionAuthority",
     "RepositoryBackedManagedReviewResolver",
     "ResolvedReviewedGenerationSource",
     "derive_managed_governing_source_adoption",

@@ -18,6 +18,7 @@ from typing import Any, Final, Literal, Self, SupportsIndex
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mastervault.change_control.managed_review import (
+    MAX_MANAGED_ARTIFACT_BYTES_V1,
     InferenceExecutionMode,
     ManagedArtifactKind,
     ManagedArtifactRef,
@@ -27,6 +28,7 @@ from mastervault.change_control.recorded_inference import (
     MAX_OUTCOME_ARTIFACT_CANONICAL_BYTES_V1,
     InferenceArtifactPayload,
     RecordedInferenceOutcome,
+    verify_replay_rebase_attestation,
 )
 from mastervault.change_control.repository_files import (
     RepositoryFileBoundaryError,
@@ -166,7 +168,6 @@ class _BatchManifest(_StrictFrozenModel):
     repository_id: str = Field(pattern=SHA256_PATTERN)
     repository_root: str
     outcomes: tuple[_BatchEntry, ...] = Field(
-        min_length=1,
         max_length=MAX_INFERENCE_EVIDENCE_BATCH_V1,
     )
 
@@ -477,11 +478,7 @@ class FilesystemInferenceEvidenceRepository:
                         f"{label} path does not use exact repository case: {relative}"
                     )
                 return None
-            flags = (
-                os.O_RDONLY
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_NONBLOCK", 0)
-            )
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
             fd = os.open(name, flags, dir_fd=parent)
             before = os.fstat(fd)
             current = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -507,9 +504,7 @@ class FilesystemInferenceEvidenceRepository:
                 or signature(before) != signature(current)
                 or before.st_size > limit
             ):
-                raise RepositoryFileIntegrityError(
-                    f"{label} is not one exact regular inode"
-                )
+                raise RepositoryFileIntegrityError(f"{label} is not one exact regular inode")
 
             def exact_read() -> bytes:
                 content = bytearray()
@@ -1045,7 +1040,7 @@ class FilesystemInferenceEvidenceRepository:
     def _prepare_batch(
         self, outcomes: tuple[RecordedInferenceOutcome, ...]
     ) -> tuple[_PreparedOutcome, ...]:
-        if not 1 <= len(outcomes) <= MAX_INFERENCE_EVIDENCE_BATCH_V1:
+        if len(outcomes) > MAX_INFERENCE_EVIDENCE_BATCH_V1:
             raise InferenceEvidenceRepositoryError(
                 "inference evidence batch count is outside the fixed v1 bound"
             )
@@ -1153,18 +1148,20 @@ class FilesystemInferenceEvidenceRepository:
                     "prompt_sha256",
                     "response_schema_sha256",
                 )
-                if (
-                    execution.task != source.execution.task
-                    or execution.input_envelope != source.execution.input_envelope
-                    or any(
-                        getattr(execution.contract, field)
-                        != getattr(source.execution.contract, field)
-                        for field in comparable_contract
-                    )
+                if execution.task != source.execution.task or any(
+                    getattr(execution.contract, field) != getattr(source.execution.contract, field)
+                    for field in comparable_contract
                 ):
                     raise ValueError(
                         "REPLAY task/input/contract differs from committed LIVE evidence"
                     )
+                if execution.replay_rebase_attestation is None:
+                    if execution.input_envelope != source.execution.input_envelope:
+                        raise ValueError(
+                            "REPLAY task/input/contract differs from committed LIVE evidence"
+                        )
+                else:
+                    verify_replay_rebase_attestation(source=source, current=replay)
                 if execution.replay_source_execution_sha256 != source.execution.execution_sha256:
                     raise ValueError(
                         "REPLAY source execution SHA differs from committed LIVE evidence"
@@ -1269,7 +1266,7 @@ class FilesystemInferenceEvidenceRepository:
     def persist_batch(
         self, outcomes: tuple[RecordedInferenceOutcome, ...]
     ) -> RepositoryVerifiedInferenceEvidenceBatch:
-        """Persist one exact non-empty recorded-inference shard evidence set."""
+        """Persist one exact recorded-inference shard set, including zero-work sets."""
 
         self._require_writable()
         prepared = self._prepare_batch(outcomes)
@@ -1519,17 +1516,22 @@ class FilesystemInferenceEvidenceRepository:
             raise TypeError("inference artifact reopen requires an exact artifact reference")
         parts = PurePosixPath(artifact.path).parts
         if artifact.kind == ManagedArtifactKind.INFERENCE_INPUT:
-            allowed = (
-                len(parts) >= 3
-                and parts[0] == "inference"
-                and parts[1] in {"algorithms", "prompts", "schemas", "inputs", "citations"}
-            ) or parts[:3] == ("temporal", "evidence", "analyses")
-        elif artifact.kind == ManagedArtifactKind.INFERENCE_OUTPUT:
-            allowed = (
-                len(parts) >= 3
-                and parts[0] == "inference"
-                and parts[1] in {"raw", "outputs"}
+            exact_rebase = (
+                len(parts) == 3
+                and parts[:2] == ("inference", "rebase-attestations")
+                and parts[2] == f"{artifact.sha256}.json"
             )
+            allowed = (
+                exact_rebase
+                or (
+                    len(parts) >= 3
+                    and parts[0] == "inference"
+                    and parts[1] in {"algorithms", "prompts", "schemas", "inputs", "citations"}
+                )
+                or parts[:3] == ("temporal", "evidence", "analyses")
+            )
+        elif artifact.kind == ManagedArtifactKind.INFERENCE_OUTPUT:
+            allowed = len(parts) >= 3 and parts[0] == "inference" and parts[1] in {"raw", "outputs"}
         elif artifact.kind == ManagedArtifactKind.INFERENCE_RECEIPT:
             allowed = parts[:2] == ("receipts", "inference")
         else:
@@ -1544,13 +1546,68 @@ class FilesystemInferenceEvidenceRepository:
                 limit=artifact.byte_count,
                 label="inference artifact",
             )
-        if payload is None or len(payload) != artifact.byte_count or (
-            hashlib.sha256(payload).hexdigest() != artifact.sha256
+        if (
+            payload is None
+            or len(payload) != artifact.byte_count
+            or hashlib.sha256(payload).hexdigest() != artifact.sha256
         ):
             raise InferenceEvidenceResolutionError(
                 "inference artifact is absent or differs from its exact receipt"
             )
         return payload
+
+    def reopen_algorithm_manifest(
+        self, algorithm_manifest_sha256: str
+    ) -> tuple[ManagedArtifactRef, bytes]:
+        """Reopen one content-addressed algorithm manifest from its exact SHA."""
+
+        if (
+            type(algorithm_manifest_sha256) is not str
+            or re.fullmatch(SHA256_PATTERN, algorithm_manifest_sha256) is None
+        ):
+            raise ValueError("algorithm manifest SHA must be exact lowercase SHA-256")
+        relative = f"inference/algorithms/{algorithm_manifest_sha256}.json"
+        try:
+            with self._read_lock():
+                parent, name = self._open_parent(relative, create=False)
+                try:
+                    aliases = [
+                        item
+                        for item in os.listdir(parent)
+                        if item.casefold() == name.casefold()
+                    ]
+                    if aliases != [name]:
+                        raise RepositoryFileBoundaryError(
+                            "algorithm manifest has an absent, aliased, or surplus locator"
+                        )
+                finally:
+                    os.close(parent)
+                payload = self._read_optional(
+                    relative,
+                    limit=MAX_MANAGED_ARTIFACT_BYTES_V1,
+                    label="inference algorithm manifest",
+                )
+        except InferenceEvidenceResolutionError:
+            raise
+        except (OSError, RepositoryFileBoundaryError, RepositoryFileIntegrityError) as exc:
+            raise InferenceEvidenceResolutionError(
+                "algorithm manifest cannot be reopened exactly"
+            ) from exc
+        if (
+            payload is None
+            or not payload
+            or hashlib.sha256(payload).hexdigest() != algorithm_manifest_sha256
+        ):
+            raise InferenceEvidenceResolutionError(
+                "algorithm manifest is absent or differs from its content address"
+            )
+        artifact = ManagedArtifactRef.create(
+            kind=ManagedArtifactKind.INFERENCE_INPUT,
+            path=relative,
+            sha256=algorithm_manifest_sha256,
+            byte_count=len(payload),
+        )
+        return artifact, payload
 
     def _resolve_batch(
         self,

@@ -11,6 +11,11 @@ from mastervault.contracts.contradiction import (
     ContradictionVerdictOut,
 )
 from mastervault.contracts.corpus_check import CorpusCheckContract, CorpusCheckOut
+from mastervault.contracts.generic_grounded_claims import (
+    GenericGroundedClaimCandidateV2,
+    GenericGroundedClaimExtractionContractV2,
+    GenericGroundedClaimExtractionV2,
+)
 from mastervault.contracts.judge import SufficiencyJudgeContract, SufficiencyVerdictOut
 from mastervault.contracts.page_grounded_claims import (
     EvidenceCandidate,
@@ -33,6 +38,9 @@ __all__ = [
     "DispatchResult",
     "GroundedAnswerOut",
     "GroundedSynthesisContract",
+    "GenericGroundedClaimCandidateV2",
+    "GenericGroundedClaimExtractionContractV2",
+    "GenericGroundedClaimExtractionV2",
     "EvidenceCandidate",
     "PageGroundedClaimCandidate",
     "PageGroundedClaimExtractionContract",

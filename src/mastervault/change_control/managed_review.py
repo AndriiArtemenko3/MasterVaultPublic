@@ -25,7 +25,11 @@ from pydantic import (
     model_validator,
 )
 
-from mastervault.change_control.analysis_binding import AnalysisBootstrapBinding
+from mastervault.change_control.analysis_binding import (
+    AnalysisBootstrapAuthority,
+    AnalysisBootstrapBinding,
+    GenericAnalysisBootstrapBindingV2,
+)
 from mastervault.change_control.models import (
     CONTENT_ID_PATTERNS,
     SHA256_PATTERN,
@@ -106,6 +110,8 @@ _ID_PATTERNS = {
 }
 _OPERATION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$")
 _INCOMING_ID_RE = re.compile(r"^incoming:[0-9a-f]{64}$")
+_GENERIC_EVENT_ID_RE = re.compile(r"^event:[0-9a-f]{64}$")
+_OPERATOR_RUN_ID_RE = re.compile(r"^operatorrun:[0-9a-f]{64}$")
 
 
 def _sha256(payload: Any) -> str:
@@ -145,6 +151,12 @@ def _exact_logical_key(value: str, *, label: str) -> str:
     return value
 
 
+def _exact_run_id(value: str) -> str:
+    if isinstance(value, str) and _OPERATOR_RUN_ID_RE.fullmatch(value) is not None:
+        return value
+    return _exact_logical_key(value, label="run_id")
+
+
 def _safe_path(value: str) -> str:
     if len(value.encode("utf-8")) > MAX_MANAGED_PATH_BYTES_V1:
         raise ValueError("path exceeds MAX_MANAGED_PATH_BYTES_V1 UTF-8 byte limit")
@@ -174,6 +186,20 @@ def _safe_path(value: str) -> str:
 
 def _is_managed_review_staging_path(value: str) -> bool:
     return PurePosixPath(value).parts[:2] == ("staging", "managed-review")
+
+
+def _is_workspace_bootstrap_raw_path(value: str) -> bool:
+    parts = PurePosixPath(value).parts
+    if (
+        len(parts) != 3
+        or parts[0] != "bootstrap-sources"
+        or re.fullmatch(SHA256_PATTERN, parts[2]) is None
+    ):
+        return False
+    try:
+        return _exact_logical_key(parts[1], label="workspace source root") == parts[1]
+    except ValueError:
+        return False
 
 
 def _canonical_utc(value: str) -> str:
@@ -475,6 +501,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
     provider_request_id: str | None = Field(default=None, pattern=_OPERATION_ID_RE.pattern)
     replay_source_receipt_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     replay_source_receipt_artifact: ManagedArtifactRef | None = None
+    replay_rebase_attestation_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
+    replay_rebase_attestation_artifact: ManagedArtifactRef | None = None
     authoritative_replay_source_resolution_required: bool
     prompt_sha256: str = Field(pattern=SHA256_PATTERN)
     response_schema_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -486,6 +514,15 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
     raw_output_sha256: str = Field(pattern=SHA256_PATTERN)
     validated_output_sha256: str = Field(pattern=SHA256_PATTERN)
     usage: InferenceUsage
+
+    @model_serializer(mode="wrap")
+    def _omit_additive_rebase_nulls(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.replay_rebase_attestation_sha256 is None:
+            values.pop("replay_rebase_attestation_sha256", None)
+        if self.replay_rebase_attestation_artifact is None:
+            values.pop("replay_rebase_attestation_artifact", None)
+        return values
 
     @field_validator("contract_id")
     @classmethod
@@ -551,6 +588,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
                 self.provider_request_id is None
                 or self.replay_source_receipt_sha256 is not None
                 or self.replay_source_receipt_artifact is not None
+                or self.replay_rebase_attestation_sha256 is not None
+                or self.replay_rebase_attestation_artifact is not None
                 or self.authoritative_replay_source_resolution_required
             ):
                 raise ValueError("live inference requires only provider request evidence")
@@ -582,6 +621,16 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             item.path == self.replay_source_receipt_artifact.path for item in self.input_artifacts
         ):
             raise ValueError("replay receipt locator cannot collide with an inference input")
+        rebase = self.replay_rebase_attestation_artifact
+        if (rebase is None) != (self.replay_rebase_attestation_sha256 is None):
+            raise ValueError("replay rebase attestation requires one exact artifact and SHA")
+        if rebase is not None and (
+            self.mode != InferenceExecutionMode.REPLAY
+            or rebase.kind != ManagedArtifactKind.INFERENCE_INPUT
+            or rebase.sha256 != self.replay_rebase_attestation_sha256
+            or rebase.path != f"inference/rebase-attestations/{rebase.sha256}.json"
+        ):
+            raise ValueError("replay rebase attestation has the wrong exact locator")
         if self.receipt_id != _content_id("minference", self._payload()):
             raise ValueError("inference receipt ID does not match its exact content")
         return self
@@ -615,14 +664,19 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             "model",
             "prompt_sha256",
             "response_schema_sha256",
-            "input_artifacts",
-            "input_envelope_sha256",
-            "canonical_input_sha256",
             "raw_output_sha256",
-            "validated_output_sha256",
         )
         if any(getattr(self, field) != getattr(source_receipt, field) for field in comparable):
             raise ValueError("replay receipt does not exactly match resolved LIVE inference")
+        if self.replay_rebase_attestation_artifact is None:
+            strict = (
+                "input_artifacts",
+                "input_envelope_sha256",
+                "canonical_input_sha256",
+                "validated_output_sha256",
+            )
+            if any(getattr(self, field) != getattr(source_receipt, field) for field in strict):
+                raise ValueError("replay receipt does not exactly match resolved LIVE inference")
 
     @classmethod
     def create(
@@ -643,6 +697,8 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
         raw_output_sha256: str,
         validated_output_sha256: str,
         usage: InferenceUsage,
+        replay_rebase_attestation_sha256: str | None = None,
+        replay_rebase_attestation_artifact: ManagedArtifactRef | None = None,
     ) -> Self:
         _preflight_collection(
             input_artifacts,
@@ -685,6 +741,12 @@ class ContentAddressedInferenceReceipt(_StrictFrozenModel):
             "validated_output_sha256": validated_output_sha256,
             "usage": usage.model_dump(mode="json"),
         }
+        if replay_rebase_attestation_sha256 is not None:
+            values["replay_rebase_attestation_sha256"] = replay_rebase_attestation_sha256
+        if replay_rebase_attestation_artifact is not None:
+            values["replay_rebase_attestation_artifact"] = (
+                replay_rebase_attestation_artifact.model_dump(mode="json")
+            )
         return _validate_canonical_json(
             cls, {"receipt_id": _content_id("minference", values), **values}
         )
@@ -1107,7 +1169,9 @@ class SourceNoteProjectionBinding(_StrictFrozenModel):
             raise ValueError("projection raw artifact has the wrong kind")
         if self.note_artifact.kind != ManagedArtifactKind.SOURCE_NOTE:
             raise ValueError("projection note artifact has the wrong kind")
-        if PurePosixPath(self.canonical_raw_path).suffix != ".md":
+        if PurePosixPath(self.canonical_raw_path).suffix != ".md" and not (
+            _is_workspace_bootstrap_raw_path(self.canonical_raw_path)
+        ):
             raise ValueError("managed raw projection path must be Markdown in this slice")
         if PurePosixPath(self.canonical_note_path).suffix != ".md":
             raise ValueError("SourceNote projection path must be Markdown")
@@ -1526,9 +1590,7 @@ class WorkspaceGenerationZeroManifestBinding(_StrictFrozenModel):
     encoding: Literal["verified-workspace-bootstrap-v1"] = "verified-workspace-bootstrap-v1"
     bootstrap_id: str = Field(pattern=r"^workspacebootstrap:[0-9a-f]{64}$")
     intent_sha256: str = Field(pattern=SHA256_PATTERN)
-    inventory_receipt_id: str = Field(
-        pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$"
-    )
+    inventory_receipt_id: str = Field(pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$")
     inventory_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
     index_receipt_id: str = Field(pattern=r"^legacyindexreceipt:[0-9a-f]{64}$")
     index_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -1588,9 +1650,7 @@ class WorkspaceGenerationZeroOriginBasis(_StrictFrozenModel):
     authoritative_repository_resolution_required: Literal[True] = True
     bootstrap_id: str = Field(pattern=r"^workspacebootstrap:[0-9a-f]{64}$")
     intent_sha256: str = Field(pattern=SHA256_PATTERN)
-    inventory_receipt_id: str = Field(
-        pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$"
-    )
+    inventory_receipt_id: str = Field(pattern=r"^workspaceinventoryreceipt:[0-9a-f]{64}$")
     inventory_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
     index_receipt_id: str = Field(pattern=r"^legacyindexreceipt:[0-9a-f]{64}$")
     index_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -1637,12 +1697,8 @@ class AuthorityRevisionBinding(_StrictFrozenModel):
     active_generation: ContentAddressedGenerationBinding
     active_pointer_sha256: str = Field(pattern=SHA256_PATTERN)
     origin_basis: (
-        GenerationZeroOriginBasis
-        | WorkspaceGenerationZeroOriginBasis
-        | ManagedDecisionOriginBasis
-    ) = Field(
-        discriminator="origin_kind"
-    )
+        GenerationZeroOriginBasis | WorkspaceGenerationZeroOriginBasis | ManagedDecisionOriginBasis
+    ) = Field(discriminator="origin_kind")
 
     @field_validator("aggregate_id")
     @classmethod
@@ -2266,6 +2322,212 @@ class ManagedAnalysisSetBinding(_StrictFrozenModel):
         )
 
 
+class GenericManagedAnalysisSetBindingV3(_StrictFrozenModel):
+    """Recorded managed-analysis lineage for generic V2 admission authority."""
+
+    schema_version: Literal[3] = 3
+    analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
+    analysis_set_sha256: str = Field(pattern=SHA256_PATTERN)
+    analysis_bootstrap: GenericAnalysisBootstrapBindingV2
+    incoming_logical_event_id: str
+    incoming_event_identity: str = Field(pattern=_GENERIC_EVENT_ID_RE.pattern)
+    incoming_bundle_id: str = Field(pattern=r"^generic-bundle-v2:[0-9a-f]{64}$")
+    incoming_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_admission_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_source_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_projection_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_inference_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_claim_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
+    analysis_bootstrap_binding_id: str = Field(
+        pattern=r"^generic-analysis-bootstrap-v2:[0-9a-f]{64}$"
+    )
+    analysis_bootstrap_binding_sha256: str = Field(pattern=SHA256_PATTERN)
+    candidate_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    classification_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    attention_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    impact_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    impact_evidence: ManagedImpactAnalysisEvidenceBinding
+    changed_claim_revision_ids: tuple[str, ...] = Field(
+        min_length=1, max_length=MAX_MANAGED_CHANGED_CLAIMS_V1
+    )
+    global_relevant_claim_revision_ids: tuple[str, ...] = Field(
+        min_length=1, max_length=MAX_MANAGED_GLOBAL_RELEVANT_CLAIMS_V1
+    )
+
+    @field_validator("changed_claim_revision_ids", "global_relevant_claim_revision_ids")
+    @classmethod
+    def _generic_claim_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if values != tuple(sorted(set(values))) or any(
+            re.fullmatch(CONTENT_ID_PATTERNS["claimrev"], item) is None for item in values
+        ):
+            raise ValueError("generic analysis claim IDs must be canonical and unique")
+        return values
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"analysis_set_id", "analysis_set_sha256"})
+
+    @model_validator(mode="after")
+    def _generic_identity(self) -> Self:
+        bootstrap = self.analysis_bootstrap
+        if not (
+            self.incoming_logical_event_id == bootstrap.incoming_event_id
+            and self.incoming_event_identity == bootstrap.incoming_event_identity
+            and self.incoming_bundle_id == bootstrap.incoming_bundle_id
+            and self.incoming_bundle_sha256 == bootstrap.incoming_bundle_sha256
+            and self.incoming_admission_sha256 == bootstrap.incoming_admission_sha256
+            and self.incoming_source_receipt_sha256 == bootstrap.incoming_source_receipt_sha256
+            and self.incoming_projection_sha256 == bootstrap.incoming_projection_sha256
+            and self.incoming_inference_sha256 == bootstrap.incoming_inference_sha256
+            and self.incoming_claim_evidence_sha256 == bootstrap.incoming_claim_evidence_sha256
+            and self.analysis_bootstrap_binding_id == bootstrap.binding_id
+            and self.analysis_bootstrap_binding_sha256 == bootstrap.binding_sha256
+            and self.changed_claim_revision_ids == bootstrap.changed_claim_revision_ids
+            and self.impact_result_sha256 == self.impact_evidence.result_sha256
+            and set(self.changed_claim_revision_ids).issubset(
+                self.global_relevant_claim_revision_ids
+            )
+        ):
+            raise ValueError("generic analysis set differs from exact V2 bootstrap authority")
+        digest = _sha256(self._payload())
+        if self.analysis_set_sha256 != digest or self.analysis_set_id != f"manalysis:{digest}":
+            raise ValueError("generic analysis set ID/SHA differs from exact algorithms")
+        return self
+
+    @classmethod
+    def create_with_impact_evidence(
+        cls,
+        *,
+        analysis_bootstrap: GenericAnalysisBootstrapBindingV2,
+        candidate_result_sha256: str,
+        classification_result_sha256: str,
+        attention_result_sha256: str,
+        impact_evidence: ManagedImpactAnalysisEvidenceBinding,
+        global_relevant_claim_revision_ids: tuple[str, ...],
+    ) -> Self:
+        values: dict[str, Any] = {
+            "schema_version": 3,
+            "analysis_bootstrap": analysis_bootstrap.model_dump(mode="json"),
+            "incoming_logical_event_id": analysis_bootstrap.incoming_event_id,
+            "incoming_event_identity": analysis_bootstrap.incoming_event_identity,
+            "incoming_bundle_id": analysis_bootstrap.incoming_bundle_id,
+            "incoming_bundle_sha256": analysis_bootstrap.incoming_bundle_sha256,
+            "incoming_admission_sha256": analysis_bootstrap.incoming_admission_sha256,
+            "incoming_source_receipt_sha256": (analysis_bootstrap.incoming_source_receipt_sha256),
+            "incoming_projection_sha256": analysis_bootstrap.incoming_projection_sha256,
+            "incoming_inference_sha256": analysis_bootstrap.incoming_inference_sha256,
+            "incoming_claim_evidence_sha256": (analysis_bootstrap.incoming_claim_evidence_sha256),
+            "analysis_bootstrap_binding_id": analysis_bootstrap.binding_id,
+            "analysis_bootstrap_binding_sha256": analysis_bootstrap.binding_sha256,
+            "candidate_result_sha256": candidate_result_sha256,
+            "classification_result_sha256": classification_result_sha256,
+            "attention_result_sha256": attention_result_sha256,
+            "impact_result_sha256": impact_evidence.result_sha256,
+            "impact_evidence": impact_evidence.model_dump(mode="json"),
+            "changed_claim_revision_ids": analysis_bootstrap.changed_claim_revision_ids,
+            "global_relevant_claim_revision_ids": global_relevant_claim_revision_ids,
+        }
+        digest = _sha256(values)
+        return _validate_canonical_json(
+            cls,
+            {
+                "analysis_set_id": f"manalysis:{digest}",
+                "analysis_set_sha256": digest,
+                **values,
+            },
+        )
+
+
+class ManagedNoWorkAnalysisSetBindingV4(_StrictFrozenModel):
+    """Exact analysis lineage for a mechanically empty planning workload."""
+
+    schema_version: Literal[4] = 4
+    analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
+    analysis_set_sha256: str = Field(pattern=SHA256_PATTERN)
+    analysis_bootstrap: AnalysisBootstrapAuthority
+    candidate_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    classification_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    attention_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    impact_result_sha256: str = Field(pattern=SHA256_PATTERN)
+    no_work_evidence_id: str = Field(pattern=r"^no-work-planning:[0-9a-f]{64}$")
+    no_work_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
+    changed_claim_revision_ids: tuple[str, ...] = Field(max_length=MAX_MANAGED_CHANGED_CLAIMS_V1)
+    global_relevant_claim_revision_ids: tuple[str, ...] = Field(
+        max_length=MAX_MANAGED_GLOBAL_RELEVANT_CLAIMS_V1
+    )
+
+    @field_validator("changed_claim_revision_ids", "global_relevant_claim_revision_ids")
+    @classmethod
+    def _claim_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if values != tuple(sorted(set(values))) or any(
+            re.fullmatch(CONTENT_ID_PATTERNS["claimrev"], item) is None for item in values
+        ):
+            raise ValueError("no-work analysis claim IDs must be canonical and unique")
+        return values
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"analysis_set_id", "analysis_set_sha256"})
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        bootstrap = self.analysis_bootstrap
+        if (
+            self.no_work_evidence_id != f"no-work-planning:{self.no_work_evidence_sha256}"
+            or self.changed_claim_revision_ids != bootstrap.changed_claim_revision_ids
+            or not set(self.changed_claim_revision_ids).issubset(
+                self.global_relevant_claim_revision_ids
+            )
+        ):
+            raise ValueError("no-work analysis differs from exact bootstrap/evidence authority")
+        digest = _sha256(self._payload())
+        if self.analysis_set_sha256 != digest or self.analysis_set_id != f"manalysis:{digest}":
+            raise ValueError("no-work analysis set ID/SHA differs from exact authority")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        analysis_bootstrap: AnalysisBootstrapAuthority,
+        candidate_result_sha256: str,
+        classification_result_sha256: str,
+        attention_result_sha256: str,
+        impact_result_sha256: str,
+        no_work_evidence_id: str,
+        no_work_evidence_sha256: str,
+        global_relevant_claim_revision_ids: tuple[str, ...],
+    ) -> Self:
+        values: dict[str, Any] = {
+            "schema_version": 4,
+            "analysis_bootstrap": analysis_bootstrap.model_dump(mode="json"),
+            "candidate_result_sha256": candidate_result_sha256,
+            "classification_result_sha256": classification_result_sha256,
+            "attention_result_sha256": attention_result_sha256,
+            "impact_result_sha256": impact_result_sha256,
+            "no_work_evidence_id": no_work_evidence_id,
+            "no_work_evidence_sha256": no_work_evidence_sha256,
+            "changed_claim_revision_ids": analysis_bootstrap.changed_claim_revision_ids,
+            "global_relevant_claim_revision_ids": tuple(sorted(global_relevant_claim_revision_ids)),
+        }
+        digest = _sha256(values)
+        return _validate_canonical_json(
+            cls,
+            {
+                "analysis_set_id": f"manalysis:{digest}",
+                "analysis_set_sha256": digest,
+                **values,
+                "analysis_bootstrap": analysis_bootstrap,
+            },
+        )
+
+
+ManagedAnalysisSetAuthority = Annotated[
+    ManagedAnalysisSetBinding
+    | GenericManagedAnalysisSetBindingV3
+    | ManagedNoWorkAnalysisSetBindingV4,
+    Field(discriminator="schema_version"),
+]
+
+
 class TargetAnalysisBinding(_StrictFrozenModel):
     schema_version: Literal[1, 2] = 1
     target_analysis_id: str = Field(pattern=_ID_PATTERNS["mtargetanalysis"].pattern)
@@ -2330,7 +2592,7 @@ class TargetAnalysisBinding(_StrictFrozenModel):
         cls,
         *,
         target_key: str,
-        analysis_set: ManagedAnalysisSetBinding,
+        analysis_set: ManagedAnalysisSetAuthority,
         target_result_sha256: str,
         inference_input: ManagedArtifactRef,
     ) -> Self:
@@ -2362,7 +2624,7 @@ class TargetAnalysisBinding(_StrictFrozenModel):
         cls,
         *,
         target_key: str,
-        analysis_set: ManagedAnalysisSetBinding,
+        analysis_set: ManagedAnalysisSetAuthority,
         target_result_sha256: str,
         inference_input: ManagedArtifactRef,
         input_envelope_sha256: str,
@@ -2419,9 +2681,7 @@ class ManagedRevisionPlanningTargetBinding(_StrictFrozenModel):
 
     @field_validator("staged_artifacts")
     @classmethod
-    def _staged(
-        cls, values: tuple[ManagedArtifactRef, ...]
-    ) -> tuple[ManagedArtifactRef, ...]:
+    def _staged(cls, values: tuple[ManagedArtifactRef, ...]) -> tuple[ManagedArtifactRef, ...]:
         if values != tuple(sorted(values, key=lambda item: item.artifact_id)):
             raise ValueError("revision admission staged artifacts must be canonical")
         if len({item.artifact_id for item in values}) != len(values) or len(
@@ -2436,9 +2696,7 @@ class ManagedRevisionPlanningTargetBinding(_StrictFrozenModel):
             raise ValueError("revision admission input ID differs from its SHA")
         if self.output_shard_id != f"revisionout:{self.output_shard_sha256}":
             raise ValueError("revision admission output ID differs from its SHA")
-        expected_subject = (
-            "mplan" if self.subject_kind == "managed-revision-plan" else "mnochange"
-        )
+        expected_subject = "mplan" if self.subject_kind == "managed-revision-plan" else "mnochange"
         if self.subject_id != f"{expected_subject}:{self.subject_sha256}":
             raise ValueError("revision admission subject ID differs from its kind/SHA")
         prefix = ("staging", "managed-review")
@@ -2466,7 +2724,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
     repository_id: str = Field(pattern=SHA256_PATTERN)
     workload_id: str = Field(pattern=r"^revisionwork:[0-9a-f]{64}$")
     workload_sha256: str = Field(pattern=SHA256_PATTERN)
-    analysis_set: ManagedAnalysisSetBinding
+    analysis_set: ManagedAnalysisSetAuthority
     analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
     analysis_set_sha256: str = Field(pattern=SHA256_PATTERN)
     reviewed_snapshot_binding_id: str = Field(pattern=r"^reviewed-snapshot:[0-9a-f]{64}$")
@@ -2481,9 +2739,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
     staging_manifest_id: str = Field(pattern=r"^managed-staging:[0-9a-f]{64}$")
     staging_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     staging_manifest_path: str
-    staging_completion_id: str = Field(
-        pattern=r"^managed-staging-completion:[0-9a-f]{64}$"
-    )
+    staging_completion_id: str = Field(pattern=r"^managed-staging-completion:[0-9a-f]{64}$")
     staging_completion_sha256: str = Field(pattern=SHA256_PATTERN)
     staging_completion_path: str
     targets: tuple[ManagedRevisionPlanningTargetBinding, ...] = Field(
@@ -2493,7 +2749,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
     @field_validator("run_id")
     @classmethod
     def _run(cls, value: str) -> str:
-        return _exact_logical_key(value, label="run_id")
+        return _exact_run_id(value)
 
     @field_validator("staging_manifest_path", "staging_completion_path")
     @classmethod
@@ -2506,8 +2762,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
         cls, values: tuple[ManagedRevisionPlanningBatchMemberBinding, ...]
     ) -> tuple[ManagedRevisionPlanningBatchMemberBinding, ...]:
         identities = tuple(
-            (item.execution_id, item.receipt_artifact_id, item.outcome_sha256)
-            for item in values
+            (item.execution_id, item.receipt_artifact_id, item.outcome_sha256) for item in values
         )
         if identities != tuple(sorted(identities)) or len(set(identities)) != len(identities):
             raise ValueError("revision admission batch members must be unique and canonical")
@@ -2560,8 +2815,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
         if self.staging_manifest_id != f"managed-staging:{self.staging_manifest_sha256}":
             raise ValueError("revision admission staging manifest ID differs from its SHA")
         expected_manifest = (
-            f"staging/managed-review/{self.run_id}/manifests/"
-            f"{self.staging_manifest_sha256}.json"
+            f"staging/managed-review/{self.run_id}/manifests/{self.staging_manifest_sha256}.json"
         )
         expected_completion = f"staging/managed-review/{self.run_id}/COMPLETE.json"
         if (
@@ -2581,8 +2835,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
         completion_sha = _sha256(completion_payload)
         if (
             self.staging_completion_sha256 != completion_sha
-            or self.staging_completion_id
-            != f"managed-staging-completion:{completion_sha}"
+            or self.staging_completion_id != f"managed-staging-completion:{completion_sha}"
         ):
             raise ValueError("revision admission staging completion is not self-consistent")
         expected_members = tuple(
@@ -2610,10 +2863,7 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
         if any(not item.path.startswith(prefix) for item in staged):
             raise ValueError("revision admission staged member escapes its exact run")
         digest = _sha256(self._payload())
-        if (
-            self.admission_sha256 != digest
-            or self.admission_id != f"mrevisionadmission:{digest}"
-        ):
+        if self.admission_sha256 != digest or self.admission_id != f"mrevisionadmission:{digest}":
             raise ValueError("revision admission ID/SHA differs from exact durable evidence")
         return self
 
@@ -2645,7 +2895,9 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
                 ),
             )
         )
-        targets = tuple(sorted(raw_targets, key=lambda item: (item.target_key, item.input_shard_id)))
+        targets = tuple(
+            sorted(raw_targets, key=lambda item: (item.target_key, item.input_shard_id))
+        )
         values = {
             "schema_version": 1,
             **kwargs,
@@ -2673,6 +2925,77 @@ class ManagedRevisionPlanningAdmissionBinding(_StrictFrozenModel):
         )
 
 
+class ManagedNoWorkPlanningAdmissionBinding(_StrictFrozenModel):
+    """Durable admission of mechanical NO_WORK for governing-source review."""
+
+    schema_version: Literal[2] = 2
+    admission_id: str = Field(pattern=_ID_PATTERNS["mrevisionadmission"].pattern)
+    admission_sha256: str = Field(pattern=SHA256_PATTERN)
+    run_id: str
+    repository_id: str = Field(pattern=SHA256_PATTERN)
+    workload_id: str = Field(pattern=r"^revisionwork:[0-9a-f]{64}$")
+    workload_sha256: str = Field(pattern=SHA256_PATTERN)
+    analysis_set: ManagedNoWorkAnalysisSetBindingV4
+    analysis_set_id: str = Field(pattern=_ID_PATTERNS["manalysis"].pattern)
+    analysis_set_sha256: str = Field(pattern=SHA256_PATTERN)
+    reviewed_snapshot_binding_id: str = Field(pattern=r"^reviewed-snapshot:[0-9a-f]{64}$")
+    reviewed_snapshot_binding_sha256: str = Field(pattern=SHA256_PATTERN)
+    temporal_decision_record_sha256: str = Field(pattern=SHA256_PATTERN)
+    no_work_evidence_id: str = Field(pattern=r"^no-work-planning:[0-9a-f]{64}$")
+    no_work_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
+    targets: tuple[ManagedRevisionPlanningTargetBinding, ...] = Field(max_length=0)
+
+    @field_validator("run_id")
+    @classmethod
+    def _run(cls, value: str) -> str:
+        return _exact_run_id(value)
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"admission_id", "admission_sha256"})
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        if (
+            self.workload_id != f"revisionwork:{self.workload_sha256}"
+            or self.analysis_set_id != self.analysis_set.analysis_set_id
+            or self.analysis_set_sha256 != self.analysis_set.analysis_set_sha256
+            or self.no_work_evidence_id != f"no-work-planning:{self.no_work_evidence_sha256}"
+            or self.analysis_set.no_work_evidence_id != self.no_work_evidence_id
+            or self.analysis_set.no_work_evidence_sha256 != self.no_work_evidence_sha256
+            or self.reviewed_snapshot_binding_id
+            != f"reviewed-snapshot:{self.reviewed_snapshot_binding_sha256}"
+        ):
+            raise ValueError("no-work admission differs from its exact authority")
+        digest = _sha256(self._payload())
+        if self.admission_sha256 != digest or self.admission_id != f"mrevisionadmission:{digest}":
+            raise ValueError("no-work admission ID/SHA differs from exact authority")
+        return self
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> Self:
+        kwargs["run_id"] = _exact_run_id(kwargs["run_id"])
+        values = {"schema_version": 2, **kwargs, "targets": ()}
+        payload = {
+            key: value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+            for key, value in values.items()
+        }
+        digest = _sha256(payload)
+        return _validate_canonical_json(
+            cls,
+            {
+                "admission_id": f"mrevisionadmission:{digest}",
+                "admission_sha256": digest,
+                **values,
+            },
+        )
+
+
+ManagedRevisionPlanningAdmissionAuthority = Annotated[
+    ManagedRevisionPlanningAdmissionBinding | ManagedNoWorkPlanningAdmissionBinding,
+    Field(discriminator="schema_version"),
+]
+
+
 class ManagedRunBinding(_StrictFrozenModel):
     schema_version: Literal[1] = 1
     run_binding_id: str = Field(pattern=_ID_PATTERNS["mrun"].pattern)
@@ -2682,12 +3005,12 @@ class ManagedRunBinding(_StrictFrozenModel):
     analysis_head: AggregateHeadBinding
     algorithm_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     inference_contract: ManagedInferenceContractBinding
-    analysis_set: ManagedAnalysisSetBinding
+    analysis_set: ManagedAnalysisSetAuthority
 
     @field_validator("run_id")
     @classmethod
     def _run(cls, value: str) -> str:
-        return _exact_logical_key(value, label="run_id")
+        return _exact_run_id(value)
 
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"run_binding_id"})
@@ -2712,7 +3035,7 @@ class ManagedRunBinding(_StrictFrozenModel):
 
     @classmethod
     def create(cls, **kwargs: Any) -> Self:
-        kwargs["run_id"] = _exact_logical_key(kwargs["run_id"], label="run_id")
+        kwargs["run_id"] = _exact_run_id(kwargs["run_id"])
         kwargs["operation_id"] = _exact_operation_id(kwargs["operation_id"])
         kwargs["algorithm_manifest_sha256"] = _exact_sha256(
             kwargs["algorithm_manifest_sha256"], label="algorithm_manifest_sha256"
@@ -2812,10 +3135,7 @@ class ManagedGoverningSourceAdoptionBinding(_StrictFrozenModel):
                 "source_note_path": self.source_note_artifact.path,
             }
         )
-        if (
-            self.source_repository_binding_sha256
-            != expected_source_repository_binding_sha256
-        ):
+        if self.source_repository_binding_sha256 != expected_source_repository_binding_sha256:
             raise ValueError("governing adoption source-repository binding is not reproducible")
         digest = _sha256(self._payload())
         if self.adoption_sha256 != digest or self.adoption_id != f"mgoverningsource:{digest}":
@@ -2843,9 +3163,7 @@ class ManagedGoverningSourceAdoptionBinding(_StrictFrozenModel):
             != expected_source_repository_binding_sha256
         ):
             raise ValueError("supplied source-repository binding is not reproducible")
-        kwargs["source_repository_binding_sha256"] = (
-            expected_source_repository_binding_sha256
-        )
+        kwargs["source_repository_binding_sha256"] = expected_source_repository_binding_sha256
         values = {"schema_version": 1, **kwargs}
         payload = {
             key: value.model_dump(mode="json") if isinstance(value, BaseModel) else value
@@ -2862,6 +3180,95 @@ class ManagedGoverningSourceAdoptionBinding(_StrictFrozenModel):
         )
 
 
+class GenericGoverningSourceAdoptionBindingV2(_StrictFrozenModel):
+    """Path-safe governing adoption derived from generic repository evidence."""
+
+    schema_version: Literal[2] = 2
+    adoption_id: str = Field(pattern=_ID_PATTERNS["mgoverningsource"].pattern)
+    adoption_sha256: str = Field(pattern=SHA256_PATTERN)
+    evidence_repository_id: str = Field(pattern=SHA256_PATTERN)
+    analysis_bootstrap_binding_id: str = Field(
+        pattern=r"^generic-analysis-bootstrap-v2:[0-9a-f]{64}$"
+    )
+    analysis_bootstrap_binding_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_logical_event_id: str
+    incoming_event_identity: str = Field(pattern=_GENERIC_EVENT_ID_RE.pattern)
+    incoming_bundle_id: str = Field(pattern=r"^generic-bundle-v2:[0-9a-f]{64}$")
+    incoming_bundle_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_admission_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_source_receipt_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_projection_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_inference_sha256: str = Field(pattern=SHA256_PATTERN)
+    incoming_claim_evidence_sha256: str = Field(pattern=SHA256_PATTERN)
+    document: DocumentVersionMetadata
+    raw_artifact: ManagedArtifactRef
+    source_note_artifact: ManagedArtifactRef
+    source_note_logical_path: str
+    source_note_snapshot_id: str = Field(pattern=r"^depsource:[0-9a-f]{64}$")
+    source_note_snapshot_sha256: str = Field(pattern=SHA256_PATTERN)
+    reviewed_snapshot_binding_id: str = Field(pattern=r"^reviewed-snapshot:[0-9a-f]{64}$")
+    reviewed_snapshot_binding_sha256: str = Field(pattern=SHA256_PATTERN)
+    temporal_decision_record_sha256: str = Field(pattern=SHA256_PATTERN)
+    reviewed_inventory_sha256: str = Field(pattern=SHA256_PATTERN)
+    reviewed_head: AggregateHeadBinding
+    authoritative_repository_resolution_required: Literal[True] = True
+
+    @field_validator("incoming_logical_event_id")
+    @classmethod
+    def _generic_event(cls, value: str) -> str:
+        return _exact_logical_key(value, label="incoming_logical_event_id")
+
+    @field_validator("source_note_logical_path")
+    @classmethod
+    def _generic_note_path(cls, value: str) -> str:
+        return _safe_path(value)
+
+    def _payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json", exclude={"adoption_id", "adoption_sha256"})
+
+    @model_validator(mode="after")
+    def _generic_identity(self) -> Self:
+        if not (
+            self.incoming_bundle_id == f"generic-bundle-v2:{self.incoming_bundle_sha256}"
+            and self.raw_artifact.kind == ManagedArtifactKind.RAW_SOURCE
+            and self.raw_artifact.path == self.document.source_path
+            and self.raw_artifact.sha256 == self.document.source_sha256
+            and self.source_note_artifact.kind == ManagedArtifactKind.SOURCE_NOTE
+            and self.source_note_artifact.path == self.source_note_logical_path
+            and self.source_note_snapshot_id == f"depsource:{self.source_note_snapshot_sha256}"
+            and self.reviewed_snapshot_binding_id
+            == f"reviewed-snapshot:{self.reviewed_snapshot_binding_sha256}"
+        ):
+            raise ValueError("generic governing-source artifacts or lineage differ")
+        digest = _sha256(self._payload())
+        if self.adoption_sha256 != digest or self.adoption_id != f"mgoverningsource:{digest}":
+            raise ValueError("generic governing-source adoption identity differs")
+        return self
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> Self:
+        values = {"schema_version": 2, **kwargs}
+        payload = {
+            key: value.model_dump(mode="json") if isinstance(value, BaseModel) else value
+            for key, value in values.items()
+        }
+        digest = _sha256(payload)
+        return _validate_canonical_json(
+            cls,
+            {
+                "adoption_id": f"mgoverningsource:{digest}",
+                "adoption_sha256": digest,
+                **values,
+            },
+        )
+
+
+GoverningSourceAdoptionAuthority = Annotated[
+    ManagedGoverningSourceAdoptionBinding | GenericGoverningSourceAdoptionBindingV2,
+    Field(discriminator="schema_version"),
+]
+
+
 class ManagedRunBindingV2(_StrictFrozenModel):
     """Run authority that durably admits one complete recorded planning run."""
 
@@ -2873,14 +3280,14 @@ class ManagedRunBindingV2(_StrictFrozenModel):
     analysis_head: AggregateHeadBinding
     algorithm_manifest_sha256: str = Field(pattern=SHA256_PATTERN)
     inference_contract: ManagedInferenceContractBinding
-    analysis_set: ManagedAnalysisSetBinding
-    revision_planning_admission: ManagedRevisionPlanningAdmissionBinding
-    governing_source_adoption: ManagedGoverningSourceAdoptionBinding
+    analysis_set: ManagedAnalysisSetAuthority
+    revision_planning_admission: ManagedRevisionPlanningAdmissionAuthority
+    governing_source_adoption: GoverningSourceAdoptionAuthority
 
     @field_validator("run_id")
     @classmethod
     def _run(cls, value: str) -> str:
-        return _exact_logical_key(value, label="run_id")
+        return _exact_run_id(value)
 
     def _payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", exclude={"run_binding_id"})
@@ -2890,7 +3297,8 @@ class ManagedRunBindingV2(_StrictFrozenModel):
         bootstrap = self.analysis_set.analysis_bootstrap
         admission = self.revision_planning_admission
         adoption = self.governing_source_adoption
-        impact_evidence = self.analysis_set.impact_evidence
+        impact_evidence = getattr(self.analysis_set, "impact_evidence", None)
+        no_work = isinstance(admission, ManagedNoWorkPlanningAdmissionBinding)
         if (
             self.prechange_head.aggregate_id != bootstrap.aggregate_id
             or self.prechange_head.revision != bootstrap.prechange_revision
@@ -2906,33 +3314,52 @@ class ManagedRunBindingV2(_StrictFrozenModel):
             admission.run_id != self.run_id
             or admission.analysis_set_id != self.analysis_set.analysis_set_id
             or admission.analysis_set_sha256 != self.analysis_set.analysis_set_sha256
-            or admission.contract_binding_id != self.inference_contract.contract_binding_id
-            or admission.reviewed_snapshot_binding_id
-            != adoption.reviewed_snapshot_binding_id
+            or (
+                not no_work
+                and getattr(admission, "contract_binding_id", None)
+                != self.inference_contract.contract_binding_id
+            )
+            or admission.reviewed_snapshot_binding_id != adoption.reviewed_snapshot_binding_id
             or admission.reviewed_snapshot_binding_sha256
             != adoption.reviewed_snapshot_binding_sha256
-            or admission.temporal_decision_record_sha256
-            != adoption.temporal_decision_record_sha256
+            or admission.temporal_decision_record_sha256 != adoption.temporal_decision_record_sha256
         ):
             raise ValueError("v2 run binding differs from its durable planning admission")
-        if (
-            impact_evidence is None
-            or adoption.evidence_repository_id != admission.repository_id
-            or adoption.evidence_repository_id != impact_evidence.repository_id
+        common_adoption_mismatch = (
+            adoption.evidence_repository_id != admission.repository_id
+            or (
+                not no_work
+                and (
+                    impact_evidence is None
+                    or adoption.evidence_repository_id != impact_evidence.repository_id
+                )
+            )
             or adoption.analysis_bootstrap_binding_id != bootstrap.binding_id
             or adoption.analysis_bootstrap_binding_sha256 != bootstrap.binding_sha256
             or adoption.incoming_logical_event_id != bootstrap.incoming_event_id
             or adoption.incoming_event_identity != bootstrap.incoming_event_identity
+            or adoption.incoming_claim_evidence_sha256 != bootstrap.incoming_claim_evidence_sha256
+            or adoption.document.document_version_id != bootstrap.incoming_document_version_id
+            or adoption.document.document_id != bootstrap.incoming_document_id
+        )
+        sealed_mismatch = isinstance(bootstrap, AnalysisBootstrapBinding) and (
+            not isinstance(adoption, ManagedGoverningSourceAdoptionBinding)
             or adoption.incoming_manifest_sha256 != bootstrap.incoming_manifest_sha256
             or adoption.alignment_attestation_id != bootstrap.alignment_attestation_id
             or adoption.alignment_attestation_sha256 != bootstrap.alignment_attestation_sha256
             or adoption.alignment_policy_version != bootstrap.alignment_policy_version
             or adoption.alignment_payload_sha256 != bootstrap.alignment_payload_sha256
-            or adoption.incoming_claim_evidence_sha256
-            != bootstrap.incoming_claim_evidence_sha256
-            or adoption.document.document_version_id != bootstrap.incoming_document_version_id
-            or adoption.document.document_id != bootstrap.incoming_document_id
-        ):
+        )
+        generic_mismatch = isinstance(bootstrap, GenericAnalysisBootstrapBindingV2) and (
+            not isinstance(adoption, GenericGoverningSourceAdoptionBindingV2)
+            or adoption.incoming_bundle_id != bootstrap.incoming_bundle_id
+            or adoption.incoming_bundle_sha256 != bootstrap.incoming_bundle_sha256
+            or adoption.incoming_admission_sha256 != bootstrap.incoming_admission_sha256
+            or adoption.incoming_source_receipt_sha256 != bootstrap.incoming_source_receipt_sha256
+            or adoption.incoming_projection_sha256 != bootstrap.incoming_projection_sha256
+            or adoption.incoming_inference_sha256 != bootstrap.incoming_inference_sha256
+        )
+        if common_adoption_mismatch or sealed_mismatch or generic_mismatch:
             raise ValueError("v2 run governing-source adoption differs from reviewed inputs")
         if self.run_binding_id != _content_id("mrun", self._payload()):
             raise ValueError("v2 run binding ID does not match exact heads and admission")
@@ -2940,7 +3367,7 @@ class ManagedRunBindingV2(_StrictFrozenModel):
 
     @classmethod
     def create(cls, **kwargs: Any) -> Self:
-        kwargs["run_id"] = _exact_logical_key(kwargs["run_id"], label="run_id")
+        kwargs["run_id"] = _exact_run_id(kwargs["run_id"])
         kwargs["operation_id"] = _exact_operation_id(kwargs["operation_id"])
         kwargs["algorithm_manifest_sha256"] = _exact_sha256(
             kwargs["algorithm_manifest_sha256"], label="algorithm_manifest_sha256"
@@ -3076,10 +3503,15 @@ class ManagedRevisionPlan(_StrictFrozenModel):
         min_length=1, max_length=MAX_MANAGED_HUNKS_PER_PLAN_V1
     )
 
-    @field_validator("run_id", "target_key")
+    @field_validator("run_id")
     @classmethod
-    def _keys(cls, value: str, info: Any) -> str:
-        return _exact_logical_key(value, label=info.field_name)
+    def _run(cls, value: str) -> str:
+        return _exact_run_id(value)
+
+    @field_validator("target_key")
+    @classmethod
+    def _target(cls, value: str) -> str:
+        return _exact_logical_key(value, label="target_key")
 
     @field_validator("rationale")
     @classmethod
@@ -3117,7 +3549,7 @@ class ManagedRevisionPlan(_StrictFrozenModel):
 
     @classmethod
     def proposal_output_bytes(cls, **kwargs: Any) -> bytes:
-        _exact_logical_key(kwargs["run_id"], label="run_id")
+        _exact_run_id(kwargs["run_id"])
         _exact_logical_key(kwargs["target_key"], label="target_key")
         normalize_review_rationale(kwargs["rationale"])
         hunks = kwargs.get("hunks", ())
@@ -3315,7 +3747,7 @@ class ManagedRevisionPlan(_StrictFrozenModel):
 
     @classmethod
     def create(cls, **kwargs: Any) -> Self:
-        kwargs["run_id"] = _exact_logical_key(kwargs["run_id"], label="run_id")
+        kwargs["run_id"] = _exact_run_id(kwargs["run_id"])
         kwargs["target_key"] = _exact_logical_key(kwargs["target_key"], label="target_key")
         kwargs["rationale"] = normalize_review_rationale(kwargs["rationale"])
         hunks = kwargs.get("hunks", ())
@@ -3369,10 +3801,15 @@ class NoChangeImpactCard(_StrictFrozenModel):
         min_length=1, max_length=MAX_MANAGED_CITATIONS_PER_HUNK_V1
     )
 
-    @field_validator("run_id", "target_key")
+    @field_validator("run_id")
     @classmethod
-    def _keys(cls, value: str, info: Any) -> str:
-        return _exact_logical_key(value, label=info.field_name)
+    def _run(cls, value: str) -> str:
+        return _exact_run_id(value)
+
+    @field_validator("target_key")
+    @classmethod
+    def _target(cls, value: str) -> str:
+        return _exact_logical_key(value, label="target_key")
 
     @field_validator("rationale")
     @classmethod
@@ -3401,7 +3838,7 @@ class NoChangeImpactCard(_StrictFrozenModel):
 
     @classmethod
     def proposal_output_bytes(cls, **kwargs: Any) -> bytes:
-        _exact_logical_key(kwargs["run_id"], label="run_id")
+        _exact_run_id(kwargs["run_id"])
         _exact_logical_key(kwargs["target_key"], label="target_key")
         normalize_review_rationale(kwargs["rationale"])
         citations = kwargs.get("citations", ())
@@ -3503,7 +3940,7 @@ class NoChangeImpactCard(_StrictFrozenModel):
 
     @classmethod
     def create(cls, **kwargs: Any) -> Self:
-        kwargs["run_id"] = _exact_logical_key(kwargs["run_id"], label="run_id")
+        kwargs["run_id"] = _exact_run_id(kwargs["run_id"])
         kwargs["target_key"] = _exact_logical_key(kwargs["target_key"], label="target_key")
         kwargs["rationale"] = normalize_review_rationale(kwargs["rationale"])
         citations = kwargs.get("citations", ())
@@ -3573,9 +4010,7 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
     run_binding: ManagedRun
     review_base: ManagedReviewBaseBinding
     temporal_prerequisite: TemporalDecisionPrerequisite
-    targets: tuple[ManagedRevisionReviewTarget, ...] = Field(
-        min_length=1, max_length=MAX_MANAGED_TARGETS_V1
-    )
+    targets: tuple[ManagedRevisionReviewTarget, ...] = Field(max_length=MAX_MANAGED_TARGETS_V1)
 
     @field_validator("targets")
     @classmethod
@@ -3601,10 +4036,10 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
     def require_authoritative_impact_evidence(self) -> ManagedImpactAnalysisEvidenceBinding:
         """Reject legacy analysis before any new managed-review authority is accepted."""
 
-        evidence = self.run_binding.analysis_set.impact_evidence
-        if self.run_binding.analysis_set.schema_version != 2 or evidence is None:
+        evidence = getattr(self.run_binding.analysis_set, "impact_evidence", None)
+        if self.run_binding.analysis_set.schema_version not in {2, 3} or evidence is None:
             raise ValueError("new managed review requires v2 durable impact evidence")
-        return evidence
+        return cast(ManagedImpactAnalysisEvidenceBinding, evidence)
 
     @model_validator(mode="after")
     def _bindings_collision_size(self) -> Self:
@@ -3617,18 +4052,30 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
             raise ValueError("run and review-open heads must belong to one aggregate")
         if self.review_base.review_open_head.revision <= self.run_binding.analysis_head.revision:
             raise ValueError("review-open head must follow the incoming analysis head")
+        if not self.targets and not (
+            isinstance(self.run_binding, ManagedRunBindingV2)
+            and isinstance(
+                self.run_binding.revision_planning_admission,
+                ManagedNoWorkPlanningAdmissionBinding,
+            )
+        ):
+            raise ValueError("zero-target review requires exact no-work adoption authority")
         analysis = self.run_binding.analysis_set
         inference_contract = self.run_binding.inference_contract
         if isinstance(self.run_binding, ManagedRunBindingV2):
             adoption = self.run_binding.governing_source_adoption
             admission = self.run_binding.revision_planning_admission
+            no_work_admission = isinstance(admission, ManagedNoWorkPlanningAdmissionBinding)
+            if no_work_admission != (not self.targets):
+                raise ValueError(
+                    "only an exact no-work admission may open a zero-target managed review"
+                )
             if (
                 adoption.reviewed_head != self.review_base.review_open_head
                 or adoption.reviewed_head != self.temporal_prerequisite.review_open_head
                 or adoption.temporal_decision_record_sha256
                 != self.temporal_prerequisite.temporal_decision_record_sha256
-                or admission.reviewed_snapshot_binding_id
-                != adoption.reviewed_snapshot_binding_id
+                or admission.reviewed_snapshot_binding_id != adoption.reviewed_snapshot_binding_id
                 or admission.reviewed_snapshot_binding_sha256
                 != adoption.reviewed_snapshot_binding_sha256
                 or admission.temporal_decision_record_sha256
@@ -3674,7 +4121,7 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
             )
             if target_subjects != admitted_subjects:
                 raise ValueError("managed review targets differ from v2 admitted planning subjects")
-        impact_evidence = analysis.impact_evidence
+        impact_evidence = getattr(analysis, "impact_evidence", None)
         if impact_evidence is not None:
             output_by_document = {
                 item.document_version_id: item for item in impact_evidence.output_shards
@@ -3776,10 +4223,15 @@ class ManagedRevisionReviewBundle(_StrictFrozenModel):
     @classmethod
     def create(cls, **kwargs: Any) -> Self:
         raw_targets = kwargs.pop("targets")
+        run_binding = kwargs["run_binding"]
+        no_work = isinstance(
+            getattr(run_binding, "revision_planning_admission", None),
+            ManagedNoWorkPlanningAdmissionBinding,
+        )
         _preflight_collection(
             raw_targets,
             label="review targets",
-            minimum=1,
+            minimum=0 if no_work else 1,
             maximum=MAX_MANAGED_TARGETS_V1,
             unique_key=lambda item: item.target_id,
         )
@@ -4169,7 +4621,7 @@ class ManagedGenerationManifestBindingV2(_StrictFrozenModel):
     manifest_encoding: Literal["content-addressed-overlay-v2"] = "content-addressed-overlay-v2"
     preserve_unmentioned_prior_entries: Literal[True] = True
     retained_review_target_keys: tuple[str, ...] = Field(max_length=MAX_MANAGED_TARGETS_V1)
-    governing_source_adoption: ManagedGoverningSourceAdoptionBinding
+    governing_source_adoption: GoverningSourceAdoptionAuthority
     publication_delta: tuple[GenerationPublicationBinding, ...] = Field(
         max_length=2 * MAX_MANAGED_REVISION_PLANS_V1
     )
@@ -4239,7 +4691,7 @@ class ManagedGenerationManifestBindingV2(_StrictFrozenModel):
         request_id: str,
         bundle_id: str,
         prior_generation: ContentAddressedGenerationBinding,
-        governing_source_adoption: ManagedGoverningSourceAdoptionBinding,
+        governing_source_adoption: GoverningSourceAdoptionAuthority,
         publications: tuple[GenerationPublicationBinding, ...],
         retained_review_target_keys: tuple[str, ...],
     ) -> Self:
@@ -4364,6 +4816,11 @@ class ManagedBundleOutcome(StrEnum):
     REJECTED = "rejected"
 
 
+class ManagedAdoptionChoice(StrEnum):
+    ADOPT = "adopt"
+    REJECT = "reject"
+
+
 class ManagedRevisionReviewOutcome(_StrictFrozenModel):
     target_id: str = Field(pattern=_ID_PATTERNS["mtarget"].pattern)
     original_target_sha256: str = Field(pattern=SHA256_PATTERN)
@@ -4384,11 +4841,10 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
     operation_id: str = Field(pattern=_OPERATION_ID_RE.pattern)
     request_record: ManagedRevisionReviewRequestRecord
     bundle_outcome: ManagedBundleOutcome
+    adoption_choice: ManagedAdoptionChoice | None = None
     reviewer_id: str
     rationale: str = Field(min_length=1, max_length=4000)
-    items: tuple[ManagedRevisionReviewOutcome, ...] = Field(
-        min_length=1, max_length=MAX_MANAGED_TARGETS_V1
-    )
+    items: tuple[ManagedRevisionReviewOutcome, ...] = Field(max_length=MAX_MANAGED_TARGETS_V1)
     generation_manifest: ManagedGenerationManifest
     expected_authority: AuthorityRevisionBinding
     activation_plan: PlannedAuthorityActivation | None = None
@@ -4423,6 +4879,13 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             mode="json", exclude={"decision_id", "decision_payload_sha256", "operation_id"}
         )
 
+    @model_serializer(mode="wrap")
+    def _preserve_non_adoption_bytes(self, handler: Any) -> dict[str, Any]:
+        values = cast(dict[str, Any], handler(self))
+        if self.adoption_choice is None:
+            values.pop("adoption_choice", None)
+        return values
+
     def _operation_payload(self) -> dict[str, Any]:
         return {**self._identity_payload(), "operation_id": self.operation_id}
 
@@ -4443,6 +4906,28 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
     def _atomic_binding_and_identity(self) -> Self:
         bundle = self.bundle
         targets = {item.target_id: item for item in bundle.targets}
+        adoption_only = not targets
+        expected_adoption_outcome = (
+            {
+                ManagedAdoptionChoice.ADOPT: ManagedBundleOutcome.ACCEPTED,
+                ManagedAdoptionChoice.REJECT: ManagedBundleOutcome.REJECTED,
+            }[self.adoption_choice]
+            if self.adoption_choice is not None
+            else None
+        )
+        if adoption_only:
+            if (
+                not isinstance(
+                    getattr(bundle.run_binding, "revision_planning_admission", None),
+                    ManagedNoWorkPlanningAdmissionBinding,
+                )
+                or expected_adoption_outcome != self.bundle_outcome
+            ):
+                raise ValueError(
+                    "zero-target decision requires an explicit matching adoption choice"
+                )
+        elif self.adoption_choice is not None:
+            raise ValueError("target decisions cannot carry an adoption-only choice")
         if tuple(item.target_id for item in self.items) != tuple(sorted(targets)):
             raise ValueError("decision requires exactly one outcome for every target")
         if self.expected_authority != bundle.review_base.authority or (
@@ -4493,8 +4978,13 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
                 raise ValueError("rejected bundle requires every target rejected")
             if final_plans:
                 raise ValueError("rejected bundle cannot publish plans")
-        elif not final_plans and not any(
-            item.disposition == ManagedRevisionDisposition.CONFIRM_NO_CHANGE for item in self.items
+        elif (
+            not adoption_only
+            and not final_plans
+            and not any(
+                item.disposition == ManagedRevisionDisposition.CONFIRM_NO_CHANGE
+                for item in self.items
+            )
         ):
             raise ValueError("accepted bundle requires an approved/edit/no-change confirmation")
         if (
@@ -4623,6 +5113,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
         operation_id: str,
         request_record: ManagedRevisionReviewRequestRecord,
         bundle_outcome: ManagedBundleOutcome,
+        adoption_choice: ManagedAdoptionChoice | None = None,
         reviewer_id: str,
         rationale: str,
         items: tuple[ManagedRevisionReviewOutcome, ...],
@@ -4633,7 +5124,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
         _preflight_collection(
             items,
             label="decision items",
-            minimum=1,
+            minimum=0 if not request_record.command.bundle.targets else 1,
             maximum=MAX_MANAGED_TARGETS_V1,
             unique_key=lambda item: item.target_id,
         )
@@ -4709,9 +5200,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "generation_number": generation_number,
             "requires_activation": requires_activation,
             "manifest_encoding": (
-                "content-addressed-overlay-v2"
-                if accepted_v2
-                else "content-addressed-overlay-v1"
+                "content-addressed-overlay-v2" if accepted_v2 else "content-addressed-overlay-v1"
             ),
             "preserve_unmentioned_prior_entries": True,
             "retained_review_target_keys": list(retained_review_target_keys),
@@ -4745,6 +5234,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "schema_version": 1,
             "request_record": request_record.model_dump(mode="json"),
             "bundle_outcome": bundle_outcome.value,
+            **({"adoption_choice": adoption_choice.value} if adoption_choice is not None else {}),
             "reviewer_id": reviewer_id,
             "rationale": rationale,
             "items": [item.model_dump(mode="json") for item in ordered],
@@ -4804,6 +5294,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "operation_id": operation_id,
             "request_record": request_record,
             "bundle_outcome": bundle_outcome,
+            "adoption_choice": adoption_choice,
             "reviewer_id": reviewer_id,
             "rationale": rationale,
             "items": ordered,
@@ -4815,6 +5306,7 @@ class ManagedRevisionDecisionCommand(_StrictFrozenModel):
             "schema_version": 1,
             "request_record": request_record.model_dump(mode="json"),
             "bundle_outcome": bundle_outcome.value,
+            **({"adoption_choice": adoption_choice.value} if adoption_choice is not None else {}),
             "reviewer_id": reviewer_id,
             "rationale": rationale,
             "items": [item.model_dump(mode="json") for item in ordered],
@@ -5051,12 +5543,17 @@ __all__ = [
     "GenerationPublicationBinding",
     "GenerationZeroManifestBinding",
     "GenerationZeroOriginBasis",
+    "GenericGoverningSourceAdoptionBindingV2",
     "GroundedArtifactCitation",
+    "GoverningSourceAdoptionAuthority",
     "InferenceExecutionMode",
     "InferenceUsage",
+    "GenericManagedAnalysisSetBindingV3",
+    "ManagedAnalysisSetAuthority",
     "ManagedAnalysisSetBinding",
     "ManagedArtifactKind",
     "ManagedArtifactRef",
+    "ManagedAdoptionChoice",
     "ManagedBundleOutcome",
     "ManagedGenerationManifest",
     "ManagedGenerationManifestBinding",
@@ -5066,6 +5563,8 @@ __all__ = [
     "ManagedImpactBatchMemberBinding",
     "ManagedImpactOutputRefBinding",
     "ManagedInferenceContractBinding",
+    "ManagedNoWorkAnalysisSetBindingV4",
+    "ManagedNoWorkPlanningAdmissionBinding",
     "ManagedDecisionOriginBasis",
     "WorkspaceGenerationZeroManifestBinding",
     "WorkspaceGenerationZeroOriginBasis",
@@ -5077,6 +5576,7 @@ __all__ = [
     "ManagedRevisionDisposition",
     "ManagedRevisionPlan",
     "ManagedRevisionPlanningAdmissionBinding",
+    "ManagedRevisionPlanningAdmissionAuthority",
     "ManagedRevisionPlanningBatchMemberBinding",
     "ManagedRevisionPlanningTargetBinding",
     "ManagedRevisionReviewBundle",

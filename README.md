@@ -45,18 +45,27 @@ approval step.
 
 ## v0.3 in development: grounded evidence and SQLite change control
 
-The internal SQLite-only change-control path can now classify impact, plan and
-review revisions, publish approved downstream replacements into an immutable
-first successor generation, build its isolated serving index, atomically
-activate it, and reopen that exact index fail-closed. Ordinary `search`,
+The synchronous SQLite-only change-control library can now admit one generic
+Markdown event and strict regression suite, capture an immutable generation-zero
+baseline, classify impact, pause at two exact human reviews, publish only
+approved replacements into an immutable first successor generation, atomically
+activate it, and verify the complete authority chain. Ordinary `search`,
 `claims`, `wiki`, and `ask` reads now resolve either a generic-workspace
 authority's attested generation-zero index or an authority's immutable active
 generation-one index through the public `--generation` selector. Sealed-seed
-authority exposes generation one only. The change-control write path deliberately
-supports only one managed successor from generation zero. Public change-control/operator
-commands, targeted post-change regressions, final JSON/Markdown audit reports,
-managed `EDIT` execution, PostgreSQL managed-generation parity, the keyless
-change-control demo, and the v0.3 release remain under development.
+authority exposes generation one only. The write path deliberately supports
+only one managed successor from generation zero.
+
+| Change-control surface | Status |
+| --- | --- |
+| Synchronous Python library (`ChangeControlApplication`) | Available in the unreleased PR20A work |
+| Generic Markdown admission, baseline, two reviews, activation, verification | Available in the unreleased PR20A work; SQLite/POSIX only |
+| `mvault change ...` command group and stable CLI JSON/exit contract | **Not shipped; explicitly deferred to PR20B** |
+| Managed `EDIT`, reports/grading, second successor, PostgreSQL managed parity | Deferred |
+
+The library contract and strict schemas are documented in
+[Synchronous change control](docs/CHANGE_CONTROL.md). This is unreleased work;
+it is not a package-version or release claim.
 
 The v0.3 document spine replaces lossy PDF flattening with auditable evidence
 for clean, digitally generated PDFs. MasterVault snapshots the exact source
@@ -152,8 +161,9 @@ That admitted staging can now proceed through SQLite-authoritative managed
 review and, for approved outcomes, immutable publication, isolated exact
 indexing, and atomic activation of the first successor generation. Ordinary
 query commands now consume that authority through a read-only resolver; the
-change-control bootstrap/review/activation workflow itself remains an internal
-library boundary. Targeted post-activation regression/reporting, managed
+change-control bootstrap/review/activation workflow is a public Python library
+boundary, while the `mvault change` CLI remains deferred to PR20B. Targeted
+post-activation regression/reporting, managed
 `EDIT` execution, a second managed successor, and PostgreSQL managed activation
 do not exist yet. The existing LangGraph orchestration remains deliberately
 unchanged.
