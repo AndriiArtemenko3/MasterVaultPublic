@@ -91,7 +91,8 @@ for MIGRATION in \
   'mastervault/change_control/migrations/sqlite/002_authoritative_human_review.sql' \
   'mastervault/change_control/migrations/sqlite/003_managed_revision_review.sql' \
   'mastervault/change_control/migrations/sqlite/004_generation_publication_activation.sql' \
-  'mastervault/change_control/migrations/sqlite/005_workspace_bootstrap_application.sql'
+  'mastervault/change_control/migrations/sqlite/005_workspace_bootstrap_application.sql' \
+  'mastervault/change_control/migrations/sqlite/006_synchronous_change_lifecycle.sql'
 do
   grep -q "$MIGRATION" "$WORK/wheel.txt" \
     || fail "wheel is missing an ordered schema migration ($MIGRATION)"
@@ -122,11 +123,15 @@ grep -q 'mastervault/prompts/grounded_synthesis/v1.md' "$WORK/wheel.txt" \
   || fail "wheel is missing the prompt files"
 grep -q 'mastervault/prompts/page_grounded_claim_extraction/v1.md' "$WORK/wheel.txt" \
   || fail "wheel is missing the page-grounded PDF extraction prompt"
+grep -q 'mastervault/prompts/generic_grounded_claim_extraction_v2/v2.md' "$WORK/wheel.txt" \
+  || fail "wheel is missing the generic grounded-claim extraction prompt"
+grep -q 'mastervault/prompts/synchronous_change_inference/v1.md' "$WORK/wheel.txt" \
+  || fail "wheel is missing the synchronous change inference prompt"
 grep -q 'mastervault/document_intelligence/docling_artifacts_manifest.json' "$WORK/wheel.txt" \
   || fail "wheel is missing the immutable Docling artifact manifest"
 grep -q 'mastervault/py.typed' "$WORK/wheel.txt" \
   || fail "wheel is missing the PEP 561 py.typed marker"
-printf '  wheel ships prompt files, the Docling artifact manifest and py.typed\n'
+printf '  wheel ships prompt files, including generic extraction and synchronous change inference, the Docling artifact manifest and py.typed\n'
 
 # No absolute developer paths baked into the metadata.
 if unzip -p "$WHEEL" '*/METADATA' | grep -nE '/(Users|home)/[a-z]'; then
@@ -143,6 +148,35 @@ VIRTUAL_ENV="$VENV" uv pip install -q "$WHEEL"
 MV="$VENV/bin/mvault"
 [ -x "$MV" ] || fail "the wheel did not install an executable 'mvault'"
 printf '  installed into a clean venv\n'
+
+"$VENV/bin/python" - <<'PY' || fail "installed wheel cannot load change-control prompts"
+from importlib.resources import files
+
+from mastervault.prompts import registry
+
+for contract, version, filename, tier, variables in (
+    (
+        "generic_grounded_claim_extraction_v2",
+        2,
+        "v2.md",
+        "small",
+        ("document",),
+    ),
+    (
+        "synchronous_change_inference",
+        1,
+        "v1.md",
+        "medium",
+        ("request",),
+    ),
+):
+    prompt = files("mastervault.prompts").joinpath(contract, filename)
+    assert prompt.is_file()
+    spec = registry.load(contract, version)
+    assert spec.tier == tier
+    assert spec.variables == variables
+PY
+printf '  installed wheel loads generic extraction and synchronous change prompts\n'
 
 # The layout parser is a genuine opt-in. The core wheel must not drag its
 # runtime/model stack into an ordinary installation.

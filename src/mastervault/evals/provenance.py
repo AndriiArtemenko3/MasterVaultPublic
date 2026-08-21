@@ -20,6 +20,15 @@ from mastervault.storage.base import SCHEMA_VERSION
 EvalKind = Literal["retrieval", "ask"]
 METADATA_SCHEMA_VERSION = 2
 BASELINE_SCHEMA_VERSION = 2
+EVAL_PROMPT_NAMESPACES = (
+    "claim_extraction",
+    "contradiction_judge",
+    "corpus_check",
+    "grounded_synthesis",
+    "page_grounded_claim_extraction",
+    "sufficiency_judge",
+    "wiki_draft",
+)
 
 
 def _sha256(path: Path) -> str:
@@ -199,7 +208,12 @@ def collect_reproducibility_metadata(
     source_files = list((repo_root / "src" / "mastervault").rglob("*.py"))
     source_files += list((repo_root / "src" / "mastervault").rglob("*.md"))
     source_files += list((repo_root / "src" / "mastervault").rglob("*.sql"))
-    prompt_files = list((repo_root / "src" / "mastervault" / "prompts").glob("*/v*.md"))
+    prompt_root = repo_root / "src" / "mastervault" / "prompts"
+    prompt_files = [
+        prompt
+        for namespace in EVAL_PROMPT_NAMESPACES
+        for prompt in (prompt_root / namespace).glob("v*.md")
+    ]
     migration_files = list(
         (repo_root / "src" / "mastervault" / "storage" / "migrations").glob("*/*.sql")
     )

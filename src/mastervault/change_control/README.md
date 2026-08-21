@@ -475,6 +475,16 @@ and pre-change aggregate head. Exact replay returns the same authority;
 different-input reuse or drift fails closed. Neither migration nor bootstrap
 modifies the legacy vault or index, and PostgreSQL is rejected before effects.
 
+Migration `006_synchronous_change_lifecycle.sql` adds the immutable operation,
+run-lock authority, incoming-admission, regression-suite, generation-zero
+baseline, activation-baseline, and extended operator-link records used by the
+public synchronous application lifecycle. Its durable run-lock authority binds
+each cooperating process to the exact regular lock-file inode recorded in
+SQLite; replacement, relinking, or metadata drift fails closed before a second
+process can enter the same run. The migration preserves the complete v5 link
+history while extending the allowed link kinds, and upgrades populated v5
+stores without rewriting their existing authority.
+
 `TemporalReviewWorkflow` persists only a versioned primitive execution cursor
 at `<workspace>/change_control/checkpoints.sqlite3`. Its stable topology reads
 the authoritative request, interrupts once while it is open, and rereads
@@ -489,18 +499,29 @@ corrupt checkpoints fail closed without deletion. The owned connection and
 lock support synchronous callers in one process only; they make no
 multi-process or production-scaling claim.
 
-The current managed-review slice now executes and durably replays actual-impact
+The public `ChangeControlApplication` lifecycle executes and durably replays
+generic admission, generation-zero regression capture, temporal review,
+actual-impact and revision-planning inference, managed review, activation, and
+fresh verification for one SQLite/POSIX generation-zero-to-one change. Its
+read-only status, listing, review-packet, and verification methods do not create
+or repair authority. LIVE provider results become authority only after local
+validation and durable recording; exact REPLAY remains offline and fails closed
+at an indeterminate uncommitted provider boundary.
+
+The managed-review implementation executes and durably replays actual-impact
 and revision-planning inference, reopens the exact reviewed incoming governing
 source, obtains an authoritative SQLite review decision, publishes only its
 approved downstream replacements, builds an isolated exact SQLite index, and
 atomically activates the corresponding complete generation. An accepted v2
 review adopts the governing source at its original immutable raw/SourceNote
 paths; adoption-only activation therefore creates no fake publication events.
-The internal application slice can adopt an operator-specified existing SQLite
-workspace as generic generation zero only after its explicit manifest,
-complete vault inventory, and unchanged legacy index have been independently
-verified and durably bound. Operator-run records remain navigation over those
-authorities, never an alternative authority source.
+The application adopts an operator-specified existing SQLite workspace as
+generic generation zero only after its explicit manifest, complete vault
+inventory, and unchanged legacy index have been independently verified and
+durably bound. Operator-run records remain navigation over those authorities,
+never an alternative authority source. The public `mvault change` command group
+and its rendering, exit-code, and subprocess contracts remain deferred to the
+follow-on CLI slice.
 The synchronous LangGraph wait/reconciliation checkpoint remains disposable
 and cannot create review, publication, index, or activation authority.
 

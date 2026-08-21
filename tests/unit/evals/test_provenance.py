@@ -6,12 +6,48 @@ from pathlib import Path
 
 from mastervault.config import Settings, load_settings
 from mastervault.evals.provenance import (
+    EVAL_PROMPT_NAMESPACES,
     collect_reproducibility_metadata,
     embedding_runtime_identity,
     provenance_comparison,
     stable_metadata_projection,
 )
 from mastervault.providers.embedding import MockEmbedding
+
+EXPECTED_EVAL_PROMPT_PATHS = {
+    "src/mastervault/prompts/claim_extraction/v1.md",
+    "src/mastervault/prompts/contradiction_judge/v1.md",
+    "src/mastervault/prompts/corpus_check/v1.md",
+    "src/mastervault/prompts/grounded_synthesis/v1.md",
+    "src/mastervault/prompts/page_grounded_claim_extraction/v1.md",
+    "src/mastervault/prompts/sufficiency_judge/v1.md",
+    "src/mastervault/prompts/wiki_draft/v1.md",
+}
+
+
+def test_eval_prompt_manifest_is_exact_and_excludes_change_control_prompts():
+    repo_root = Path(__file__).resolve().parents[3]
+
+    metadata = collect_reproducibility_metadata(repo_root, "retrieval", Settings())
+
+    prompt_paths = {row["path"] for row in metadata["prompts"]["files"]}
+    assert set(EVAL_PROMPT_NAMESPACES) == {
+        path.split("/")[-2] for path in EXPECTED_EVAL_PROMPT_PATHS
+    }
+    assert prompt_paths == EXPECTED_EVAL_PROMPT_PATHS
+    assert metadata["prompts"]["file_count"] == 7
+    assert not any("generic_grounded_claim_extraction_v2" in path for path in prompt_paths)
+    assert not any("synchronous_change_inference" in path for path in prompt_paths)
+
+
+def test_bound_eval_prompt_hashes_remain_material_to_compatibility():
+    repo_root = Path(__file__).resolve().parents[3]
+    metadata = collect_reproducibility_metadata(repo_root, "ask", Settings())
+    assert all(len(row["sha256"]) == 64 for row in metadata["prompts"]["files"])
+    changed = deepcopy(metadata)
+    changed["prompts"]["files"][0]["sha256"] = "0" * 64
+
+    assert provenance_comparison(changed, metadata)["compatible"] is False
 
 
 def test_machine_and_git_worktree_state_are_diagnostic_not_comparator_inputs():
