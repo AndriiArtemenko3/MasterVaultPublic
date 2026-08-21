@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from managed_v2_test_support import (
@@ -13,10 +14,13 @@ from managed_v2_test_support import (
     clone_real_managed_v2_scenario,
 )
 
+from mastervault.change_control import managed_review_service as service_module
 from mastervault.change_control.incoming import ALIGNMENT_ATTESTATION_RELATIVE_PATH
 from mastervault.change_control.managed_review import (
     AuthorityRevisionBinding,
+    ManagedAdoptionChoice,
     ManagedGenerationManifestBindingV2,
+    ManagedNoWorkPlanningAdmissionBinding,
     ManagedRevisionDisposition,
     ManagedRevisionPlan,
     ManagedRevisionPlanningAdmissionBinding,
@@ -308,11 +312,58 @@ def test_selection_set_is_store_derived_complete_and_edit_is_deferred(
                     rationale="Reject an invalid human selection set.",
                 )
 
+        original_read = scenario.store.get_managed_review
+        ordinary_empty_reads = 0
+
+        def observed_read(*args, **kwargs):
+            nonlocal ordinary_empty_reads
+            ordinary_empty_reads += 1
+            return original_read(*args, **kwargs)
+
+        monkeypatch.setattr(scenario.store, "get_managed_review", observed_read)
+        with pytest.raises(ManagedReviewSelectionError, match="non-empty"):
+            decide_managed_revision_review(
+                store=scenario.store,
+                request_id=opened.request_record.command.request_id,
+                selections=(),
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+                operation_id="managed-service:ordinary-empty",
+                reviewer_id="reviewer@example.test",
+                rationale="Ordinary review cannot accept an empty selection set.",
+            )
+        assert ordinary_empty_reads == 1
+
         def unexpected_read(*args, **kwargs):
             del args, kwargs
-            raise AssertionError("EDIT must fail before authoritative read")
+            raise AssertionError("selection structure must fail before authoritative read")
 
         monkeypatch.setattr(scenario.store, "get_managed_review", unexpected_read)
+        with pytest.raises(ManagedReviewSelectionError, match="duplicate"):
+            decide_managed_revision_review(
+                store=scenario.store,
+                request_id=opened.request_record.command.request_id,
+                selections=(valid[0], valid[0]),
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+                operation_id="managed-service:duplicate-before-read",
+                reviewer_id="reviewer@example.test",
+                rationale="Duplicates must fail before authoritative read.",
+            )
+        with pytest.raises(TypeError, match="type was substituted"):
+            decide_managed_revision_review(
+                store=scenario.store,
+                request_id=opened.request_record.command.request_id,
+                selections=(object(),),  # type: ignore[arg-type]
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+                operation_id="managed-service:substitution-before-read",
+                reviewer_id="reviewer@example.test",
+                rationale="Substitution must fail before authoritative read.",
+            )
         with pytest.raises(ManagedRevisionEditDeferredError):
             decide_managed_revision_review(
                 store=scenario.store,
@@ -337,6 +388,93 @@ def test_selection_set_is_store_derived_complete_and_edit_is_deferred(
             ).fetchone()[0]
             == 0
         )
+    finally:
+        scenario.store.close()
+
+
+def test_empty_selection_requires_store_derived_exact_adoption_only_authority(
+    managed_service_seed: RealManagedV2Scenario,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario = clone_real_managed_v2_scenario(
+        managed_service_seed, tmp_path / "adoption-only-selection"
+    )
+
+    class _DecisionConstructionReached(RuntimeError):
+        pass
+
+    class _SubstitutedNoWorkAdmission(ManagedNoWorkPlanningAdmissionBinding):
+        pass
+
+    authorities = iter(
+        (
+            _SubstitutedNoWorkAdmission.model_construct(),
+            ManagedNoWorkPlanningAdmissionBinding.model_construct(),
+        )
+    )
+
+    def authoritative_view(admission):
+        return SimpleNamespace(
+            lifecycle=ManagedRevisionStoreLifecycle.OPEN,
+            request_record=SimpleNamespace(
+                command=SimpleNamespace(
+                    bundle=SimpleNamespace(
+                        targets=(),
+                        run_binding=SimpleNamespace(
+                            revision_planning_admission=admission,
+                        ),
+                    )
+                )
+            ),
+        )
+    reads = 0
+
+    def authoritative_read(*args, **kwargs):
+        nonlocal reads
+        del args, kwargs
+        reads += 1
+        return authoritative_view(next(authorities))
+
+    def decision_construction(**kwargs):
+        assert kwargs["items"] == ()
+        assert kwargs["adoption_choice"] == ManagedAdoptionChoice.ADOPT
+        raise _DecisionConstructionReached
+
+    try:
+        monkeypatch.setattr(scenario.store, "get_managed_review", authoritative_read)
+        monkeypatch.setattr(
+            service_module.ManagedRevisionDecisionCommand,
+            "create",
+            decision_construction,
+        )
+        with pytest.raises(ManagedReviewSelectionError, match="non-empty"):
+            decide_managed_revision_review(
+                store=scenario.store,
+                request_id="mreview:" + "0" * 64,
+                selections=(),
+                adoption_choice=ManagedAdoptionChoice.ADOPT,
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+                operation_id="managed-service:substituted-adoption-only-empty",
+                reviewer_id="reviewer@example.test",
+                rationale="Reject substituted adoption-only authority.",
+            )
+        with pytest.raises(_DecisionConstructionReached):
+            decide_managed_revision_review(
+                store=scenario.store,
+                request_id="mreview:" + "0" * 64,
+                selections=(),
+                adoption_choice=ManagedAdoptionChoice.ADOPT,
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+                operation_id="managed-service:adoption-only-empty",
+                reviewer_id="reviewer@example.test",
+                rationale="Accept exact store-derived adoption-only authority.",
+            )
+        assert reads == 2
     finally:
         scenario.store.close()
 

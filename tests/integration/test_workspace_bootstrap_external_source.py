@@ -65,7 +65,7 @@ def _assert_exact_state_cardinality(state_db: Path) -> None:
         "change_control_legacy_index_readiness_receipts": 1,
         "change_control_generation_manifests": 1,
         "change_control_active_generation": 1,
-        "change_control_schema_migrations": 5,
+        "change_control_schema_migrations": 6,
         "change_control_operator_runs": 1,
         "change_control_operator_run_links": 4,
     }

@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from mastervault.change_control.regression_suite import (
+    RegressionSuiteBoundaryError,
     RegressionSuiteError,
+    RegressionSuiteIntegrityError,
     load_regression_suite,
     parse_regression_suite_bytes,
 )
@@ -76,7 +78,7 @@ def test_admission_sorts_cases_and_binds_original_and_canonical_bytes() -> None:
     ],
 )
 def test_parser_rejects_ambiguous_or_non_strict_json(payload: bytes) -> None:
-    with pytest.raises(RegressionSuiteError):
+    with pytest.raises(RegressionSuiteBoundaryError):
         parse_regression_suite_bytes(payload)
 
 
@@ -135,6 +137,30 @@ def test_file_loader_reads_to_eof_even_when_os_read_returns_short_chunks(
     monkeypatch.setattr(os, "read", short_read)
     admitted = load_regression_suite(path)
     assert len(admitted.suite.cases) == 2
+
+
+def test_file_loader_classifies_mid_read_descriptor_change_as_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "suite.json"
+    path.write_bytes(_bytes())
+    path.chmod(0o600)
+    original = os.read
+    changed = False
+
+    def change_after_first_read(fd: int, size: int) -> bytes:
+        nonlocal changed
+        chunk = original(fd, size)
+        if chunk and not changed:
+            changed = True
+            before = path.stat()
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+        return chunk
+
+    monkeypatch.setattr(os, "read", change_after_first_read)
+
+    with pytest.raises(RegressionSuiteIntegrityError, match="changed during admission"):
+        load_regression_suite(path)
 
 
 def test_file_loader_rejects_symlink_hardlink_fifo_and_oversize(tmp_path: Path) -> None:

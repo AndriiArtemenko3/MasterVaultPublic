@@ -354,11 +354,11 @@ def open_managed_revision_review(
 
 def _exact_selections(
     selections: tuple[ManagedRevisionReviewSelection, ...],
-    *,
-    allow_empty: bool = False,
 ) -> tuple[ManagedRevisionReviewSelection, ...]:
-    if type(selections) is not tuple or (not selections and not allow_empty):
-        raise ManagedReviewSelectionError("managed decision requires a non-empty selection set")
+    """Normalize authority-independent selection structure before any store access."""
+
+    if type(selections) is not tuple:
+        raise ManagedReviewSelectionError("managed decision selections must be an exact tuple")
     exact = tuple(
         ManagedRevisionReviewSelection.model_validate_json(
             canonical_json_bytes(item.model_dump(mode="json"))
@@ -407,6 +407,7 @@ def decide_managed_revision_review(
     )
     reviewer_id = normalize_actor_id(reviewer_id)
     rationale = normalize_review_rationale(rationale)
+    exact_selections = _exact_selections(selections)
 
     before = _read_review(
         store=store,
@@ -417,15 +418,16 @@ def decide_managed_revision_review(
     if before.lifecycle == ManagedRevisionStoreLifecycle.STALE:
         raise ManagedReviewStaleError("stale managed review cannot accept a new decision")
     targets = {item.target_id: item for item in before.request_record.command.bundle.targets}
-    adoption_only = not targets and isinstance(
-        getattr(
-            before.request_record.command.bundle.run_binding,
-            "revision_planning_admission",
-            None,
-        ),
-        ManagedNoWorkPlanningAdmissionBinding,
+    admission = getattr(
+        before.request_record.command.bundle.run_binding,
+        "revision_planning_admission",
+        None,
     )
-    exact_selections = _exact_selections(selections, allow_empty=adoption_only)
+    adoption_only = (
+        not targets and type(admission) is ManagedNoWorkPlanningAdmissionBinding
+    )
+    if not exact_selections and not adoption_only:
+        raise ManagedReviewSelectionError("managed decision requires a non-empty selection set")
     if adoption_only != (adoption_choice is not None):
         raise ManagedReviewSelectionError(
             "adoption choice is required only for an exact zero-target review"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import multiprocessing
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,15 +33,192 @@ from mastervault.change_control.operator_run import (
 )
 from mastervault.change_control.regression_suite import RegressionSuiteV1
 from mastervault.change_control.review import ReviewDisposition
-from mastervault.change_control.store import ChangeControlCorruptionError
+from mastervault.change_control.store import (
+    ChangeControlCorruptionError,
+    ChangeControlIdempotencyError,
+)
 from mastervault.change_control.synchronous_lifecycle_store_models import (
     RegressionSuiteAdmissionIntentV1,
     RegressionSuiteAdmissionRecordV1,
+    SynchronousApplicationOperationV1,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PRECHANGE_MANIFEST = REPO_ROOT / "datasets/larkstead/change_control/sl2_prechange.yaml"
 INCOMING_MANIFEST = REPO_ROOT / "datasets/larkstead/change_control/sl2_incoming_returns_v2.yaml"
+
+
+def _claim_application_operation_process(
+    path: str,
+    run_id: str,
+    request_sha256: str,
+    ready: Any,
+    start: Any,
+    results: Any,
+) -> None:
+    store = SqliteManagedChangeControlStore(Path(path), secure_open=True)
+    try:
+        ready.put(True)
+        start.wait()
+        store.claim_application_operation(
+            SynchronousApplicationOperationV1.create(
+                operation_id="application-claim:process-race",
+                operation_kind="start",
+                run_id=run_id,
+                request_sha256=request_sha256,
+                claimed_at="2026-08-20T12:00:00+00:00",
+            )
+        )
+    except BaseException as exc:  # process boundary reports only stable type
+        results.put(type(exc).__name__)
+    else:
+        results.put("claimed")
+    finally:
+        store.close()
+
+
+def test_application_operation_claim_is_global_exact_and_lost_ack_safe(
+    tmp_path: Path,
+) -> None:
+    store = SqliteManagedChangeControlStore(tmp_path / "authority.sqlite3")
+    store.init_schema()
+    bootstrap = bootstrap_analysis_aggregate(
+        repo_root=REPO_ROOT,
+        prechange_manifest_path=PRECHANGE_MANIFEST,
+        incoming_manifest_path=INCOMING_MANIFEST,
+        store=store,
+        prechange_operation_id="application-claim:prechange",
+        analysis_operation_id="application-claim:analysis",
+    )
+    authority = store.initialize_generation_zero(
+        verified_bootstrap=bootstrap.verification_capability,
+        prechange_head=AggregateHeadBinding.create(
+            aggregate_id=bootstrap.binding.aggregate_id,
+            revision=bootstrap.binding.prechange_revision,
+            aggregate_sha256=bootstrap.binding.prechange_aggregate_sha256,
+        ),
+    )
+    run = store.create_operator_run(
+        OperatorRunCommand.create(
+            operation_id="application-claim:run",
+            aggregate_id=authority.aggregate_id,
+            base_authority_id=authority.authority_id,
+            base_authority_revision=0,
+            base_active_pointer_sha256=authority.active_pointer_sha256,
+        )
+    )
+    claim = SynchronousApplicationOperationV1.create(
+        operation_id="application-claim:start",
+        operation_kind="start",
+        run_id=run.record.command.run_id,
+        request_sha256="8" * 64,
+        claimed_at="2026-08-20T12:00:00+00:00",
+    )
+    try:
+        assert store.claim_application_operation(claim) == claim
+        replay = SynchronousApplicationOperationV1.create(
+            operation_id=claim.operation_id,
+            operation_kind=claim.operation_kind,
+            run_id=claim.run_id,
+            request_sha256=claim.request_sha256,
+            claimed_at="2026-08-20T12:00:01+00:00",
+        )
+        assert store.claim_application_operation(replay) == claim
+
+        with pytest.raises(ChangeControlIdempotencyError):
+            store.claim_application_operation(
+                SynchronousApplicationOperationV1.create(
+                    operation_id=claim.operation_id,
+                    operation_kind="activate-no-op",
+                    run_id=claim.run_id,
+                    request_sha256=claim.request_sha256,
+                    claimed_at=claim.claimed_at,
+                )
+            )
+        with pytest.raises(ChangeControlIdempotencyError):
+            store.claim_application_operation(
+                SynchronousApplicationOperationV1.create(
+                    operation_id=run.record.command.operation_id,
+                    operation_kind="start",
+                    run_id=claim.run_id,
+                    request_sha256=claim.request_sha256,
+                    claimed_at=claim.claimed_at,
+                )
+            )
+        reverse_claim = SynchronousApplicationOperationV1.create(
+            operation_id="application-claim:reverse",
+            operation_kind="start",
+            run_id=claim.run_id,
+            request_sha256="9" * 64,
+            claimed_at=claim.claimed_at,
+        )
+        store.claim_application_operation(reverse_claim)
+        with pytest.raises(ChangeControlIdempotencyError):
+            store.create_operator_run(
+                OperatorRunCommand.create(
+                    operation_id=reverse_claim.operation_id,
+                    aggregate_id=authority.aggregate_id,
+                    base_authority_id=authority.authority_id,
+                    base_authority_revision=0,
+                    base_active_pointer_sha256=authority.active_pointer_sha256,
+                )
+            )
+    finally:
+        store.close()
+
+
+def test_application_operation_two_process_contention_has_one_owner(tmp_path: Path) -> None:
+    path = tmp_path / "authority.sqlite3"
+    store = SqliteManagedChangeControlStore(path, secure_open=True)
+    store.init_schema()
+    bootstrap = bootstrap_analysis_aggregate(
+        repo_root=REPO_ROOT,
+        prechange_manifest_path=PRECHANGE_MANIFEST,
+        incoming_manifest_path=INCOMING_MANIFEST,
+        store=store,
+        prechange_operation_id="application-process:prechange",
+        analysis_operation_id="application-process:analysis",
+    )
+    authority = store.initialize_generation_zero(
+        verified_bootstrap=bootstrap.verification_capability,
+        prechange_head=AggregateHeadBinding.create(
+            aggregate_id=bootstrap.binding.aggregate_id,
+            revision=bootstrap.binding.prechange_revision,
+            aggregate_sha256=bootstrap.binding.prechange_aggregate_sha256,
+        ),
+    )
+    run = store.create_operator_run(
+        OperatorRunCommand.create(
+            operation_id="application-process:run",
+            aggregate_id=authority.aggregate_id,
+            base_authority_id=authority.authority_id,
+            base_authority_revision=0,
+            base_active_pointer_sha256=authority.active_pointer_sha256,
+        )
+    )
+    store.close()
+
+    context = multiprocessing.get_context("spawn")
+    ready = context.Queue()
+    start = context.Event()
+    results = context.Queue()
+    processes = tuple(
+        context.Process(
+            target=_claim_application_operation_process,
+            args=(str(path), run.record.command.run_id, digit * 64, ready, start, results),
+        )
+        for digit in ("6", "7")
+    )
+    for process in processes:
+        process.start()
+    for _ in processes:
+        assert ready.get(timeout=10) is True
+    start.set()
+    observed = sorted(results.get(timeout=10) for _ in processes)
+    for process in processes:
+        process.join(timeout=10)
+        assert process.exitcode == 0
+    assert observed == ["ChangeControlIdempotencyError", "claimed"]
 
 
 def _navigation_run(*, suffix: str) -> OperatorRunView:

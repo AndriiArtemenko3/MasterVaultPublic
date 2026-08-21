@@ -33,6 +33,18 @@ class RegressionSuiteError(ValueError):
     """A suite failed its bounded syntax or semantic contract."""
 
 
+class RegressionSuiteBoundaryError(RegressionSuiteError):
+    """Operator-supplied suite input is malformed or unsafe to admit."""
+
+
+class RegressionSuiteIntegrityError(RegressionSuiteError):
+    """Suite descriptors or bytes changed during their verified read."""
+
+
+class RegressionSuiteUnsupportedError(RegressionSuiteError):
+    """The host cannot provide the required no-follow admission guarantees."""
+
+
 class RegressionCaseRole(StrEnum):
     TARGETED = "targeted"
     CONTROL = "control"
@@ -163,24 +175,24 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]
     result: dict[str, object] = {}
     for key, value in pairs:
         if key in result:
-            raise RegressionSuiteError(f"regression suite contains duplicate key {key!r}")
+            raise RegressionSuiteBoundaryError(f"regression suite contains duplicate key {key!r}")
         result[key] = value
     return result
 
 
 def _reject_constant(value: str) -> object:
-    raise RegressionSuiteError(f"regression suite contains non-finite number {value}")
+    raise RegressionSuiteBoundaryError(f"regression suite contains non-finite number {value}")
 
 
 def _scan(value: object, *, depth: int = 0) -> None:
     if depth > 32:
-        raise RegressionSuiteError("regression suite exceeds maximum nesting depth")
+        raise RegressionSuiteBoundaryError("regression suite exceeds maximum nesting depth")
     if isinstance(value, dict):
         for key, item in value.items():
             normalized = normalize_logical_key(str(key).replace("_", "-"))
             parts = frozenset(normalized.replace("-", ".").split("."))
             if parts & _FORBIDDEN_KEY_PARTS:
-                raise RegressionSuiteError(
+                raise RegressionSuiteBoundaryError(
                     f"regression suite contains forbidden answer-shaped key {key!r}"
                 )
             _scan(item, depth=depth + 1)
@@ -188,37 +200,37 @@ def _scan(value: object, *, depth: int = 0) -> None:
         for item in value:
             _scan(item, depth=depth + 1)
     elif isinstance(value, float) and not math.isfinite(value):
-        raise RegressionSuiteError("regression suite contains a non-finite number")
+        raise RegressionSuiteBoundaryError("regression suite contains a non-finite number")
 
 
 def parse_regression_suite_bytes(payload: bytes) -> AdmittedRegressionSuiteV1:
     """Parse exact JSON bytes without coercion or ambiguous syntax."""
 
     if not payload or len(payload) > MAX_REGRESSION_SUITE_BYTES:
-        raise RegressionSuiteError("regression suite must be 1 byte to 1 MiB")
+        raise RegressionSuiteBoundaryError("regression suite must be 1 byte to 1 MiB")
     if payload.startswith(b"\xef\xbb\xbf"):
-        raise RegressionSuiteError("regression suite cannot contain a UTF-8 BOM")
+        raise RegressionSuiteBoundaryError("regression suite cannot contain a UTF-8 BOM")
     try:
         text = payload.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise RegressionSuiteError("regression suite must be UTF-8 JSON") from exc
+        raise RegressionSuiteBoundaryError("regression suite must be UTF-8 JSON") from exc
     try:
         raw = json.loads(
             text,
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_constant,
         )
-    except RegressionSuiteError:
+    except RegressionSuiteBoundaryError:
         raise
     except (json.JSONDecodeError, ValueError) as exc:
-        raise RegressionSuiteError("regression suite is not strict JSON") from exc
+        raise RegressionSuiteBoundaryError("regression suite is not strict JSON") from exc
     if not isinstance(raw, dict):
-        raise RegressionSuiteError("regression suite root must be an object")
+        raise RegressionSuiteBoundaryError("regression suite root must be an object")
     _scan(raw)
     try:
         suite = TypeAdapter(RegressionSuiteV1).validate_python(raw, strict=True)
     except ValueError as exc:
-        raise RegressionSuiteError(f"regression suite is invalid: {exc}") from exc
+        raise RegressionSuiteBoundaryError(f"regression suite is invalid: {exc}") from exc
     return AdmittedRegressionSuiteV1(
         suite=suite,
         original_sha256=hashlib.sha256(payload).hexdigest(),
@@ -233,7 +245,9 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
     if not isinstance(path, Path):
         raise TypeError("regression suite path must be pathlib.Path")
     if os.name != "posix" or not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
-        raise RegressionSuiteError("regression suite admission requires POSIX no-follow support")
+        raise RegressionSuiteUnsupportedError(
+            "regression suite admission requires POSIX no-follow support"
+        )
     absolute = path.absolute()
     parts = absolute.parts
     directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -245,7 +259,9 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
         for component in parts[1:-1]:
             names = os.listdir(current)
             if component not in names:
-                raise RegressionSuiteError("regression suite parent path changed or has wrong case")
+                raise RegressionSuiteBoundaryError(
+                    "regression suite parent path changed or has wrong case"
+                )
             child = os.open(component, directory_flags, dir_fd=current)
             child_info = os.fstat(child)
             named_info = os.stat(component, dir_fd=current, follow_symlinks=False)
@@ -253,13 +269,13 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
                 child_info.st_dev,
                 child_info.st_ino,
             ) != (named_info.st_dev, named_info.st_ino):
-                raise RegressionSuiteError("regression suite parent was substituted")
+                raise RegressionSuiteIntegrityError("regression suite parent was substituted")
             os.close(current)
             current = child
             child = -1
         name = parts[-1]
         if name not in os.listdir(current):
-            raise RegressionSuiteError("regression suite file changed or has wrong case")
+            raise RegressionSuiteBoundaryError("regression suite file changed or has wrong case")
         flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
         fd = os.open(name, flags, dir_fd=current)
         before = os.stat(name, dir_fd=current, follow_symlinks=False)
@@ -270,7 +286,9 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
             or before.st_nlink != 1
             or before.st_mode & 0o022
         ):
-            raise RegressionSuiteError("regression suite must be one owner-controlled regular file")
+            raise RegressionSuiteBoundaryError(
+                "regression suite must be one owner-controlled regular file"
+            )
         chunks: list[bytes] = []
         total = 0
         while total <= MAX_REGRESSION_SUITE_BYTES:
@@ -283,7 +301,7 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
         finished = os.fstat(fd)
         after = os.stat(name, dir_fd=current, follow_symlinks=False)
     except OSError as exc:
-        raise RegressionSuiteError("regression suite cannot be opened safely") from exc
+        raise RegressionSuiteBoundaryError("regression suite cannot be opened safely") from exc
     finally:
         if fd >= 0:
             with suppress(OSError):
@@ -308,7 +326,7 @@ def load_regression_suite(path: Path) -> AdmittedRegressionSuiteV1:
         for item in (before, opened, finished, after)
     }
     if len(signatures) != 1 or len(payload) != after.st_size:
-        raise RegressionSuiteError("regression suite changed during admission")
+        raise RegressionSuiteIntegrityError("regression suite changed during admission")
     return parse_regression_suite_bytes(payload)
 
 
@@ -319,6 +337,9 @@ __all__ = [
     "RegressionCaseRole",
     "RegressionCaseV1",
     "RegressionSuiteError",
+    "RegressionSuiteBoundaryError",
+    "RegressionSuiteIntegrityError",
+    "RegressionSuiteUnsupportedError",
     "RegressionSuiteV1",
     "SearchRegressionCaseV1",
     "load_regression_suite",

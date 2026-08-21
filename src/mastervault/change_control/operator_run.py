@@ -71,6 +71,7 @@ class OperatorRunLinkKind(StrEnum):
     ACTIVATION_OPERATION = "activation-operation"
     REGRESSION_SUITE = "regression-suite"
     GENERATION_ZERO_BASELINE = "generation-zero-baseline"
+    MECHANICAL_NO_CHANGE = "mechanical-no-change"
     REGRESSION = "regression"
     REPORT = "report"
 

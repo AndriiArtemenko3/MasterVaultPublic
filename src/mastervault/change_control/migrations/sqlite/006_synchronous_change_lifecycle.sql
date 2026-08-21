@@ -1,5 +1,33 @@
 -- Synchronous generic admission, regression-suite, and generation-zero baseline authority.
 
+CREATE TABLE synchronous_application_operations (
+  operation_id TEXT PRIMARY KEY,
+  operation_kind TEXT NOT NULL CHECK (operation_kind IN ('start', 'activate-no-op')),
+  run_id TEXT NOT NULL REFERENCES change_control_operator_runs(run_id),
+  request_sha256 TEXT NOT NULL CHECK (length(request_sha256) = 64),
+  owner_id TEXT NOT NULL UNIQUE,
+  owner_sha256 TEXT NOT NULL UNIQUE CHECK (length(owner_sha256) = 64),
+  payload_schema_version INTEGER NOT NULL CHECK (payload_schema_version = 1),
+  payload_json TEXT NOT NULL,
+  claimed_at TEXT NOT NULL
+);
+
+CREATE TABLE synchronous_run_lock_authorities (
+  run_id TEXT PRIMARY KEY REFERENCES change_control_operator_runs(run_id),
+  authority_id TEXT NOT NULL UNIQUE,
+  authority_sha256 TEXT NOT NULL UNIQUE CHECK (length(authority_sha256) = 64),
+  operation_id TEXT NOT NULL UNIQUE,
+  relative_locator TEXT NOT NULL UNIQUE,
+  device INTEGER NOT NULL CHECK (device >= 0),
+  inode INTEGER NOT NULL CHECK (inode > 0),
+  owner_uid INTEGER NOT NULL CHECK (owner_uid >= 0),
+  file_mode INTEGER NOT NULL CHECK (file_mode > 0),
+  link_count INTEGER NOT NULL CHECK (link_count = 1),
+  payload_schema_version INTEGER NOT NULL CHECK (payload_schema_version = 1),
+  payload_json TEXT NOT NULL,
+  claimed_at TEXT NOT NULL
+);
+
 CREATE TABLE change_control_incoming_admission_intents (
   intent_id TEXT PRIMARY KEY,
   intent_sha256 TEXT NOT NULL UNIQUE CHECK (length(intent_sha256) = 64),
@@ -138,6 +166,7 @@ CREATE TABLE change_control_operator_run_links_v6 (
     'activation-operation',
     'regression-suite',
     'generation-zero-baseline',
+    'mechanical-no-change',
     'regression',
     'report'
   )),

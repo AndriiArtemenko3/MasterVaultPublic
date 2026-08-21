@@ -232,6 +232,35 @@ def test_source_type_size_mode_links_fifo_and_workspace_boundary(tmp_path: Path)
         admit_generic_incoming_markdown_v2(source, active_workspace=workspace)
 
 
+def test_admission_requires_exact_filesystem_case(tmp_path: Path) -> None:
+    exact_parent = tmp_path / "Exact-Parent"
+    source, workspace = _write(
+        exact_parent,
+        "Returns require a receipt.\n",
+    )
+    assert admit_generic_incoming_markdown_v2(
+        source, active_workspace=workspace
+    ).source_name == source.name
+
+    casefolded_parent = tmp_path / exact_parent.name.swapcase()
+    if not casefolded_parent.exists():
+        pytest.skip("filesystem is case-sensitive")
+
+    with pytest.raises(GenericIncomingBoundaryError, match="exact filesystem case"):
+        admit_generic_incoming_markdown_v2(
+            casefolded_parent / source.name,
+            active_workspace=workspace,
+        )
+
+    exact_filename = source.with_name(source.name.upper())
+    source.rename(exact_filename)
+    with pytest.raises(GenericIncomingBoundaryError, match="exact filesystem case"):
+        admit_generic_incoming_markdown_v2(
+            source,
+            active_workspace=workspace,
+        )
+
+
 def test_admission_rejects_byte_and_inode_substitution(tmp_path: Path) -> None:
     source, workspace = _write(tmp_path, "Returns require a receipt.\n")
     admission = admit_generic_incoming_markdown_v2(source, active_workspace=workspace)

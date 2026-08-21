@@ -1409,6 +1409,64 @@ def test_publication_file_crash_reconciles_and_active_index_tamper_fails_closed(
         scenario.store.close()
 
 
+@pytest.mark.parametrize("artifact_kind", ("publication", "index"))
+@pytest.mark.generation_activation_c
+def test_receipt_owned_hook_tamper_fails_before_service_success(
+    generation_seed: RealManagedV2Scenario,
+    tmp_path: Path,
+    artifact_kind: str,
+) -> None:
+    scenario = clone_real_managed_v2_scenario(generation_seed, tmp_path / "scenario")
+    try:
+        request_id = _decide(scenario, prefix=f"generation:receipt-tamper:{artifact_kind}", mode="mixed")
+        operation_id = f"generation:receipt-tamper:{artifact_kind}:activate"
+        generation_root = tmp_path / "generations"
+        tampered_path: Path | None = None
+        original = b""
+
+        def tamper_after_receipt(boundary: str) -> None:
+            nonlocal tampered_path, original
+            if boundary != "activation-receipt-owned":
+                return
+            state = scenario.store.get_managed_generation_activation(
+                operation_id,
+                resolver=scenario.resolver,
+                verified_bootstrap=scenario.verified_bootstrap,
+                prechange_head=scenario.prechange_head,
+            )
+            assert state is not None and state.index_receipt is not None
+            tampered_path = (
+                generation_root / state.publication_events[0].repository_relative_path
+                if artifact_kind == "publication"
+                else generation_root / state.index_receipt.index_relative_path
+            )
+            original = tampered_path.read_bytes()
+            tampered_path.chmod(0o600)
+            with tampered_path.open("ab") as stream:
+                stream.write(b"tamper-after-receipt")
+
+        with pytest.raises(ManagedGenerationRepositoryError):
+            _activate(
+                scenario,
+                request_id=request_id,
+                operation_id=operation_id,
+                generation_root=generation_root,
+                failure_hook=tamper_after_receipt,
+            )
+        assert tampered_path is not None
+        tampered_path.write_bytes(original)
+        tampered_path.chmod(0o400)
+        recovered = _activate(
+            scenario,
+            request_id=request_id,
+            operation_id=operation_id,
+            generation_root=generation_root,
+        )
+        assert recovered.outcome == ManagedActivationOutcome.ACTIVATED
+    finally:
+        scenario.store.close()
+
+
 @pytest.mark.parametrize(
     "boundary",
     (
@@ -1435,6 +1493,10 @@ def test_publication_file_crash_reconciles_and_active_index_tamper_fails_closed(
         pytest.param(
             "authority-updated-before-receipt",
             marks=pytest.mark.generation_activation_b,
+        ),
+        pytest.param(
+            "activation-receipt-owned",
+            marks=pytest.mark.generation_activation_c,
         ),
         pytest.param(
             "authority-cas-committed",

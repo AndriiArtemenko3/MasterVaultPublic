@@ -611,6 +611,12 @@ def test_historical_receipt_replay_survives_replacements_and_preserves_timestamp
         proposed_full_aggregate(), expected_revision=1, operation_id="change-lost-ack"
     )
     historical_lookup = store.get_operation_commit("change-lost-ack")
+    receipt_sha256 = str(
+        store.conn.execute(
+            "SELECT receipt_sha256 FROM change_control_operations WHERE operation_id=?",
+            ("change-lost-ack",),
+        ).fetchone()[0]
+    )
     assert create_replay.replayed and create_replay.revision == 1
     assert create_replay.committed_at == created.committed_at
     assert change_replay.replayed and change_replay.revision == 2
@@ -623,9 +629,57 @@ def test_historical_receipt_replay_survives_replacements_and_preserves_timestamp
         committed_at=changed.committed_at,
         replayed=True,
     )
+    assert store.get_operation_receipt_sha256("change-lost-ack") == receipt_sha256
     assert store.get_operation_commit("missing-operation") is None
+    assert store.get_operation_receipt_sha256("missing-operation") is None
     assert store.conn.execute("SELECT count(*) FROM change_control_operations").fetchone()[0] == 3
     store.close()
+
+
+def test_operation_receipt_sha256_is_a_nonmutating_read_only_lookup(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    writer = _store(path)
+    writer.create(empty_aggregate(), operation_id="receipt-read-only")
+    expected = writer.get_operation_receipt_sha256("receipt-read-only")
+    writer.close()
+    path.chmod(0o600)
+    before = path.read_bytes()
+
+    reader = SqliteChangeControlStore(path, secure_open=True, read_only=True)
+    try:
+        assert reader.get_operation_receipt_sha256("receipt-read-only") == expected
+    finally:
+        reader.close()
+
+    assert path.read_bytes() == before
+
+
+def test_operation_receipt_sha256_fails_closed_on_receipt_corruption(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.sqlite3"
+    writer = _store(path)
+    writer.create(empty_aggregate(), operation_id="receipt-corruption")
+    writer.close()
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "UPDATE change_control_operations SET receipt_sha256=? WHERE operation_id=?",
+            ("0" * 64, "receipt-corruption"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    path.chmod(0o600)
+
+    reader = SqliteChangeControlStore(path, secure_open=True, read_only=True)
+    try:
+        with pytest.raises(ChangeControlCorruptionError):
+            reader.get_operation_receipt_sha256("receipt-corruption")
+    finally:
+        reader.close()
 
 
 def test_review_accepts_replacement_and_dependent_document_constraint_atomically(

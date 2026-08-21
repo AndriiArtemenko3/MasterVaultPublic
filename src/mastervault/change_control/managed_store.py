@@ -126,6 +126,8 @@ from mastervault.change_control.synchronous_lifecycle_store_models import (
     IncomingAdmissionRecordV1,
     RegressionSuiteAdmissionIntentV1,
     RegressionSuiteAdmissionRecordV1,
+    SynchronousApplicationOperationV1,
+    SynchronousRunLockAuthorityV1,
 )
 from mastervault.change_control.temporal_proposal import TemporalProposalCommit
 from mastervault.change_control.workspace_bootstrap import (
@@ -221,6 +223,10 @@ class OperatorRunAuthorityResolver(Protocol):
     def resolve_generation_zero_baseline(
         self, record: GenerationZeroBaselineStoreRecordV1
     ) -> GenerationZeroBaselineReceiptV1: ...
+
+    def resolve_operator_mechanical_no_change(
+        self, *, run_id: str, target_id: str, target_sha256: str
+    ) -> Any: ...
 
 
 class ManagedReviewAuthorityError(ChangeControlConflictError):
@@ -457,6 +463,216 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
 
     def _operation_owner(self, operation_id: str) -> tuple[str, str] | None:
         return self._global_operation_owner(operation_id)
+
+    def _read_application_operation_in_transaction(
+        self, operation_id: str
+    ) -> SynchronousApplicationOperationV1 | None:
+        row = self.conn.execute(
+            "SELECT * FROM synchronous_application_operations WHERE operation_id=?",
+            (operation_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        record = _decode_model(
+            SynchronousApplicationOperationV1,
+            str(row["payload_json"]),
+            label="synchronous application operation",
+        )
+        if not (
+            str(row["operation_id"]) == record.operation_id == operation_id
+            and str(row["operation_kind"]) == record.operation_kind
+            and str(row["run_id"]) == record.run_id
+            and str(row["request_sha256"]) == record.request_sha256
+            and str(row["owner_id"]) == record.owner_id
+            and str(row["owner_sha256"]) == record.owner_sha256
+            and int(row["payload_schema_version"]) == record.schema_version == 1
+            and str(row["claimed_at"]) == record.claimed_at
+        ):
+            raise ChangeControlCorruptionError(
+                "application operation columns differ from canonical receipt"
+            )
+        return record
+
+    def claim_application_operation(
+        self, claim: SynchronousApplicationOperationV1
+    ) -> SynchronousApplicationOperationV1:
+        """Claim one raw public operation ID across every SQLite write authority."""
+
+        claim = SynchronousApplicationOperationV1.model_validate_json(
+            canonical_json_bytes(claim.model_dump(mode="json")), strict=True
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(claim.operation_id)
+            if owner is not None:
+                if owner[0] != "synchronous-application":
+                    raise ChangeControlIdempotencyError(
+                        "application operation_id is already owned by another write"
+                    )
+                existing = self._read_application_operation_in_transaction(claim.operation_id)
+                if existing is None or existing.semantic_key != claim.semantic_key:
+                    raise ChangeControlIdempotencyError(
+                        "application operation_id was reused for different inputs"
+                    )
+                self._commit()
+                return existing
+            self.conn.execute(
+                "INSERT INTO synchronous_application_operations "
+                "(operation_id, operation_kind, run_id, request_sha256, owner_id, "
+                "owner_sha256, payload_schema_version, payload_json, claimed_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    claim.operation_id,
+                    claim.operation_kind,
+                    claim.run_id,
+                    claim.request_sha256,
+                    claim.owner_id,
+                    claim.owner_sha256,
+                    claim.schema_version,
+                    canonical_json_bytes(claim.model_dump(mode="json")).decode("utf-8"),
+                    claim.claimed_at,
+                ),
+            )
+            stored = self._read_application_operation_in_transaction(claim.operation_id)
+            if stored != claim:
+                raise ChangeControlCorruptionError(
+                    "application operation was not persisted exactly"
+                )
+            self._validate_global_operation_ownership()
+            self._commit()
+            return claim
+        except BaseException as exc:
+            if not self.conn.in_transaction:
+                raise
+            self._rollback_operation_error(exc)
+            raise
+
+    def _read_run_lock_authority_in_transaction(
+        self, run_id: str
+    ) -> SynchronousRunLockAuthorityV1 | None:
+        row = self.conn.execute(
+            "SELECT * FROM synchronous_run_lock_authorities WHERE run_id=?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        authority = _decode_model(
+            SynchronousRunLockAuthorityV1,
+            str(row["payload_json"]),
+            label="synchronous run-lock authority",
+        )
+        if not (
+            str(row["run_id"]) == authority.run_id == run_id
+            and str(row["authority_id"]) == authority.authority_id
+            and str(row["authority_sha256"]) == authority.authority_sha256
+            and str(row["operation_id"]) == authority.operation_id
+            and str(row["relative_locator"]) == authority.relative_locator
+            and int(row["device"]) == authority.device
+            and int(row["inode"]) == authority.inode
+            and int(row["owner_uid"]) == authority.owner_uid
+            and int(row["file_mode"]) == authority.file_mode
+            and int(row["link_count"]) == authority.link_count == 1
+            and int(row["payload_schema_version"]) == authority.schema_version == 1
+            and str(row["claimed_at"]) == authority.claimed_at
+        ):
+            raise ChangeControlCorruptionError(
+                "run-lock authority columns differ from canonical receipt"
+            )
+        return authority
+
+    def get_run_lock_authority(self, run_id: str) -> SynchronousRunLockAuthorityV1 | None:
+        """Read one bound lock inode without creating filesystem or SQLite state."""
+
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            authority = self._read_run_lock_authority_in_transaction(run_id)
+            self._commit()
+            return authority
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
+    def claim_run_lock_authority(
+        self, candidate: SynchronousRunLockAuthorityV1
+    ) -> SynchronousRunLockAuthorityV1:
+        """Bind one stable per-run filesystem lock inode under a short transaction."""
+
+        candidate = SynchronousRunLockAuthorityV1.model_validate_json(
+            canonical_json_bytes(candidate.model_dump(mode="json")), strict=True
+        )
+        self._require_ready()
+        self._begin("BEGIN IMMEDIATE")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            owner = self._operation_owner(candidate.operation_id)
+            existing = self._read_run_lock_authority_in_transaction(candidate.run_id)
+            if owner is not None or existing is not None:
+                if (
+                    existing is None
+                    or owner != ("synchronous-run-lock", existing.authority_id)
+                    or existing.semantic_key != candidate.semantic_key
+                ):
+                    raise ChangeControlIdempotencyError(
+                        "run-lock authority differs from its durable inode binding"
+                    )
+                self._commit()
+                return existing
+            run = self.conn.execute(
+                "SELECT 1 FROM change_control_operator_runs WHERE run_id=?",
+                (candidate.run_id,),
+            ).fetchone()
+            if run is None:
+                raise ChangeControlCorruptionError(
+                    "run-lock authority requires an existing operator run"
+                )
+            self.conn.execute(
+                "INSERT INTO synchronous_run_lock_authorities "
+                "(run_id, authority_id, authority_sha256, operation_id, relative_locator, "
+                "device, inode, owner_uid, file_mode, link_count, payload_schema_version, "
+                "payload_json, claimed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    candidate.run_id,
+                    candidate.authority_id,
+                    candidate.authority_sha256,
+                    candidate.operation_id,
+                    candidate.relative_locator,
+                    candidate.device,
+                    candidate.inode,
+                    candidate.owner_uid,
+                    candidate.file_mode,
+                    candidate.link_count,
+                    candidate.schema_version,
+                    _canonical_model_json(candidate),
+                    candidate.claimed_at,
+                ),
+            )
+            reopened = self._read_run_lock_authority_in_transaction(candidate.run_id)
+            if reopened != candidate:
+                raise ChangeControlCorruptionError(
+                    "run-lock authority did not reopen exactly"
+                )
+            self._validate_global_operation_ownership()
+            self._commit()
+            return candidate
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
 
     def _read_workspace_bootstrap_in_transaction(
         self, bootstrap_id: str
@@ -1299,6 +1515,22 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
         return record
 
     def _validate_extension_records(self) -> None:
+        application_operation_rows = self.conn.execute(
+            "SELECT operation_id FROM synchronous_application_operations ORDER BY operation_id"
+        ).fetchall()
+        for row in application_operation_rows:
+            if self._read_application_operation_in_transaction(str(row["operation_id"])) is None:
+                raise ChangeControlCorruptionError(
+                    "application operation disappeared during validation"
+                )
+        run_lock_rows = self.conn.execute(
+            "SELECT run_id FROM synchronous_run_lock_authorities ORDER BY run_id"
+        ).fetchall()
+        for row in run_lock_rows:
+            if self._read_run_lock_authority_in_transaction(str(row["run_id"])) is None:
+                raise ChangeControlCorruptionError(
+                    "run-lock authority disappeared during validation"
+                )
         bootstrap_rows = self.conn.execute(
             "SELECT bootstrap_id FROM change_control_workspace_bootstrap_intents "
             "ORDER BY bootstrap_id"
@@ -2140,6 +2372,28 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
                 raise ChangeControlCorruptionError(
                     "operator baseline repository authority differs from its SQLite receipt"
                 )
+        elif command.kind == OperatorRunLinkKind.MECHANICAL_NO_CHANGE:
+            if resolver is None:
+                raise ManagedReviewAuthorityError(
+                    "operator mechanical no-change target requires a repository authority resolver"
+                )
+            evidence = resolver.resolve_operator_mechanical_no_change(
+                run_id=command.run_id,
+                target_id=command.target_id,
+                target_sha256=command.target_sha256,
+            )
+            if not (
+                evidence.run_id == command.run_id
+                and evidence.evidence_id == command.target_id
+                and evidence.evidence_sha256 == command.target_sha256
+                and evidence.base_authority_id == run.record.command.base_authority_id
+                and evidence.base_authority_revision == run.record.command.base_authority_revision
+                and evidence.base_active_pointer_sha256
+                == run.record.command.base_active_pointer_sha256
+            ):
+                raise ChangeControlCorruptionError(
+                    "operator mechanical no-change authority differs from its run link"
+                )
         elif command.kind == OperatorRunLinkKind.IMPACT_EVIDENCE:
             if resolver is None:
                 raise ManagedReviewAuthorityError(
@@ -2516,6 +2770,25 @@ class SqliteManagedChangeControlStore(SqliteChangeControlStore):
             return OperatorRunPhase.READY_TO_ACTIVATE
 
         links = {item.command.kind: item.command for item in run.links}
+        mechanical_no_change = links.get(OperatorRunLinkKind.MECHANICAL_NO_CHANGE)
+        if mechanical_no_change is not None:
+            if any(
+                kind in links
+                for kind in (
+                    OperatorRunLinkKind.TEMPORAL_PROPOSAL,
+                    OperatorRunLinkKind.TEMPORAL_REVIEW_REQUEST,
+                    OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION,
+                    OperatorRunLinkKind.IMPACT_EVIDENCE,
+                    OperatorRunLinkKind.REVISION_PLANNING,
+                    OperatorRunLinkKind.MANAGED_REVIEW_REQUEST,
+                    OperatorRunLinkKind.MANAGED_REVIEW_DECISION,
+                    OperatorRunLinkKind.ACTIVATION_OPERATION,
+                )
+            ):
+                raise ChangeControlCorruptionError(
+                    "mechanical no-change run contains downstream lifecycle authority"
+                )
+            return OperatorRunPhase.COMPLETED_NO_OP
         temporal_decision_link = links.get(OperatorRunLinkKind.TEMPORAL_REVIEW_DECISION)
         if temporal_decision_link is not None:
             temporal_decision = self._read_review_decision(temporal_decision_link.target_id)

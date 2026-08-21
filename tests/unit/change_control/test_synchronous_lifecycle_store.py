@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+import stat
 from pathlib import Path
 
 import pytest
@@ -20,10 +21,16 @@ from mastervault.change_control.operator_run import (
     encode_operator_run_cursor,
 )
 from mastervault.change_control.regression_suite import RegressionSuiteV1
-from mastervault.change_control.store import _DEFAULT_MIGRATIONS_DIR, SqliteChangeControlStore
+from mastervault.change_control.store import (
+    _DEFAULT_MIGRATIONS_DIR,
+    ChangeControlCorruptionError,
+    ChangeControlIdempotencyError,
+    SqliteChangeControlStore,
+)
 from mastervault.change_control.synchronous_lifecycle_store_models import (
     IncomingAdmissionIntentV1,
     RegressionSuiteAdmissionIntentV1,
+    SynchronousRunLockAuthorityV1,
 )
 
 
@@ -72,6 +79,8 @@ def test_migration_006_creates_exact_tables_and_retains_link_values(tmp_path: Pa
         for kind in OperatorRunLinkKind:
             assert f"'{kind.value}'" in sql
         expected = {
+            "synchronous_application_operations",
+            "synchronous_run_lock_authorities",
             "change_control_incoming_admission_intents",
             "change_control_incoming_admission_receipts",
             "change_control_regression_suite_admission_intents",
@@ -130,6 +139,7 @@ def test_migration_006_upgrades_v5_without_foreign_key_damage(
         not in {
             OperatorRunLinkKind.REGRESSION_SUITE,
             OperatorRunLinkKind.GENERATION_ZERO_BASELINE,
+            OperatorRunLinkKind.MECHANICAL_NO_CHANGE,
         }
     )
     for sequence, kind in enumerate(old_kinds):
@@ -184,6 +194,87 @@ def test_migration_006_upgrades_v5_without_foreign_key_damage(
         ] == [1, 2, 3, 4, 5, 6]
     finally:
         upgraded.close()
+
+
+def test_run_lock_authority_claim_replay_conflict_and_tamper(tmp_path: Path) -> None:
+    store = SqliteManagedChangeControlStore(tmp_path / "authority.sqlite3")
+    store.init_schema()
+    created_at = "2026-08-20T12:00:00+00:00"
+    store.conn.execute(
+        "INSERT INTO change_control_aggregates VALUES (?, 1, 1, ?, ?)",
+        ("run-lock-aggregate", "0" * 64, created_at),
+    )
+    command = OperatorRunCommand.create(
+        operation_id="run-lock:operator-run",
+        aggregate_id="run-lock-aggregate",
+        base_authority_id=f"mauthority:{'1' * 64}",
+        base_authority_revision=0,
+        base_active_pointer_sha256="2" * 64,
+    )
+    record = OperatorRunRecord(command=command, created_at=created_at)
+    store.conn.execute(
+        "INSERT INTO change_control_operator_runs VALUES (?, ?, ?, ?, ?, 0, ?, 1, ?, ?)",
+        (
+            command.run_id,
+            command.run_sha256,
+            command.operation_id,
+            command.aggregate_id,
+            command.base_authority_id,
+            command.base_active_pointer_sha256,
+            canonical_json_bytes(record.model_dump(mode="json")).decode(),
+            created_at,
+        ),
+    )
+    store.conn.commit()
+    candidate = SynchronousRunLockAuthorityV1.create(
+        run_id=command.run_id,
+        device=7,
+        inode=11,
+        owner_uid=501,
+        file_mode=stat.S_IFREG | 0o600,
+        link_count=1,
+        claimed_at=created_at,
+    )
+    try:
+        assert store.claim_run_lock_authority(candidate) == candidate
+        replay = SynchronousRunLockAuthorityV1.create(
+            **candidate.model_dump(
+                mode="python",
+                exclude={
+                    "authority_id",
+                    "authority_sha256",
+                    "operation_id",
+                    "relative_locator",
+                    "run_id",
+                    "schema_version",
+                    "claimed_at",
+                },
+            ),
+            run_id=command.run_id,
+            claimed_at="2026-08-20T12:00:01+00:00",
+        )
+        assert store.claim_run_lock_authority(replay) == candidate
+        conflict = SynchronousRunLockAuthorityV1.create(
+            run_id=command.run_id,
+            device=candidate.device,
+            inode=candidate.inode + 1,
+            owner_uid=candidate.owner_uid,
+            file_mode=candidate.file_mode,
+            link_count=1,
+            claimed_at=created_at,
+        )
+        with pytest.raises(ChangeControlIdempotencyError, match="durable inode"):
+            store.claim_run_lock_authority(conflict)
+
+        store.conn.execute(
+            "UPDATE synchronous_run_lock_authorities SET inode=inode+1 WHERE run_id=?",
+            (command.run_id,),
+        )
+        store.conn.commit()
+        with pytest.raises(ChangeControlCorruptionError, match="run-lock authority"):
+            store.get_run_lock_authority(command.run_id)
+    finally:
+        store.close()
 
 
 def test_suite_admission_intent_embeds_and_binds_canonical_suite() -> None:

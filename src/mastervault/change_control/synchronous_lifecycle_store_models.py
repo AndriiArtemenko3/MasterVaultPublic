@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import stat
 from datetime import datetime
 from typing import Any, Literal, Self
 
@@ -40,6 +41,140 @@ def _operation_id(value: str) -> str:
     if _OPERATION_ID_RE.fullmatch(value) is None:
         raise ValueError("operation_id is not canonical")
     return value
+
+
+class SynchronousApplicationOperationV1(_StrictFrozenModel):
+    """SQLite ownership receipt for a public synchronous application operation."""
+
+    schema_version: Literal[1] = 1
+    operation_id: str
+    operation_kind: Literal["start", "activate-no-op"]
+    run_id: str = Field(pattern=r"^operatorrun:[0-9a-f]{64}$")
+    request_sha256: str = Field(pattern=SHA256_PATTERN)
+    owner_id: str = Field(pattern=r"^applicationoperation:[0-9a-f]{64}$")
+    owner_sha256: str = Field(pattern=SHA256_PATTERN)
+    claimed_at: str
+
+    _operation = field_validator("operation_id")(_operation_id)
+    _timestamp = field_validator("claimed_at")(_canonical_utc)
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        payload = self.model_dump(mode="json", exclude={"owner_id", "owner_sha256"})
+        digest = _sha256(payload)
+        if self.owner_sha256 != digest or self.owner_id != f"applicationoperation:{digest}":
+            raise ValueError("application operation owner differs from exact claim")
+        return self
+
+    @classmethod
+    def create(cls, **kwargs: Any) -> Self:
+        values = {"schema_version": 1, **kwargs}
+        if "claimed_at" in values:
+            values["claimed_at"] = _canonical_utc(values["claimed_at"])
+        digest = _sha256(values)
+        return cls.model_validate_json(
+            canonical_json_bytes(
+                {
+                    "owner_id": f"applicationoperation:{digest}",
+                    "owner_sha256": digest,
+                    **values,
+                }
+            )
+        )
+
+    @property
+    def semantic_key(self) -> tuple[str, str, str, str]:
+        return self.operation_id, self.operation_kind, self.run_id, self.request_sha256
+
+
+class SynchronousRunLockAuthorityV1(_StrictFrozenModel):
+    """SQLite-bound identity of one stable per-run filesystem lock inode."""
+
+    schema_version: Literal[1] = 1
+    authority_id: str = Field(pattern=r"^applicationrunlock:[0-9a-f]{64}$")
+    authority_sha256: str = Field(pattern=SHA256_PATTERN)
+    operation_id: str
+    run_id: str = Field(pattern=r"^operatorrun:[0-9a-f]{64}$")
+    relative_locator: str = Field(
+        pattern=r"^application/start-commands/run-locks/[0-9a-f]{64}\.lock$"
+    )
+    device: int = Field(ge=0)
+    inode: int = Field(gt=0)
+    owner_uid: int = Field(ge=0)
+    file_mode: int = Field(gt=0)
+    link_count: Literal[1] = 1
+    claimed_at: str
+
+    _timestamp = field_validator("claimed_at")(_canonical_utc)
+
+    @model_validator(mode="after")
+    def _identity(self) -> Self:
+        run_digest = hashlib.sha256(self.run_id.encode("utf-8")).hexdigest()
+        expected_locator = f"application/start-commands/run-locks/{run_digest}.lock"
+        expected_operation = f"application-run-lock:{run_digest}"
+        if (
+            self.operation_id != expected_operation
+            or self.relative_locator != expected_locator
+            or not stat.S_ISREG(self.file_mode)
+            or self.file_mode & 0o077
+        ):
+            raise ValueError("run-lock authority differs from its canonical private inode")
+        payload = self.model_dump(mode="json", exclude={"authority_id", "authority_sha256"})
+        digest = _sha256(payload)
+        if (
+            self.authority_sha256 != digest
+            or self.authority_id != f"applicationrunlock:{digest}"
+        ):
+            raise ValueError("run-lock authority identity differs from its exact claim")
+        return self
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        run_id: str,
+        device: int,
+        inode: int,
+        owner_uid: int,
+        file_mode: int,
+        link_count: int,
+        claimed_at: str,
+    ) -> Self:
+        run_digest = hashlib.sha256(run_id.encode("utf-8")).hexdigest()
+        values = {
+            "schema_version": 1,
+            "operation_id": f"application-run-lock:{run_digest}",
+            "run_id": run_id,
+            "relative_locator": (
+                f"application/start-commands/run-locks/{run_digest}.lock"
+            ),
+            "device": device,
+            "inode": inode,
+            "owner_uid": owner_uid,
+            "file_mode": file_mode,
+            "link_count": link_count,
+            "claimed_at": _canonical_utc(claimed_at),
+        }
+        digest = _sha256(values)
+        return cls.model_validate_json(
+            canonical_json_bytes(
+                {
+                    "authority_id": f"applicationrunlock:{digest}",
+                    "authority_sha256": digest,
+                    **values,
+                }
+            ),
+            strict=True,
+        )
+
+    @property
+    def semantic_key(self) -> tuple[Any, ...]:
+        return tuple(
+            self.model_dump(
+                mode="json",
+                exclude={"authority_id", "authority_sha256", "claimed_at"},
+            ).items()
+        )
 
 
 class IncomingAdmissionIntentV1(_StrictFrozenModel):
@@ -295,4 +430,6 @@ __all__ = [
     "IncomingAdmissionRecordV1",
     "RegressionSuiteAdmissionIntentV1",
     "RegressionSuiteAdmissionRecordV1",
+    "SynchronousApplicationOperationV1",
+    "SynchronousRunLockAuthorityV1",
 ]

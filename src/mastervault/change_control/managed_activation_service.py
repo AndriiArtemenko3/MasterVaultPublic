@@ -615,6 +615,7 @@ def activate_reviewed_managed_generation(
         baseline_guard=baseline_guard,
         failure_hook=failure_hook,
     )
+    _notify(failure_hook, "activation-receipt-owned")
     # Lost acknowledgement and post-commit workspace/repository drift must not
     # return a successful activation result from this bounded service call.
     RepositoryVerifiedManagedGenerationEffects.verify(

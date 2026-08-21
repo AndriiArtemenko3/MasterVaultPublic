@@ -367,16 +367,39 @@ def _read_external_regular(
         current_path = Path(requested.anchor)
         try:
             for part in requested.parts[1:-1]:
+                names = os.listdir(parent_fd)
+                if part not in names:
+                    if any(name.casefold() == part.casefold() for name in names):
+                        raise GenericIncomingBoundaryError(
+                            "incoming source path does not use exact filesystem case"
+                        )
+                    raise GenericIncomingIntegrityError(
+                        "incoming source path component is unavailable"
+                    )
                 child_fd = os.open(part, directory_flags, dir_fd=parent_fd)
+                named_component = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
                 os.close(parent_fd)
                 parent_fd = child_fd
                 current_path /= part
                 component = os.fstat(parent_fd)
-                if not stat.S_ISDIR(component.st_mode):
+                if not stat.S_ISDIR(component.st_mode) or (
+                    component.st_dev,
+                    component.st_ino,
+                ) != (
+                    named_component.st_dev,
+                    named_component.st_ino,
+                ):
                     raise GenericIncomingBoundaryError(
-                        "incoming source path contains a non-directory component"
+                        "incoming source path contains a non-directory or substituted component"
                     )
                 component_signatures.append((current_path, _stat_signature(component)))
+            names = os.listdir(parent_fd)
+            if requested.name not in names:
+                if any(name.casefold() == requested.name.casefold() for name in names):
+                    raise GenericIncomingBoundaryError(
+                        "incoming source filename does not use exact filesystem case"
+                    )
+                raise GenericIncomingIntegrityError("incoming source is unavailable")
             before = os.stat(requested.name, dir_fd=parent_fd, follow_symlinks=False)
         except Exception:
             os.close(parent_fd)

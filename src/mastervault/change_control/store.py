@@ -140,6 +140,8 @@ _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES = {
 }
 _V5_EXPECTED_TABLES = _V4_EXPECTED_TABLES | _WORKSPACE_BOOTSTRAP_APPLICATION_TABLES
 _SYNCHRONOUS_LIFECYCLE_TABLES = {
+    "synchronous_application_operations",
+    "synchronous_run_lock_authorities",
     "change_control_incoming_admission_intents",
     "change_control_incoming_admission_receipts",
     "change_control_regression_suite_admission_intents",
@@ -1247,6 +1249,29 @@ class SqliteChangeControlStore:
             self._rollback_operation_error(exc)
             raise
 
+    def get_operation_receipt_sha256(self, operation_id: str) -> str | None:
+        """Return the validated exact receipt digest for one historical operation."""
+
+        operation_id = _require_operation_id(operation_id)
+        self._require_ready()
+        self._begin("BEGIN")
+        try:
+            self._validate_identity()
+            self._assert_foreign_keys()
+            self._validate_receipts()
+            self._validate_reviews()
+            self._validate_global_operation_ownership()
+            row = self.conn.execute(
+                "SELECT receipt_sha256 FROM change_control_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            result = None if row is None else str(row["receipt_sha256"])
+            self._commit()
+            return result
+        except BaseException as exc:
+            self._rollback_operation_error(exc)
+            raise
+
     def _capture_rows(self, aggregate_id: str) -> dict[str, list[sqlite3.Row]]:
         tables = {
             "documents": ("change_control_document_versions", "document_version_id"),
@@ -1518,6 +1543,18 @@ class SqliteChangeControlStore:
                 "link_id",
             ),
             (
+                "synchronous-application",
+                "synchronous_application_operations",
+                "operation_id",
+                "owner_id",
+            ),
+            (
+                "synchronous-run-lock",
+                "synchronous_run_lock_authorities",
+                "operation_id",
+                "authority_id",
+            ),
+            (
                 "incoming-admission",
                 "change_control_incoming_admission_intents",
                 "operation_id",
@@ -1604,6 +1641,16 @@ class SqliteChangeControlStore:
             selects.append(
                 "SELECT operation_id, 'incoming-admission' "
                 "FROM change_control_incoming_admission_intents"
+            )
+        if "synchronous_application_operations" in tables:
+            selects.append(
+                "SELECT operation_id, 'synchronous-application' "
+                "FROM synchronous_application_operations"
+            )
+        if "synchronous_run_lock_authorities" in tables:
+            selects.append(
+                "SELECT operation_id, 'synchronous-run-lock' "
+                "FROM synchronous_run_lock_authorities"
             )
         if "change_control_regression_suite_admission_intents" in tables:
             selects.append(
