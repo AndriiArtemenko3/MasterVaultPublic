@@ -1668,7 +1668,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
         request_id = _decide(scenario, prefix=prefix, mode="mixed")
         operation_id = f"{prefix}:activate"
         generation_root = tmp_path / "generations"
-        original_sync = generation_repository_module.sync_exact_source_notes
+        original_sync = generation_repository_module.sync_exact_vault_notes
         poisoned_counts: dict[str, tuple[int, int]] = {}
 
         def poison_fts(*args: object, **kwargs: object) -> object:
@@ -1718,7 +1718,7 @@ def test_duplicate_fts_rows_cannot_be_sealed_and_retry_rebuilds_exactly(
         with monkeypatch.context() as poisoned_sync:
             poisoned_sync.setattr(
                 generation_repository_module,
-                "sync_exact_source_notes",
+                "sync_exact_vault_notes",
                 poison_fts,
             )
             with pytest.raises(
